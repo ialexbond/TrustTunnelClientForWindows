@@ -7,6 +7,7 @@ import { Button } from "../../shared/ui/Button";
 import { IconButton } from "../../shared/ui/IconButton";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { UptimeCounter } from "../../shared/ui/UptimeCounter";
 import { FieldError } from "../../shared/ui/FieldError";
 import { OverflowMenu, type OverflowMenuItem } from "../../shared/ui/OverflowMenu";
 import { statusBadgeVariant } from "../../shared/lib/statusBadgeVariant";
@@ -107,8 +108,12 @@ export interface ConfigCardProps {
   ping?: ConfigPing;
   /** Lead-card mode — carries the big primary, monospace uptime, ping, and the lifecycle. */
   leadCard?: boolean;
-  /** Monospace uptime string for the lead card (e.g. «01:23:45»). */
+  /** Monospace uptime string for the lead card (e.g. «01:23:45»). Storybook/tests pass a frozen
+   *  string; production passes `connectedSince` instead so the counter ticks live. */
   uptime?: string;
+  /** Live session start — when set (and connected) the lead card renders a ticking «HH:MM:SS»
+   *  uptime counter from it (production path). Takes precedence over the static `uptime` string. */
+  connectedSince?: Date | null;
   /** A mutation (duplicate/delete) is in flight — actions disabled, a spinner on the dot. */
   busy?: boolean;
   /** A tunnel is active on ANOTHER card → this inactive card's primary reads «Переключиться». */
@@ -182,6 +187,7 @@ function ConfigCardImpl({
   ping,
   leadCard = false,
   uptime,
+  connectedSince,
   busy = false,
   activeElsewhere = false,
   locked = false,
@@ -530,10 +536,13 @@ function ConfigCardImpl({
                   <ConfigPingPill ping={effectivePing} />
                 </span>
               )}
-              {isConnected && !switching && uptime && (
+              {/* Session uptime: a LIVE 1s ticker from `connectedSince` in production (the wire that
+                  was missing since Phase 11 — the slot + Storybook existed, the data did not); the
+                  static `uptime` string is the Storybook/test fallback. */}
+              {isConnected && !switching && (connectedSince || uptime) && (
                 <span className="flex shrink-0 items-center gap-[var(--space-1)] font-mono tabular-nums">
                   <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  {uptime}
+                  {connectedSince ? <UptimeCounter since={connectedSince} /> : uptime}
                 </span>
               )}
             </div>

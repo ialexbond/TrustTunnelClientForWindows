@@ -732,22 +732,43 @@ pub(crate) fn build_pidfile_record() -> &'static str {
     "echo $(ps -o pgid= -p $$ | tr -dc 0-9) > /tmp/tt_deploy.pid 2>/dev/null || true"
 }
 
-/// Build the pinned-tag, integrity-checked install.sh fetch+run command.
+/// Build the pinned-tag, integrity-checked install.sh fetch+run command, with auto-retry
+/// on transient network failures.
 ///
 /// CONF-M-05 (T-04-06): pulls install.sh from `TRUSTTUNNEL_INSTALL_SH_TAG` (a
 /// release tag, never `refs/heads/master`) and verifies it against the in-repo
 /// `TRUSTTUNNEL_INSTALL_SH_SHA256` via `sha256sum -c` before executing. The temp
 /// script is always removed, and a non-zero result surfaces a clear marker.
+///
+/// RETRY (18-UAT): the fetch+run is retried up to 3 times with linear backoff on TRANSIENT
+/// failures — the install.sh fetch AND (the dominant case) install.sh's OWN github-releases
+/// tarball download, which can die with `curl (35) TLS ... unexpected eof` / a connection reset
+/// on a flaky or DPI'd network (common on RU links). An INTEGRITY MISMATCH (a complete-but-wrong
+/// script → `sha256sum -c` fails) is NEVER retried: that is a supply-chain signal, so we fail
+/// closed immediately (retrying a tampered/wrong artifact only delays the same failure). A
+/// truncated fetch makes `curl` itself non-zero (caught as a transient, before the sha step).
 pub(crate) fn build_install_command(sudo: &str) -> String {
     let tag = TRUSTTUNNEL_INSTALL_SH_TAG;
     let expected_sha = TRUSTTUNNEL_INSTALL_SH_SHA256;
     let pidrec = build_pidfile_record();
     format!(
         "{pidrec}; \
-         curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/{tag}/scripts/install.sh -o /tmp/tt_install.sh \
-         && echo '{expected_sha}  /tmp/tt_install.sh' | sha256sum -c - \
-         && {sudo}sh /tmp/tt_install.sh -a y -v; \
-         tt_rc=$?; rm -f /tmp/tt_install.sh; \
+         tt_rc=1; tt_i=0; tt_max=3; \
+         while [ \"$tt_i\" -lt \"$tt_max\" ]; do \
+           tt_i=$((tt_i+1)); \
+           if ! curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/{tag}/scripts/install.sh -o /tmp/tt_install.sh; then \
+             rm -f /tmp/tt_install.sh; tt_rc=1; \
+             if [ \"$tt_i\" -lt \"$tt_max\" ]; then echo \"install: install.sh fetch failed — retry $tt_i/$tt_max\" >&2; sleep $((tt_i*3)); continue; fi; \
+             break; \
+           fi; \
+           if ! echo '{expected_sha}  /tmp/tt_install.sh' | sha256sum -c -; then \
+             rm -f /tmp/tt_install.sh; tt_rc=1; break; \
+           fi; \
+           {sudo}sh /tmp/tt_install.sh -a y -v; tt_rc=$?; rm -f /tmp/tt_install.sh; \
+           if [ \"$tt_rc\" -eq 0 ]; then break; fi; \
+           if [ \"$tt_i\" -lt \"$tt_max\" ]; then echo \"install: run failed (rc=$tt_rc) — retry $tt_i/$tt_max\" >&2; sleep $((tt_i*3)); continue; fi; \
+           break; \
+         done; \
          if [ \"$tt_rc\" -ne 0 ]; then echo 'SSH_INSTALL_SH_INTEGRITY_OR_RUN_FAILED' >&2; fi; \
          exit $tt_rc"
     )
@@ -1532,6 +1553,19 @@ pub async fn deploy_server(
     emit_step(app, "connect", "ok", "Connected to server");
     emit_step(app, "auth", "ok", "Authentication successful");
 
+    // ── Step 1.5: Pre-install snapshot (UN-2 / D-04) ──
+    // This is the FIRST server-touch and MUST precede any apt/ufw mutation (Pitfall 3):
+    // a snapshot taken after a change is worthless. The writer is first-install-only —
+    // a re-install never overwrites the original pre-install truth. We hoist detect_sudo
+    // here (env-check runs its own detection later) so the capture can read ufw status,
+    // which needs sudo. NON-BLOCKING like Step 6.5 hardening: a capture hiccup must never
+    // brick the install — on Err we emit a secret-free warn and continue. The snapshot
+    // carries NO secret field, so nothing it captures can leak to the log (D-INV-2/D-29).
+    let snapshot_sudo = detect_sudo(&handle, app).await;
+    if let Err(e) = crate::ssh::server::snapshot::write_preinstall_snapshot(app, &handle, snapshot_sudo).await {
+        emit_log(app, "warn", &format!("Pre-install snapshot skipped (non-fatal): {e}"));
+    }
+
     // ── Step 2: Check environment ──
     let sudo = deploy_check_env(&handle, app).await?;
 
@@ -1613,6 +1647,12 @@ pub async fn deploy_server(
 
     // ── Step 7: Export client config + save locally ──
     let config_path_str = deploy_export_config(&handle, app, &params, &settings, &sudo).await?;
+
+    // WR-5 (Phase-18 re-review): the deploy fully succeeded — promote the pending pre-install
+    // snapshot to the authoritative path now (first-install-only, fail-safe). Every `?` step
+    // above already returned on failure, so an abandoned/failed deploy never reaches here and
+    // its pending capture never becomes the authoritative "pre-install truth".
+    crate::ssh::server::snapshot::promote_preinstall_snapshot(app, &handle, &sudo).await.ok();
 
     // ── Disconnect ──
     handle
@@ -2359,6 +2399,27 @@ mod tests {
                 .all(|c| c.is_ascii_hexdigit() && (!c.is_alphabetic() || c.is_lowercase())),
             "pinned SHA-256 must be 64 lowercase hex chars"
         );
+    }
+
+    #[test]
+    fn install_command_retries_transient_failures_but_not_integrity() {
+        // 18-UAT: transient github download failures (curl TLS «unexpected eof» / reset) must
+        // self-heal via a bounded retry+backoff; an integrity mismatch must NOT retry (fail closed).
+        let cmd = build_install_command("sudo ");
+        assert!(cmd.contains("tt_max=3"), "retry capped at 3 attempts: {cmd}");
+        assert!(cmd.contains("while ["), "retry loop present: {cmd}");
+        assert!(cmd.contains("sleep $((tt_i*3))"), "linear backoff between retries: {cmd}");
+        // The sha-check failure branch must BREAK (no retry) before any `continue` appears —
+        // a complete-but-wrong artifact is a supply-chain signal, not a transient.
+        let after_sha = &cmd[cmd.find("sha256sum -c -").expect("sha check present")..];
+        let break_idx = after_sha.find("break").expect("sha failure must break");
+        assert!(
+            after_sha.find("continue").map_or(true, |ci| break_idx < ci),
+            "integrity mismatch must break (fail closed), not continue: {cmd}"
+        );
+        // The failure marker + fail-closed exit code are preserved.
+        assert!(cmd.contains("SSH_INSTALL_SH_INTEGRITY_OR_RUN_FAILED"), "failure marker preserved");
+        assert!(cmd.contains("exit $tt_rc"), "final exit code preserved");
     }
 
     #[test]

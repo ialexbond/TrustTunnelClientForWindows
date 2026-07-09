@@ -51,7 +51,11 @@ export interface ServerInfo {
 }
 
 export interface SetupWizardProps {
-  onSetupComplete: (configPath: string) => void;
+  // `register` (default false) — whether to ADD the freshly-installed config as a card in
+  // «Подключение». Only the explicit «Добавить конфиг» Done-step button and the manual import
+  // pass true; «Перейти к панели управления» / the × close leave register false so the install
+  // finishes WITHOUT auto-adding a card (BACKLOG auto-add-config fix — owner complaint).
+  onSetupComplete: (configPath: string, register?: boolean) => void;
   // onClose closes the wizard overlay (App's setWizardActive(false)). Install-only
   // wizard (D-01): the first screen's "Назад" and the Done/Found post-install nav
   // exit the overlay instead of navigating to the deleted welcome menu (Pitfall 3).

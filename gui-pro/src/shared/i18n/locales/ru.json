@@ -1625,6 +1625,13 @@
           "start_error": "Не удалось запустить MTProto Proxy: {{error}}",
           "stop_error": "Не удалось остановить MTProto Proxy: {{error}}"
         },
+        "errors": {
+          "TELEMT_DOWNLOAD_FAILED": "Не удалось скачать протокол на сервер. Проверьте, что у сервера есть доступ в интернет (github.com), и попробуйте снова.",
+          "TELEMT_START_FAILED": "Сервис не запустился. Попробуйте ещё раз.",
+          "TELEMT_SECRET_INVALID": "Не удалось сгенерировать ключ. Попробуйте ещё раз.",
+          "MTPROTO_PORT_BUSY": "Порт занят другим сервисом. Выберите другой порт.",
+          "MTPROTO_INVALID_PORT": "Некорректный порт (допустимо 1024–65535)."
+        },
         "modal_title_install": "Установка MTProto Proxy",
         "modal_title_configure": "Настройка MTProto Proxy",
         "configure": "Настроить",
@@ -1730,7 +1737,20 @@
       "reboot_message": "Сервер будет перезагружен. Операция займёт 1-2 минуты.",
       "delete_title": "Удалить TrustTunnel?",
       "delete_message": "VPN будет полностью удалён с сервера. Это действие необратимо.",
-      "uninstalled": "VPN удалён с сервера"
+      "uninstalled": "TrustTunnel удалён"
+    },
+    "uninstall": {
+      "title": "Удалить протокол",
+      "description": "По умолчанию удаляется всё, что установил TrustTunnel — сервер вернётся к состоянию до установки. Снимите галочки, чтобы что-то оставить.",
+      "detecting": "Проверяем сервер…",
+      "confirm": "Удалить",
+      "components": {
+        "protocol": "Протокол TrustTunnel",
+        "ufw": "Брандмауэр (ufw)",
+        "fail2ban": "Fail2ban",
+        "bbr": "Ускорение BBR",
+        "mtproto": "MTProto Proxy"
+      }
     },
     "overview": {
       "version": "Версия",

@@ -315,7 +315,8 @@ function seedStepFromSnapshot(): Step {
 
 // ─── Hook ──────────────────────────────────────────
 interface UseWizardStateParams {
-  onSetupComplete: (configPath: string) => void;
+  // See SetupWizardProps.onSetupComplete — `register` gates the «Подключение» card add.
+  onSetupComplete: (configPath: string, register?: boolean) => void;
   // onClose closes the wizard overlay (App's setWizardActive(false)). Consumed by
   // the first-screen "Назад" and the Done/Found post-install nav (D-01 / Pitfall 3).
   onClose?: () => void;
@@ -1300,13 +1301,14 @@ export function useWizardState({ onSetupComplete, onClose }: UseWizardStateParam
       filters: [{ name: "TrustTunnel Config", extensions: ["toml"] }],
     });
     if (selected) {
-      // Import → go to VPN settings, not control panel
+      // Import → go to VPN settings, not control panel. register=true: a manual import is an
+      // EXPLICIT «add this config», so it must appear as a card (unlike a plain install finish).
       localStorage.setItem("tt_navigate_after_setup", "settings");
       try {
         const copied = await invoke<string>("copy_config_to_app_dir", { sourcePath: selected as string });
-        onSetupComplete(copied);
+        onSetupComplete(copied, true);
       } catch {
-        onSetupComplete(selected as string);
+        onSetupComplete(selected as string, true);
       }
     }
   };

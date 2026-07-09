@@ -285,7 +285,17 @@ if command -v ufw >/dev/null 2>&1; then
   # Delete via `ufw --force delete` — NOT `yes | ufw delete`: in this russh exec env `yes`
   # feeds sudo's stdin (not ufw's), the confirm is never answered, and NOTHING is deleted
   # (firewall_delete_rule documents the same trap — Fable MEDIUM-3).
-  for tt_num in $({sudo}ufw status numbered 2>/dev/null | grep -iE 'trusttunnel|HTTP cert renewal' | grep -vE '(^|[^0-9]){ssh_port}/tcp([^0-9]|$)' | grep -oE '^\[[ ]*[0-9]+\]' | grep -oE '[0-9]+' | sort -rn); do
+  #
+  # H-03: EXCLUDE the D-05 pre-allow rules (comment 'pre-existing admin service
+  # (TrustTunnel)'). Those rules encode the ADMIN's connectivity — the fold added an
+  # `ufw allow <port>/tcp` for each service the admin already ran, so `default deny
+  # incoming` on the ufw WE enabled would not firewall it off. The old sweep matched
+  # them via the case-insensitive 'trusttunnel' grep and deleted them EVEN WHEN ufw is
+  # kept active (user unchecked «Брандмауэр»), re-locking-out the admin's service —
+  # exactly the Pitfall-1 lockout D-05 was built to prevent, on the uninstall side.
+  # When ufw IS purged/disabled these rules vanish with the firewall anyway, so never
+  # deleting them here is correct under every branch.
+  for tt_num in $({sudo}ufw status numbered 2>/dev/null | grep -iE 'trusttunnel|HTTP cert renewal' | grep -vE 'pre-existing admin service' | grep -vE '(^|[^0-9]){ssh_port}/tcp([^0-9]|$)' | grep -oE '^\[[ ]*[0-9]+\]' | grep -oE '[0-9]+' | sort -rn); do
     {sudo}ufw --force delete "$tt_num" 2>/dev/null || true
   done
 fi
@@ -327,6 +337,198 @@ fi
     )
 }
 
+/// 18-10 — build the probe that reports whether OUR ufw/fail2ban INSTALL-markers exist, so
+/// the build-time package-purge gate can fire on a LEGACY server (no snapshot). The markers
+/// (`/opt/trusttunnel/.tt-installed-{ufw,fail2ban}`) are written by `install_firewall` /
+/// `install_fail2ban` ONLY when the package was ABSENT before us → strictly stronger
+/// ownership proof than the snapshot. Bare `test -f` → reads no file content (nothing can
+/// leak, D-29). Emits fixed tokens parsed by `parse_pkg_marker_probe`. Pure fn →
+/// unit-testable under `cargo test --lib`.
+pub(crate) fn build_pkg_marker_probe(sudo: &str) -> String {
+    format!(
+        "{sudo}test -f /opt/trusttunnel/.tt-installed-ufw && echo UFW_PKG_OURS || echo UFW_PKG_NOT_OURS; \
+         {sudo}test -f /opt/trusttunnel/.tt-installed-fail2ban && echo F2B_PKG_OURS || echo F2B_PKG_NOT_OURS"
+    )
+}
+
+/// Parse `build_pkg_marker_probe` output into `(ufw_pkg_ours, fail2ban_pkg_ours)`. Pure fn.
+pub(crate) fn parse_pkg_marker_probe(raw: &str) -> (bool, bool) {
+    (raw.contains("UFW_PKG_OURS"), raw.contains("F2B_PKG_OURS"))
+}
+
+/// Per-component uninstall selection payload (UN-1, D-01/D-03). Each bool gates ONE
+/// teardown branch in `build_uninstall_script`. The DEFAULT (D-03) is «restore to
+/// exactly pre-install» → every flag true (remove everything WE installed); the
+/// frontend dialog (plan 18-05) sends the user's checkbox state, and an omitted
+/// payload defaults to `restore_all` in `uninstall_server`.
+///
+/// SECURITY (D-INV-2 / D-29): five booleans only — there is no secret-bearing field,
+/// so the selection can never carry a credential/telemt secret into the log channel.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallSelection {
+    // NOTE (18-UAT): there is intentionally NO `user_configs` field. Users are part of the
+    // protocol and are ALWAYS removed with it — the optional «keep users» preserve path was
+    // removed (owner decision) because a preserved credential list could not be re-adopted on
+    // reinstall. `build_uninstall_script` unconditionally removes the whole install dir.
+    /// Remove OUR ufw rules (always, via the comment-scoped sweep). The ufw PACKAGE is
+    /// purged only when ALSO snapshot-proves-absent AND marker-present (D-07 triple-gate).
+    pub ufw: bool,
+    /// Remove OUR fail2ban jail (always). The fail2ban PACKAGE is purged only when ALSO
+    /// snapshot-proves-absent AND marker-present (D-07 triple-gate).
+    pub fail2ban: bool,
+    /// Revert BBR — folded ONLY when the snapshot proves BBR was OFF before us (BBR is
+    /// system-global → never revert an admin's pre-existing BBR — D-02b / T-18-15).
+    pub bbr: bool,
+    /// Remove MTProto (telemt) — folded ONLY when the snapshot proves telemt was ABSENT
+    /// before us («old protocol ≠ ours», ownership evidence — D-05 / T-18-16).
+    pub mtproto: bool,
+}
+
+impl UninstallSelection {
+    /// D-03 default: restore to exactly pre-install — remove everything WE installed.
+    /// Used when the frontend omits the selection payload (pre-18-05 callers) so the
+    /// existing «удалить протокол» keeps its current full-revert behavior.
+    pub fn restore_all() -> Self {
+        Self { ufw: true, fail2ban: true, bbr: true, mtproto: true }
+    }
+}
+
+impl Default for UninstallSelection {
+    /// D-03: the honest default is a full restore-to-pre-install (NOT serde's all-false).
+    fn default() -> Self {
+        Self::restore_all()
+    }
+}
+
+/// Build the Step-5e fail2ban de-provision block (ownership-scoped). Pure fn so the
+/// D-07 package-purge gate is unit-testable.
+///
+/// `emit_purge=true` → today's two-branch block: WE-installed (marker `$TT_INSTALLED_F2B`)
+/// gets the full purge (unban-all BEFORE stop — only a live daemon can unban — then stop,
+/// disable, `apt-get purge`, drop `/etc/fail2ban` + the persisted `/var/lib/fail2ban` ban
+/// DB); an admin-pre-existing fail2ban keeps the package (scope-unban THIS session's IP on
+/// sshd, remove OUR jail.local, reload).
+///
+/// `emit_purge=false` + `selected=true` (D-06/D-07 conservative: user WANTS fail2ban removed
+/// but ownership is unproven — admin's package / snapshot shows present) → NEVER stop/disable/
+/// purge the daemon; lift a self-ban of THIS session's IP, remove OUR jail.local, reload so our
+/// jail stops being enforced. The admin's fail2ban is left running.
+///
+/// `selected=false` (WR-2, Phase-18 re-review: user UNCHECKED fail2ban to KEEP brute-force
+/// protection) → KEEP-AS-IS: do NOT remove `jail.local`, do NOT reload. Our `jail.local`
+/// carries the admin-IP `ignoreip` self-ban whitelist + the chosen preset — deleting it left
+/// the kept daemon on distro defaults with the admin's IP un-whitelisted (a later 5-fail SSH
+/// typo would self-ban them with no app left to unban). Only lift a self-ban of THIS session's
+/// IP as a safety net; the hardened jail stays intact.
+pub(crate) fn build_fail2ban_deprovision(sudo: &str, selected: bool, emit_purge: bool) -> String {
+    if !selected {
+        // WR-2 keep-as-is: preserve our hardened jail.local (incl. the ignoreip whitelist);
+        // only lift a self-ban of this session's IP. No jail.local removal, no reload.
+        return format!(
+            r#"if command -v fail2ban-client >/dev/null 2>&1 || dpkg -s fail2ban >/dev/null 2>&1; then
+  # KEEP fail2ban (user unchecked it): leave OUR jail.local + the ignoreip whitelist in place.
+  [ -n "$TT_SSH_IP" ] && {sudo}fail2ban-client set sshd unbanip "$TT_SSH_IP" 2>/dev/null || true
+fi"#
+        );
+    }
+    if emit_purge {
+        format!(
+            r#"if command -v fail2ban-client >/dev/null 2>&1 || dpkg -s fail2ban >/dev/null 2>&1; then
+  if [ "$TT_INSTALLED_F2B" = "1" ]; then
+    # We installed fail2ban (it was absent) → full purge, back to pre-TrustTunnel.
+    # Unban EVERYTHING first (we own the whole install) while the daemon is still up.
+    {sudo}fail2ban-client unban --all 2>/dev/null || true
+    {sudo}systemctl stop fail2ban 2>/dev/null || true
+    {sudo}systemctl disable fail2ban 2>/dev/null || true
+    # M-01: purge ONLY the named package. The bare system-wide orphan-sweep that used
+    # to follow removed EVERY package apt deemed orphaned, including orphans from the
+    # admin's own earlier operations, over-reaching beyond "revert what we installed".
+    # Dropped (the full rdepends "nothing depends on it" check stays deferred to the
+    # live-UAT A1 checkpoint).
+    {sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y fail2ban 2>/dev/null || true
+    {sudo}rm -rf /etc/fail2ban 2>/dev/null || true
+    # Drop the persisted ban DB so a residual boot-time restore can't re-ban the admin.
+    {sudo}rm -rf /var/lib/fail2ban 2>/dev/null || true
+  else
+    # Admin already had fail2ban → keep the package + their jails. Lift ONLY a ban of
+    # THIS session's IP on the sshd jail (never `unban --all` — that would clear the
+    # admin's other jails), then remove our jail.local + reload.
+    [ -n "$TT_SSH_IP" ] && {sudo}fail2ban-client set sshd unbanip "$TT_SSH_IP" 2>/dev/null || true
+    {sudo}rm -f /etc/fail2ban/jail.local 2>/dev/null || true
+    {sudo}systemctl reload fail2ban 2>/dev/null || {sudo}systemctl restart fail2ban 2>/dev/null || true
+  fi
+fi"#
+        )
+    } else {
+        format!(
+            r#"if command -v fail2ban-client >/dev/null 2>&1 || dpkg -s fail2ban >/dev/null 2>&1; then
+  # Conservative (D-06/D-07): the user WANTS fail2ban removed but ownership is unproven
+  # (the snapshot shows fail2ban pre-existed / no marker). KEEP the admin's package; NEVER
+  # stop/disable/purge their daemon — only lift a self-ban of THIS session's IP on sshd,
+  # remove OUR jail.local, and reload so our jail stops being enforced.
+  [ -n "$TT_SSH_IP" ] && {sudo}fail2ban-client set sshd unbanip "$TT_SSH_IP" 2>/dev/null || true
+  {sudo}rm -f /etc/fail2ban/jail.local 2>/dev/null || true
+  {sudo}systemctl reload fail2ban 2>/dev/null || {sudo}systemctl restart fail2ban 2>/dev/null || true
+fi"#
+        )
+    }
+}
+
+/// Build the Step-5e ufw de-provision block (ownership-scoped). Pure fn so the D-07
+/// package-purge gate is unit-testable.
+///
+/// `emit_purge=true` → today's block: WE-installed (marker `$TT_INSTALLED_UFW`) → disable
+/// (drops all enforcement so purging can never strand SSH) then `apt-get purge`; a
+/// pre-existing-but-inactive ufw WE enabled (`$TT_ENABLED_UFW`) → just disable it back to
+/// its prior state (keep the admin's package).
+///
+/// `emit_purge=false` + `selected=true` (D-06/D-07 conservative: user WANTS ufw removed but
+/// ownership is unproven) → NEVER purge; only revert an inactive→active flip WE made
+/// (`$TT_ENABLED_UFW`) so the admin's prior state is restored.
+///
+/// `selected=false` (WR-1, Phase-18 re-review: user UNCHECKED ufw to KEEP the firewall) →
+/// KEEP-AS-IS: emit NOTHING (no `ufw --force disable`). install_firewall writes
+/// `.tt-enabled-ufw` on every install where ufw was not already active, so the old conservative
+/// branch would `ufw --force disable` the very firewall the user chose to keep — leaving the
+/// server with no packet filtering. The FINAL SACRED SSH re-assert still guarantees the active
+/// SSH port stays allowed (D-INV-1); the protocol's own 443/80 rules are removed by the
+/// comment-scoped Step 5c sweep regardless.
+pub(crate) fn build_ufw_deprovision(sudo: &str, selected: bool, emit_purge: bool) -> String {
+    if !selected {
+        // WR-1 keep-as-is: leave the firewall exactly as it is (still enabled). Nothing to emit.
+        return String::new();
+    }
+    if emit_purge {
+        format!(
+            r#"if command -v ufw >/dev/null 2>&1; then
+  if [ "$TT_INSTALLED_UFW" = "1" ]; then
+    # We installed ufw (was absent → server had no firewall before) → full purge.
+    {sudo}ufw --force disable 2>/dev/null || true
+    # M-01: purge ONLY ufw — the bare system-wide orphan-sweep that used to follow could
+    # cascade-remove the admin's own orphaned packages. Dropped.
+    {sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y ufw 2>/dev/null || true
+  elif [ "$TT_ENABLED_UFW" = "1" ]; then
+    # ufw pre-existed but was INACTIVE before TrustTunnel enabled it → turn it back
+    # off (its prior state). Keep the package — it is the admin's base tool.
+    {sudo}ufw --force disable 2>/dev/null || true
+  fi
+fi"#
+        )
+    } else {
+        format!(
+            r#"if command -v ufw >/dev/null 2>&1; then
+  # Conservative (D-06/D-07): the user WANTS ufw removed but ownership is unproven (snapshot
+  # shows ufw pre-existed / no marker) → KEEP the package, never purge. Only revert an
+  # inactive→active flip WE made so the admin's prior state is restored.
+  if [ "$TT_ENABLED_UFW" = "1" ]; then
+    {sudo}ufw --force disable 2>/dev/null || true
+  fi
+fi"#
+        )
+    }
+}
+
 /// Build the COMPLETE uninstall script body for «Начать заново» (D-04 full clean
 /// slate, OWNERSHIP-SCOPED — round-3 HIGH A). Pure fn → unit-testable under
 /// `cargo test --lib` without a live server, mirroring the `build_uninstall_extras`
@@ -366,7 +568,68 @@ fi
 /// metacharacters) before reaching here; no NEW free-text SSH-reaching field is
 /// introduced by this helper. `build_stop_in_progress` + `build_uninstall_extras`
 /// are interpolated in (no inline duplicate of their bodies).
-pub(crate) fn build_uninstall_script(sudo: &str, dir: &str, svc: &str, host: &str, ssh_port: u16) -> String {
+///
+/// PHASE 18 — component-selective, snapshot-evidence-gated FULL REVERT (D-01/D-05/D-07):
+///   - `selection` — per-component UN-1 checkboxes; each gates one teardown branch.
+///   - `snapshot` — the pre-install evidence (18-01). `None` = legacy server (D-06
+///     conservative marker-only path).
+///   - `telemt_port` — resolved by `uninstall_server` via an explicit telemt.toml read
+///     (the `_secret` is read but NEVER logged, D-29); threaded straight into
+///     `build_telemt_teardown`. Unused when the MTProto gate does not fire.
+///
+/// GATES (18-UAT owner principle — remove ONLY what WE created, proven by OUR marker):
+///   - MTProto fold (`build_telemt_teardown`): `selection.mtproto` AND `mtproto_is_ours`
+///     (the `/opt/trusttunnel/.tt-installed-mtproto` marker OUR install writes). WR-8: the
+///     snapshot's "telemt was absent before us" is NO LONGER an authorization — first-touch
+///     absence does not prove the CURRENTLY-installed telemt is ours (an admin could have
+///     installed their own AFTER us). Since 18-09 every app MTProto install writes the marker,
+///     so a normal install is fully removable; an admin's own telemt (no marker) is NEVER
+///     folded (D-05). A pre-18-09 app-installed MTProto has no marker until reinstalled.
+///   - BBR fold (`build_bbr_revert`): `selection.bbr` AND the `.tt-bbr-prior` ownership marker
+///     OUR `enable_bbr` writes (`bbr_prior_marker`) records a revertable algo. WR-8: the
+///     snapshot's recorded pre-install value is NO LONGER an authorization to revert (same
+///     reasoning). The marker both PROVES ownership and carries the exact prior algo, gated
+///     through `bbr_revert_target` so an admin's own BBR / an unknown prior is NEVER reverted
+///     (system-global ownership — D-02b preserved).
+///   - install dir: ALWAYS removed in full (`rm -rfv {dir}`) — users are part of the protocol
+///     and go with it. There is no keep-users option (18-UAT: removed by owner decision, since a
+///     preserved credential list could not be re-adopted on reinstall).
+///   - Package purge (ufw/fail2ban): emitted only when `selection.<pkg>` AND ownership is
+///     proven — 18-10: by the `.tt-installed-{ufw,fail2ban}` install-marker
+///     (`ufw_pkg_ours`/`fail2ban_pkg_ours`, written ONLY when the package was ABSENT before
+///     us → strictly stronger proof than the snapshot) OR the snapshot proving the package
+///     was absent pre-install. A snapshot proving the package PRESENT no longer vetoes when
+///     the marker is set (the marker is authoritative). With NEITHER (legacy, admin's
+///     pre-existing package) the conservative branch keeps the package. The in-shell
+///     `$TT_INSTALLED_*` marker gate stays as a belt-and-suspenders double gate; the
+///     rules/jail cleanup stays unconditional. This SUPERSEDES the earlier M-01
+///     «never purge without snapshot» — the install-marker is better ownership evidence.
+///
+/// The FINAL unconditional SACRED SSH-port re-assert stays LAST for EVERY selection combo
+/// (D-INV-1) — the MTProto/BBR folds are placed BEFORE it so the SSH allow is the last word.
+///
+/// The arg list mirrors the deploy artifact chain (dir/svc/host/ports) plus the two Phase 18
+/// inputs (selection + snapshot); bundling them into a struct would not aid readability here,
+/// so we allow the lint exactly as `derive_partial` above does.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_uninstall_script(
+    sudo: &str,
+    dir: &str,
+    svc: &str,
+    host: &str,
+    ssh_port: u16,
+    telemt_port: u16,
+    mtproto_is_ours: bool,
+    // 18-10: install/enable ownership markers read by `uninstall_server` BEFORE {dir} is
+    // removed — the LEGACY (no-snapshot) ownership proof for the ufw/fail2ban package purge
+    // and the BBR revert. Written ONLY by our install/enable actions, so an admin's
+    // pre-existing component never carries one.
+    ufw_pkg_ours: bool,
+    fail2ban_pkg_ours: bool,
+    bbr_prior_marker: Option<&str>,
+    selection: &UninstallSelection,
+    snapshot: Option<&super::snapshot::PreInstallSnapshot>,
+) -> String {
     // OWNERSHIP-SCOPED extended cleanup (LE state + ufw-by-comment + iptables-by-tag)
     // — see build_uninstall_extras doc. host already whitelist-validated upstream.
     // ssh_port = the port THIS session is riding (SshParams.port); made SACRED so the
@@ -376,6 +639,84 @@ pub(crate) fn build_uninstall_script(sudo: &str, dir: &str, svc: &str, host: &st
     // dpkg) so a mid-install cancel leaves a clean, re-runnable server — never
     // touches the system's own apt (05-UAT 2026-06-09).
     let stop_in_progress = build_stop_in_progress(sudo);
+
+    // ── D-07 package-purge gate (build-time half; the in-shell `$TT_INSTALLED_*` marker
+    //    is the other half — kept as a belt-and-suspenders double gate). A purge is emitted
+    //    when the selection checkbox is set AND ownership is proven.
+    //    18-10: ownership = the `.tt-installed-{ufw,fail2ban}` INSTALL-MARKER
+    //    (`ufw_pkg_ours`/`fail2ban_pkg_ours`) OR the snapshot proving the package was absent
+    //    pre-install. The install-marker is written ONLY when the package was ABSENT at our
+    //    install (server_security.rs) → strictly STRONGER proof than the snapshot, and it
+    //    exists on LEGACY servers with no snapshot. This SUPERSEDES M-01's snapshot-only
+    //    gate: a legacy server whose ufw/fail2ban WE apt-installed now correctly purges the
+    //    package. With NEITHER marker nor snapshot-absent (an admin's pre-existing package)
+    //    the conservative branch keeps it. The marker being authoritative means a snapshot
+    //    that (wrongly) recorded the package present cannot veto a genuine marker. ──
+    let ufw_purge = selection.ufw
+        && (ufw_pkg_ours || snapshot.map(|s| !s.ufw_present).unwrap_or(false));
+    let fail2ban_purge = selection.fail2ban
+        && (fail2ban_pkg_ours || snapshot.map(|s| !s.fail2ban_present).unwrap_or(false));
+    // WR-1/WR-2: pass the SELECTION bit separately from the purge decision so an unchecked
+    // (keep-as-is) component is never disabled/stripped, only a checked-but-unowned one reverts.
+    let fail2ban_deprovision = build_fail2ban_deprovision(sudo, selection.fail2ban, fail2ban_purge);
+    let ufw_deprovision = build_ufw_deprovision(sudo, selection.ufw, ufw_purge);
+
+    // ── Step 4 dir removal. Users are PART OF the protocol → «удалить протокол» ALWAYS removes
+    //    the whole {dir}, accounts included. 18-UAT: the optional «keep users» preserve path was
+    //    REMOVED (owner decision). A preserved credential list left the reinstalled endpoint unable
+    //    to export the user's config («There is no user config for specified username», code 101 —
+    //    the endpoint's per-user config could not be re-materialized from the surviving
+    //    credentials.toml alone), and the owner does not want a keep-users option at all. So the
+    //    teardown is unconditional: the whole install dir goes, and success = {dir} is gone. ──
+    let remove_dir = format!("{sudo}rm -rfv {dir}");
+    let verify_block =
+        format!("if test -d {dir}; then\n    echo \"UNINSTALL_FAILED\"\nelse\n    echo \"UNINSTALL_OK\"\nfi");
+
+    // ── MTProto fold (D-05 ownership gate). ONLY when selection.mtproto AND the snapshot
+    //    POSITIVELY proves telemt was absent pre-install. build_telemt_teardown's surgical
+    //    lines carry no inner `sudo` (designed to run inside a `{sudo}bash <<'UUID'` heredoc,
+    //    like mtproto_uninstall), so we wrap the fragment in exactly that. The UUID delim
+    //    (D-INV-3) is generated here; the fragment content is fully static (no user input),
+    //    so this only affects the delimiter token, never the tested content. ──
+    // 18-UAT (owner principle / WR-8): remove ONLY what WE installed, proven by OUR
+    // `.tt-installed-mtproto` marker (mtproto_is_ours) — NEVER inferred from the snapshot's
+    // "telemt was absent before us". First-touch absence does NOT prove the CURRENTLY-installed
+    // telemt is ours: an admin could have installed their own telemt AFTER our protocol install,
+    // and the snapshot-absent inference would then destroy it. Since 18-09 EVERY app MTProto
+    // install writes the marker, so a normal install stays fully removable; the snapshot is no
+    // longer an authorization to destroy (it remains only the non-destructive D-05 pre-allow).
+    let telemt_step = if selection.mtproto && mtproto_is_ours {
+        // H-04: pass the SACRED ssh_port so the fold's ufw delete never enumerates the
+        // SSH allow (anchored port match + SSH-port exclusion inside build_telemt_teardown).
+        let teardown = super::server_mtproto::build_telemt_teardown(sudo, telemt_port, ssh_port);
+        let delim = format!("TELEMT_TEARDOWN_EOF_{}", uuid::Uuid::new_v4().simple());
+        format!(
+            "echo \"=== Step 5g: Remove MTProto (telemt) — ownership-gated (D-05) ===\"\n\
+{sudo}bash <<'{delim}'\n{teardown}{delim}\n"
+        )
+    } else {
+        String::new()
+    };
+
+    // ── BBR fold (D-02b / T-18-15 system-global ownership gate). M-02: revert ONLY on
+    //    POSITIVE proof — the restore algo must be a KNOWN non-BBR algorithm. An inconclusive
+    //    `""`/`"unknown"` (a FAILED probe) or `bbr` is NOT proof → no revert.
+    //    18-UAT (owner principle / WR-8): the revert authorization AND the algo to restore both
+    //    come from OUR `.tt-bbr-prior` marker (`bbr_prior_marker`) — NOT the snapshot. "BBR was
+    //    off before us" (first-touch) does not prove WE enabled the CURRENT BBR (an admin could
+    //    have enabled it after us), so the snapshot is no longer an authorization to revert. Every
+    //    app BBR-enable writes the marker (18-10), so normal use is unaffected; the marker passes
+    //    through the `bbr_revert_target` whitelist so it can never revert to `bbr`/unknown, and we
+    //    restore the RECORDED prior algo (not a hardcoded `cubic`). build_bbr_revert carries
+    //    per-command sudo → drops straight into this script and also drops the spent marker. ──
+    let restore_algo = bbr_prior_marker.and_then(super::server_bbr::bbr_revert_target);
+    let bbr_step = match restore_algo {
+        Some(restore_algo) if selection.bbr => {
+            let revert = super::server_bbr::build_bbr_revert(sudo, restore_algo);
+            format!("echo \"=== Step 5h: Revert BBR to '{restore_algo}' (our .tt-bbr-prior marker proves we enabled it) ===\"\n{revert}\n")
+        }
+        _ => String::new(),
+    };
     format!(
         r#"set -x
 echo "=== BEFORE: listing {dir} ==="
@@ -421,41 +762,41 @@ echo "=== Step 3: Remove systemd units ==="
 # no longer provisions a decoy, so there is nothing to remove here.
 {sudo}systemctl daemon-reload
 
-echo "=== Step 4: Remove {dir} ==="
-{sudo}rm -rfv {dir}
+echo "=== Step 4: Remove {dir} (whole install dir — users go with the protocol) ==="
+{remove_dir}
+# CORE-REMOVAL SENTINEL (post-UAT «код -1» fix): the firewall/Fail2ban teardown that runs
+# BELOW can reset OUR OWN established SSH connection (conntrack flush / brief DROP on
+# `ufw --force disable`/`apt purge ufw`/fail2ban stop), closing THIS channel before the final
+# VERIFY sentinel + the command exit status ever reach the app — even though the protocol
+# (systemd service + {dir}) is already gone. Emit an authoritative core-removed marker HERE,
+# BEFORE any firewall op, so `uninstall_server` can confirm success from the (partial) output
+# even when the channel dies mid-teardown. The dir was just `rm -rfv`'d above.
+if test -d {dir}; then echo "CORE_REMOVE_FAILED"; else echo "CORE_REMOVED_OK"; fi
 
 echo "=== Step 5: Remove certbot cron ==="
 {sudo}rm -f /etc/cron.d/trusttunnel-cert-renew 2>/dev/null || true
 
 {uninstall_extras}
-echo "=== Step 5e: Smart de-provision of TrustTunnel-managed security (ownership-scoped) ==="
+# CR-2 (Phase-18 re-review): the MTProto (Step 5g) + BBR (Step 5h) folds run HERE — BEFORE
+# the Step 5e fail2ban/ufw teardown — not after it. That teardown (`ufw --force disable` /
+# `apt purge` / fail2ban stop) can reset OUR OWN established SSH channel (the «код -1» case);
+# with the folds sitting after it, a mid-teardown drop left telemt STILL SERVING with a valid
+# secret and BBR STILL ON while the app reported success (CORE_REMOVED_OK already emitted at
+# Step 4). These folds are channel-safe — telemt's ufw cleanup is delete-by-number with the
+# SSH port excluded (H-04) and BBR is a plain sysctl write — so running them before any
+# connection-resetting op guarantees they actually complete. The FINAL SACRED-SSH re-assert
+# still stays last (after Step 5e), so the SSH allow is the last firewall word either way.
+{bbr_step}{telemt_step}echo "=== Step 5e: Smart de-provision of TrustTunnel-managed security (ownership-scoped) ==="
 # fail2ban: always remove OUR jail config; purge the package only if WE installed it.
 # SACRED SSH (post-UAT brick fix): a fail2ban ban is an iptables/nft DROP that can
 # OUTLIVE `apt purge` (purge removes config/db, not live kernel rules) and the ban DB
 # (/var/lib/fail2ban) restores bans on the next boot. So we (a) UNBAN before stopping
 # the daemon (only a live daemon can unban), (b) drop the ban DB, and (c) sweep any
 # orphaned f2b chains in Step 5f — so a self-ban can never strand SSH after uninstall.
-if command -v fail2ban-client >/dev/null 2>&1 || dpkg -s fail2ban >/dev/null 2>&1; then
-  if [ "$TT_INSTALLED_F2B" = "1" ]; then
-    # We installed fail2ban (it was absent) → full purge, back to pre-TrustTunnel.
-    # Unban EVERYTHING first (we own the whole install) while the daemon is still up.
-    {sudo}fail2ban-client unban --all 2>/dev/null || true
-    {sudo}systemctl stop fail2ban 2>/dev/null || true
-    {sudo}systemctl disable fail2ban 2>/dev/null || true
-    {sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y fail2ban 2>/dev/null || true
-    {sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
-    {sudo}rm -rf /etc/fail2ban 2>/dev/null || true
-    # Drop the persisted ban DB so a residual boot-time restore can't re-ban the admin.
-    {sudo}rm -rf /var/lib/fail2ban 2>/dev/null || true
-  else
-    # Admin already had fail2ban → keep the package + their jails. Lift ONLY a ban of
-    # THIS session's IP on the sshd jail (never `unban --all` — that would clear the
-    # admin's other jails), then remove our jail.local + reload.
-    [ -n "$TT_SSH_IP" ] && {sudo}fail2ban-client set sshd unbanip "$TT_SSH_IP" 2>/dev/null || true
-    {sudo}rm -f /etc/fail2ban/jail.local 2>/dev/null || true
-    {sudo}systemctl reload fail2ban 2>/dev/null || {sudo}systemctl restart fail2ban 2>/dev/null || true
-  fi
-fi
+# D-07: the `apt-get purge` inside is emitted (build-time) only when selection.fail2ban
+# AND the snapshot does not prove fail2ban pre-existed; otherwise the conservative branch
+# keeps the admin's package (below).
+{fail2ban_deprovision}
 echo "=== Step 5f: Sweep orphaned fail2ban DROP chains (backend-agnostic, dead-daemon safe) ==="
 # unban only works against a LIVE daemon; a wedged/killed fail2ban (or a re-run after a
 # prior purge) can leave an f2b DROP chain with no daemon to lift it. Sweep those — but
@@ -482,19 +823,10 @@ if ! {sudo}systemctl is-active --quiet fail2ban 2>/dev/null; then
 fi
 # ufw: the TrustTunnel rules were removed above (Step 5c). Now the package / state.
 # `ufw --force disable` first drops all enforcement (default ACCEPT) so purging can
-# never strand the SSH session — there is no lock-out window.
-if command -v ufw >/dev/null 2>&1; then
-  if [ "$TT_INSTALLED_UFW" = "1" ]; then
-    # We installed ufw (was absent → server had no firewall before) → full purge.
-    {sudo}ufw --force disable 2>/dev/null || true
-    {sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y ufw 2>/dev/null || true
-    {sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
-  elif [ "$TT_ENABLED_UFW" = "1" ]; then
-    # ufw pre-existed but was INACTIVE before TrustTunnel enabled it → turn it back
-    # off (its prior state). Keep the package — it is the admin's base tool.
-    {sudo}ufw --force disable 2>/dev/null || true
-  fi
-fi
+# never strand the SSH session — there is no lock-out window. D-07: the `apt-get purge`
+# inside is emitted (build-time) only when selection.ufw AND the snapshot does not prove
+# ufw pre-existed; otherwise the conservative branch keeps the admin's package.
+{ufw_deprovision}
 # SACRED SSH (post-UAT brick fix): FINAL unconditional re-assert of the active SSH
 # port's allow — the last word on firewall state. If ufw was purged above,
 # `command -v ufw` is now false → skipped (enforcement gone, port already open). If ufw
@@ -527,21 +859,35 @@ find / -maxdepth 4 -name '*trusttunnel*' -not -path '/proc/*' -not -path '/sys/*
 # An admin's pre-existing ufw/fail2ban is never purged; only our rules + jail go.
 
 echo "=== VERIFY ==="
-if test -d {dir}; then
-    echo "UNINSTALL_FAILED"
-else
-    echo "UNINSTALL_OK"
-fi
+{verify_block}
 "#
     )
 }
 
 /// Completely remove TrustTunnel from the server.
 /// NOTE: Uses direct connect (NOT pooled) — destructive one-shot operation.
+///
+/// PHASE 18 (UN-1) — component-selective, snapshot-evidence-gated FULL REVERT. `selection`
+/// is the per-component UN-1 payload; `None` (pre-18-05 callers / the wizard cancel-rollback
+/// path that omit it) defaults to `UninstallSelection::restore_all` = today's full revert
+/// (D-03). Before building the script this:
+///   1. reads the pre-install snapshot (`read_preinstall_snapshot`) → `Option<..>` evidence
+///      (`None` = legacy server → D-06 conservative marker-only path),
+///   2. resolves the telemt port with an EXPLICIT telemt.toml SSH read (mirrors
+///      `mtproto_uninstall`): the port drives the fold's ufw delete-by-number, the `_secret`
+///      is bound to `_` and NEVER logged (D-29), and a missing telemt.toml defaults the port
+///      to 0 (the fold's ufw block is then a no-op).
+///
+/// The Tauri command surface (frontend payload wiring) is plan 18-05; until then the macro
+/// passes `Option<UninstallSelection>` and the omitted case defaults to restore_all here.
 pub async fn uninstall_server(
     app: &tauri::AppHandle,
     params: SshParams,
+    selection: Option<UninstallSelection>,
 ) -> Result<(), String> {
+    // D-03: an omitted selection (pre-18-05 callers, wizard cancel-rollback) restores to
+    // exactly pre-install — remove everything WE installed (today's full-revert behavior).
+    let selection = selection.unwrap_or_default();
     // 06-uat (Layer 1 of the cancel→reinstall race fix): when this runs as the CANCEL
     // rollback, wait (bounded) for the in-flight deploy_server to finish aborting BEFORE
     // we connect and run the destructive `rm -rf /opt/trusttunnel`, so the removal can
@@ -560,19 +906,111 @@ pub async fn uninstall_server(
 
     emit_step(app, "uninstall", "progress", "Removing TrustTunnel...");
 
+    // UN-2 evidence: read the pre-install snapshot BEFORE building the script. `None` =
+    // legacy server (installed before this feature) → the D-06 conservative marker-only
+    // path (no snapshot-gated purge / no MTProto or BBR fold). The snapshot carries no
+    // secret by construction (see PreInstallSnapshot), so this read cannot leak (D-29).
+    let snapshot = super::snapshot::read_preinstall_snapshot(app, &handle, sudo)
+        .await
+        .unwrap_or(None);
+
+    // Resolve the telemt/MTProto proxy port via a PORT-ONLY telemt.toml read.
+    // C-01: previously this `cat`-ed the whole telemt.toml and fed it to
+    // parse_telemt_toml_minimal — but exec_command echoes every stdout line into the
+    // log channel, so the `[access.users] trusttunnel = "<hex>"` secret line leaked on
+    // EVERY protocol uninstall. `build_telemt_port_read` greps ONLY the port integer,
+    // so the secret never leaves the server. The port drives the fold's ufw
+    // delete-by-number; a missing telemt.toml → port 0 → the fold's ufw block is a
+    // no-op. The MTProto fold itself is ownership-gated inside build_uninstall_script
+    // (WR-8: only when OUR `.tt-installed-mtproto` marker is present — the snapshot no
+    // longer authorizes), so reading the port here is harmless when the fold does not fire.
+    let telemt_port = {
+        let (port_out, _) = exec_command(
+            &handle,
+            app,
+            &super::server_mtproto::build_telemt_port_read(sudo),
+        )
+        .await?;
+        super::server_mtproto::parse_telemt_port_line(&port_out)
+    };
+
+    // 18-09 / WR-8: read the MTProto ownership MARKER (`/opt/trusttunnel/.tt-installed-mtproto`).
+    // POSITIVE proof that OUR install created this telemt proxy — after WR-8 this marker is the
+    // SOLE authorization for the fold (the snapshot no longer authorizes destruction). Bare
+    // `test -f` → no content read, so the secret never leaves the server (D-29). An admin's own
+    // pre-existing telemt never carries the marker → never folded (D-05).
+    let mtproto_is_ours = {
+        let (marker_out, _) = exec_command(
+            &handle,
+            app,
+            &super::server_mtproto::build_mtproto_marker_probe(sudo),
+        )
+        .await?;
+        marker_out.contains("MARKER_PRESENT")
+    };
+
+    // 18-10: read the ufw/fail2ban INSTALL-markers (`/opt/trusttunnel/.tt-installed-*`) so
+    // the package purge can fire on a LEGACY server with no snapshot. Written ONLY when WE
+    // apt-installed the package (it was absent), so a marker is authoritative ownership
+    // proof. Bare `test -f` → no content read (D-29). An admin's pre-existing package never
+    // carries the marker → never purged.
+    let (ufw_pkg_ours, fail2ban_pkg_ours) = {
+        let (out, _) = exec_command(&handle, app, &build_pkg_marker_probe(sudo)).await?;
+        parse_pkg_marker_probe(&out)
+    };
+
+    // 18-10: read the `.tt-bbr-prior` marker CONTENT (the algo active before our first
+    // `enable_bbr`). On a LEGACY server (no snapshot) this is the only proof that WE enabled
+    // BBR and what to restore. `bbr_revert_target` whitelists the token before it reaches any
+    // `sysctl -w` (build_uninstall_script), so an admin's `bbr`/an unknown prior is never
+    // reverted. Non-secret token → nothing leaks (D-29).
+    let bbr_prior_marker = {
+        let (out, _) = exec_command(&handle, app, &super::server_bbr::build_bbr_prior_read(sudo)).await?;
+        super::server_bbr::parse_bbr_prior_marker(&out)
+    };
+
     // Run full uninstall as a single script for reliability. The script body is built
     // by the pure, unit-testable `build_uninstall_script` (06-16 C-18: pinned to the
     // deploy.rs COCOON MANIFEST by a symmetry test). host is validated upstream by
     // `validate_ssh_host` (no shell metacharacters).
-    let uninstall_script = build_uninstall_script(sudo, ENDPOINT_DIR, ENDPOINT_SERVICE, &params.host, params.port);
+    let uninstall_script = build_uninstall_script(
+        sudo,
+        ENDPOINT_DIR,
+        ENDPOINT_SERVICE,
+        &params.host,
+        params.port,
+        telemt_port,
+        mtproto_is_ours,
+        ufw_pkg_ours,
+        fail2ban_pkg_ours,
+        bbr_prior_marker.as_deref(),
+        &selection,
+        snapshot.as_ref(),
+    );
 
     let (output, code) = exec_command(&handle, app, &uninstall_script).await?;
 
-    if output.contains("UNINSTALL_FAILED") || code != 0 {
+    // Success = the protocol footprint (systemd service + {dir}) is confirmed gone. The
+    // firewall/Fail2ban teardown that runs AFTER the core removal can reset OUR OWN established
+    // SSH connection (conntrack flush on `ufw --force disable`/`apt purge ufw`/fail2ban stop),
+    // closing this channel before the final exit status — `exec_command` then returns code == -1
+    // (its default; no ExitStatus was received). A dropped channel is NOT a failure once the
+    // CORE_REMOVED_OK sentinel (emitted right after `rm -rfv {dir}`, before any firewall op)
+    // confirms the dir is gone; the interrupted firewall cleanup is best-effort and the SACRED
+    // SSH port stays open regardless. Only an explicit FAILED marker, or NO success sentinel with
+    // a genuine non-zero exit (not the -1 drop after a confirmed core removal), is a real failure.
+    let core_removed = output.contains("CORE_REMOVED_OK");
+    let hard_fail = output.contains("UNINSTALL_FAILED") || output.contains("CORE_REMOVE_FAILED");
+    if hard_fail || (!core_removed && code != 0) {
         let msg = format!("SSH_UNINSTALL_FAILED|{code}");
         emit_step(app, "uninstall", "error", &msg);
         handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err(msg);
+    }
+    if core_removed && code != 0 {
+        // Core removal confirmed but the channel dropped mid-teardown — log it (no secret) so a
+        // «код -1»-that-actually-succeeded is debuggable, and proceed as success.
+        emit_log(app, "warn", "uninstall: SSH channel dropped during firewall/Fail2ban teardown after the protocol was already removed — treating as success (core footprint confirmed gone)");
     }
 
     emit_log(app, "info", "TrustTunnel completely removed from server");
@@ -1259,7 +1697,34 @@ pub async fn server_get_user_config(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_probe_script, build_stop_in_progress, build_uninstall_extras, build_uninstall_script, derive_partial};
+    use super::{
+        build_fail2ban_deprovision, build_pkg_marker_probe, build_probe_script,
+        build_stop_in_progress, build_ufw_deprovision, build_uninstall_extras,
+        build_uninstall_script, derive_partial, parse_pkg_marker_probe, UninstallSelection,
+    };
+    use super::super::snapshot::PreInstallSnapshot;
+
+    // ── Phase 18 test helpers: build a UninstallSelection / PreInstallSnapshot with the
+    //    one axis a test cares about, leaving the rest at a neutral default. ──
+
+    /// A snapshot that PROVES ufw / fail2ban / telemt were ABSENT and BBR was OFF before
+    /// us — i.e. everything is «ours», so every fold + purge is eligible. Individual tests
+    /// override the single field they exercise.
+    fn snapshot_all_ours() -> PreInstallSnapshot {
+        PreInstallSnapshot {
+            schema_version: 1,
+            occupied_ports: vec![],
+            ufw_present: false,
+            ufw_active: false,
+            ufw_rules: vec![],
+            fail2ban_present: false,
+            fail2ban_enabled: false,
+            mtproto_present: false,
+            bbr_value: "cubic".to_string(),
+            ufw_manual: false,
+            fail2ban_manual: false,
+        }
+    }
 
     // ── build_stop_in_progress: cancel must kill OUR deploy group, heal dpkg,
     //    and NEVER broad-kill the system's apt (05-UAT 2026-06-09) ──
@@ -1435,6 +1900,29 @@ mod tests {
     }
 
     #[test]
+    fn uninstall_sweep_spares_the_d05_admin_service_preallows_h03() {
+        // H-03: the Step 5c sweep must EXCLUDE the D-05 pre-allow rules (comment
+        // 'pre-existing admin service (TrustTunnel)'). Those rules keep the ADMIN's
+        // own services reachable through the ufw WE enabled; deleting them while ufw
+        // stays active (user unchecked «Брандмауэр») firewalls the admin's service off.
+        let s = build_uninstall_extras("sudo ", "example.com", 2222);
+        // The sweep pipeline carries an explicit exclusion for the pre-allow tag,
+        // alongside the existing SSH-port exclusion.
+        assert!(
+            s.contains("grep -vE 'pre-existing admin service'"),
+            "Step 5c must exclude the D-05 admin-service pre-allows: {s}"
+        );
+        // Sanity: the exclusion sits inside the same enumerate-then-delete loop that
+        // still targets our own trusttunnel-tagged rules.
+        let sweep_line = s
+            .lines()
+            .find(|l| l.contains("for tt_num in"))
+            .expect("Step 5c sweep loop present");
+        assert!(sweep_line.contains("grep -iE 'trusttunnel|HTTP cert renewal'"), "still sweeps our rules");
+        assert!(sweep_line.contains("pre-existing admin service"), "exclusion is part of the sweep pipeline");
+    }
+
+    #[test]
     fn uninstall_extras_interpolates_validated_host_verbatim() {
         // host is validated upstream by validate_ssh_host (whitelist — no shell
         // metacharacters). A clean sample is interpolated verbatim into the certbot
@@ -1461,7 +1949,7 @@ mod tests {
         // (it is a DIRECTORY — `rm -f` cannot remove it, the root cause) and the
         // removal must come BEFORE `systemctl daemon-reload` so the reload re-reads
         // units without our drop-in.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
         assert!(
             s.contains("rm -rf /etc/systemd/system/trusttunnel.service.d"),
             "must rm -rf the .service.d drop-in dir (rm -f cannot remove a dir): {s}"
@@ -1483,7 +1971,7 @@ mod tests {
         // C-16: the cert-renew helper deploy.rs writes to /usr/local/sbin must be
         // removed. The glob must be prefixed with `trusttunnel` (OUR files only) —
         // never a bare /usr/local/sbin/* that could match a foreign admin script.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
         assert!(
             s.contains("/usr/local/sbin/trusttunnel*"),
             "must remove the orphaned /usr/local/sbin/trusttunnel* cert-renew helper: {s}"
@@ -1499,8 +1987,9 @@ mod tests {
         // post-UAT exception to C-20: ufw + fail2ban (which install_firewall /
         // install_fail2ban can apt-install) ARE purged — but ONLY inside the
         // ownership-marker branches. Admin-shared certbot/curl/iptables are STILL
-        // never purged.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        // never purged. M-01: the purge is now snapshot-gated too, so use a snapshot
+        // that PROVES the packages were absent before us (None/legacy ⇒ no purge).
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), Some(&snapshot_all_ours()));
         // The ufw/fail2ban purges exist…
         assert!(s.contains("apt-get purge -y fail2ban"), "fail2ban smart-purge missing");
         assert!(s.contains("apt-get purge -y ufw"), "ufw smart-purge missing");
@@ -1562,7 +2051,7 @@ mod tests {
             "must re-assert the SSH allow BEFORE the sweep (survives a conntrack flush)"
         );
 
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
         let reassert = "ufw allow 2222/tcp comment 'SSH keep active session'";
         // Re-asserted at least twice: pre-sweep (in extras) AND as the final word.
         assert!(
@@ -1582,8 +2071,10 @@ mod tests {
     fn uninstall_fail2ban_unbans_before_stop_and_clears_ban_db_and_orphans() {
         // post-UAT brick fix: a fail2ban self-ban must never outlive uninstall. Unban
         // BEFORE stop (only a live daemon can unban), drop the persisted ban DB, and
-        // sweep orphan f2b chains ONLY when the daemon is not active.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        // sweep orphan f2b chains ONLY when the daemon is not active. M-01: the
+        // we-installed (unban --all + purge) branch requires a snapshot proving fail2ban
+        // was absent before us — pass one (None/legacy takes the conservative branch).
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), Some(&snapshot_all_ours()));
         let unban = s.find("fail2ban-client unban --all").expect("must unban-all in the we-installed branch");
         let stop = s.find("systemctl stop fail2ban").expect("must stop fail2ban");
         assert!(unban < stop, "unban-all must come BEFORE systemctl stop (a live daemon is needed to unban)");
@@ -1601,7 +2092,7 @@ mod tests {
         // Behavior-preserving: the extraction into build_uninstall_script must keep
         // the same lifecycle (Step 0..7 + VERIFY) AND interpolate the
         // ownership-scoped extras (no broad firewall delete introduced).
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
         // Step 0 stop-in-progress (interpolated build_stop_in_progress)
         assert!(s.contains("/tmp/tt_deploy.pid"), "Step 0 stop-in-progress must be interpolated");
         // Step 1 stop/disable, Step 2 kill, Step 4 rm dir, Step 5 cron
@@ -1630,7 +2121,15 @@ mod tests {
         // COCOON MANIFEST in deploy.rs). build_uninstall_script (which interpolates
         // build_uninstall_extras) must contain a removal targeting EACH. Adding a fake
         // path here would turn the test red — that is the drift guard working.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        //
+        // Phase 18 / WR-8: pass OUR ownership markers (mtproto_is_ours=true + .tt-bbr-prior
+        // "cubic") + a real telemt port, so the MTProto + BBR folds are emitted and their owned
+        // paths participate in the symmetry check. (Snapshot absence no longer authorizes the
+        // folds — the marker is the sole authority.)
+        let s = build_uninstall_script(
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
+            8443, true, false, false, Some("cubic"), &UninstallSelection::restore_all(), Some(&snapshot_all_ours()),
+        );
         let owned: &[&str] = &[
             // ENDPOINT_DIR — all config + certs + binaries (Step 4)
             "/opt/trusttunnel",
@@ -1653,6 +2152,14 @@ mod tests {
             // ufw_rule_sweep_matches_real_install_comments test.)
             "ufw status numbered",
             "trusttunnel-managed",
+            // Phase 18 MTProto fold (Step 5g, ownership-gated): telemt binary + config +
+            // working dirs + the system user removal (build_telemt_teardown).
+            "/bin/telemt",
+            "rm -rf /etc/telemt /opt/telemt",
+            "userdel -r telemt",
+            // Phase 18 BBR fold (Step 5h, snapshot-off-gated): revert the running congestion
+            // control + remove the persisted sysctl lines (build_bbr_revert).
+            "net.ipv4.tcp_congestion_control=cubic",
         ];
         for path in owned {
             assert!(
@@ -1681,6 +2188,479 @@ mod tests {
         assert!(
             deploy_src.contains("ADMIN-SHARED") || deploy_src.contains("admin-shared"),
             "manifest must state the C-20 admin-shared not-purged boundary"
+        );
+    }
+
+    // ── Phase 18 (18-04): component-selective, snapshot-evidence-gated FULL REVERT ──
+
+    // Conceptually-named literals kept in the TEST file only (comment-text discipline):
+    // the token a fold's presence is asserted by.
+    const TELEMT_FOLD_TOKEN: &str = "systemctl stop telemt";
+    const BBR_FOLD_TOKEN: &str = "net.ipv4.tcp_congestion_control=cubic";
+    const SSH_REASSERT: &str = "ufw allow 2222/tcp comment 'SSH keep active session'";
+
+    fn script_with(
+        selection: &UninstallSelection,
+        snapshot: Option<&PreInstallSnapshot>,
+        telemt_port: u16,
+    ) -> String {
+        // mtproto_is_ours=false + no ufw/f2b/bbr install-markers → these tests exercise the
+        // SNAPSHOT-gated ownership path exclusively (the 18-09/18-10 marker paths have their
+        // own dedicated tests below).
+        build_uninstall_script(
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
+            telemt_port, false, false, false, None, selection, snapshot,
+        )
+    }
+
+    // 18-09: variant that threads the MTProto ownership MARKER (mtproto_is_ours).
+    fn script_with_marker(
+        selection: &UninstallSelection,
+        snapshot: Option<&PreInstallSnapshot>,
+        telemt_port: u16,
+        mtproto_is_ours: bool,
+    ) -> String {
+        build_uninstall_script(
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
+            telemt_port, mtproto_is_ours, false, false, None, selection, snapshot,
+        )
+    }
+
+    // 18-10: variant that threads the ufw/fail2ban INSTALL-markers + the .tt-bbr-prior
+    // marker — the LEGACY (no-snapshot) ownership proofs for the package purge + BBR revert.
+    fn script_with_legacy_markers(
+        selection: &UninstallSelection,
+        snapshot: Option<&PreInstallSnapshot>,
+        ufw_pkg_ours: bool,
+        fail2ban_pkg_ours: bool,
+        bbr_prior_marker: Option<&str>,
+    ) -> String {
+        build_uninstall_script(
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
+            0, false, ufw_pkg_ours, fail2ban_pkg_ours, bbr_prior_marker, selection, snapshot,
+        )
+    }
+
+    // Both component-ownership markers present (mtproto_is_ours + .tt-bbr-prior) — the ONLY
+    // authorization for the destructive telemt/BBR folds after the WR-8 tightening (snapshot
+    // absence no longer authorizes). `bbr_marker` drives the revert to that recorded algo.
+    fn script_full_ours(
+        selection: &UninstallSelection,
+        snapshot: Option<&PreInstallSnapshot>,
+        telemt_port: u16,
+        bbr_marker: Option<&str>,
+    ) -> String {
+        build_uninstall_script(
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
+            telemt_port, true, false, false, bbr_marker, selection, snapshot,
+        )
+    }
+
+    #[test]
+    fn mtproto_fold_requires_the_marker_snapshot_absence_never_authorizes_wr8() {
+        // WR-8 (18-UAT owner principle): the telemt fold fires ONLY on OUR `.tt-installed-mtproto`
+        // marker (mtproto_is_ours). Snapshot "telemt was absent before us" NO LONGER authorizes —
+        // an admin could have installed their own telemt after us, and first-touch absence would
+        // wrongly destroy it. The marker path is covered by
+        // `mtproto_fold_fires_on_ownership_marker_even_without_a_snapshot_18_09`.
+        let sel = UninstallSelection::restore_all(); // mtproto = true
+
+        // (1) snapshot proves telemt ABSENT but NO marker → NO fold (the WR-8 fix — was: folded).
+        let absent = snapshot_all_ours(); // mtproto_present = false
+        let s = script_with(&sel, Some(&absent), 8443);
+        assert!(!s.contains(TELEMT_FOLD_TOKEN), "snapshot-absent alone must NOT authorize removing telemt (WR-8): {s}");
+        assert!(!s.contains("=== Step 5g:"), "no telemt fold header without the ownership marker: {s}");
+
+        // (2) snapshot shows telemt PRESENT (admin's own) + no marker → NO fold (D-05).
+        let present = PreInstallSnapshot { mtproto_present: true, ..snapshot_all_ours() };
+        let s = script_with(&sel, Some(&present), 8443);
+        assert!(!s.contains(TELEMT_FOLD_TOKEN), "must NEVER remove a pre-existing (admin) telemt: {s}");
+
+        // (3) None snapshot (legacy) + no marker → NO fold (conservative).
+        let s = script_with(&sel, None, 8443);
+        assert!(!s.contains(TELEMT_FOLD_TOKEN), "legacy no-snapshot + no marker must not fold");
+
+        // (4) marker present but selection.mtproto UNCHECKED → NO fold (the checkbox still gates).
+        let sel_no_mt = UninstallSelection { mtproto: false, ..UninstallSelection::restore_all() };
+        let s = script_with_marker(&sel_no_mt, Some(&absent), 8443, true);
+        assert!(!s.contains(TELEMT_FOLD_TOKEN), "unchecking MTProto must skip the fold");
+    }
+
+    #[test]
+    fn mtproto_fold_fires_on_ownership_marker_even_without_a_snapshot_18_09() {
+        // 18-09: the LEGACY hole. A server with NO pre-install snapshot (installed before
+        // the snapshot feature) whose MTProto WE installed carries the marker → the fold
+        // MUST fire off the marker alone, closing the former «accepted D-06 tail».
+        let sel = UninstallSelection::restore_all(); // mtproto = true
+
+        // (1) LEGACY (snapshot=None) + marker present (ours) → fold FIRES.
+        let s = script_with_marker(&sel, None, 8443, true);
+        assert!(
+            s.contains(TELEMT_FOLD_TOKEN),
+            "legacy app-installed MTProto (marker present, no snapshot) must fold: {s}"
+        );
+        assert!(s.contains("=== Step 5g:"), "telemt fold step header missing under marker path");
+
+        // (2) LEGACY + NO marker (admin's own telemt, or not-yet-remarked) → NO fold (D-05).
+        let s = script_with_marker(&sel, None, 8443, false);
+        assert!(
+            !s.contains(TELEMT_FOLD_TOKEN),
+            "legacy with neither marker nor snapshot must NEVER fold (admin's telemt): {s}"
+        );
+
+        // (3) marker present but selection.mtproto UNCHECKED → NO fold (the checkbox still gates).
+        let sel_no_mt = UninstallSelection { mtproto: false, ..UninstallSelection::restore_all() };
+        let s = script_with_marker(&sel_no_mt, None, 8443, true);
+        assert!(!s.contains(TELEMT_FOLD_TOKEN), "unchecking MTProto must skip the fold even with the marker");
+
+        // (4) marker AND snapshot-proves-present (admin's own, but we ALSO marked?) — marker
+        //     wins the OR, so the fold fires. This is safe: OUR install only writes the marker
+        //     when WE installed telemt, so a marker means it is genuinely ours regardless of
+        //     what the snapshot recorded. Documents the OR semantics explicitly.
+        let present = PreInstallSnapshot { mtproto_present: true, ..snapshot_all_ours() };
+        let s = script_with_marker(&sel, Some(&present), 8443, true);
+        assert!(s.contains(TELEMT_FOLD_TOKEN), "marker ownership must fold via the OR even if snapshot recorded present: {s}");
+
+        // (5) SACRED SSH-port re-assert stays LAST under the new marker branch too (D-INV-1).
+        let last_reassert = s.rfind(SSH_REASSERT).expect("final SSH re-assert must exist");
+        let fold_off = s.find(TELEMT_FOLD_TOKEN).expect("telemt fold present");
+        assert!(
+            last_reassert > fold_off,
+            "the FINAL SSH re-assert must come AFTER the marker-path MTProto fold (last={last_reassert}, fold={fold_off})"
+        );
+    }
+
+    #[test]
+    fn bbr_revert_requires_the_marker_snapshot_alone_never_authorizes_wr8() {
+        // WR-8 (18-UAT owner principle): the BBR revert fires ONLY on OUR `.tt-bbr-prior` marker,
+        // NOT the snapshot. A first-touch snapshot recording "BBR was off before us" does not
+        // prove WE enabled the CURRENT BBR (an admin could have enabled it after us). The marker
+        // path is covered by `bbr_fold_fires_on_prior_marker_even_without_a_snapshot_18_10`.
+        let sel = UninstallSelection::restore_all(); // bbr = true
+
+        // snapshot proves BBR was off (cubic) but NO marker → NO revert (was: reverted — WR-8 fix).
+        let off = snapshot_all_ours(); // bbr_value = "cubic"
+        let s = script_with(&sel, Some(&off), 0);
+        assert!(!s.contains(BBR_FOLD_TOKEN), "snapshot-only (no marker) must NOT authorize a BBR revert (WR-8): {s}");
+        assert!(!s.contains("=== Step 5h:"), "no BBR fold header without the ownership marker: {s}");
+
+        // snapshot records reno, still no marker → NO revert.
+        let reno = PreInstallSnapshot { bbr_value: "reno".to_string(), ..snapshot_all_ours() };
+        let s = script_with(&sel, Some(&reno), 0);
+        assert!(!s.contains("tcp_congestion_control=reno"), "snapshot alone must not drive a revert: {s}");
+
+        // None snapshot + no marker → NO revert.
+        let s = script_with(&sel, None, 0);
+        assert!(!s.contains(BBR_FOLD_TOKEN), "legacy no-snapshot + no marker must not revert BBR");
+
+        // marker present but selection.bbr UNCHECKED → NO revert (the checkbox still gates).
+        let sel_no_bbr = UninstallSelection { bbr: false, ..UninstallSelection::restore_all() };
+        let s = script_with_legacy_markers(&sel_no_bbr, Some(&off), false, false, Some("cubic"));
+        assert!(!s.contains("=== Step 5h:"), "unchecking BBR must skip the revert even with the marker");
+    }
+
+    #[test]
+    fn bbr_fold_fires_on_prior_marker_even_without_a_snapshot_18_10() {
+        // 18-10 legacy hole: a server with NO pre-install snapshot whose BBR WE enabled
+        // carries the `.tt-bbr-prior` marker → the revert MUST fold off the marker alone,
+        // restoring the recorded prior algo + deleting our sysctl lines + dropping the marker.
+        let sel = UninstallSelection::restore_all(); // bbr = true
+
+        // (1) LEGACY (snapshot=None) + marker "cubic" → fold FIRES, restores cubic, rm marker.
+        let s = script_with_legacy_markers(&sel, None, false, false, Some("cubic"));
+        assert!(s.contains("tcp_congestion_control=cubic"), "legacy marker must restore the recorded algo: {s}");
+        assert!(s.contains("=== Step 5h:"), "BBR fold step header missing under the marker path");
+        assert!(
+            s.contains("rm -f /opt/trusttunnel/.tt-bbr-prior"),
+            "the fold must drop the spent .tt-bbr-prior marker: {s}"
+        );
+
+        // (2) LEGACY + NO marker + NO snapshot → NO revert (conservative D-06).
+        let s = script_with_legacy_markers(&sel, None, false, false, None);
+        assert!(!s.contains("=== Step 5h:"), "legacy with neither marker nor snapshot must not revert BBR: {s}");
+
+        // (3) marker records an admin's own BBR (`bbr`) → NEVER reverted (whitelist refuses).
+        let s = script_with_legacy_markers(&sel, None, false, false, Some("bbr"));
+        assert!(!s.contains("=== Step 5h:"), "a marker recording 'bbr' must never revert (admin's BBR): {s}");
+
+        // (4) an unknown/garbage prior → NEVER reverted (not on the whitelist).
+        let s = script_with_legacy_markers(&sel, None, false, false, Some("something-weird"));
+        assert!(!s.contains("=== Step 5h:"), "an unknown prior algo must never revert: {s}");
+
+        // (5) marker present but selection.bbr UNCHECKED → NO revert (the checkbox still gates).
+        let sel_no_bbr = UninstallSelection { bbr: false, ..UninstallSelection::restore_all() };
+        let s = script_with_legacy_markers(&sel_no_bbr, None, false, false, Some("cubic"));
+        assert!(!s.contains("=== Step 5h:"), "unchecking BBR must skip the revert even with the marker");
+
+        // (6) WR-8: the MARKER is the sole authority. Even with a snapshot recording cubic, the
+        //     marker's recorded algo (reno) is what gets restored — the snapshot no longer drives.
+        let off = snapshot_all_ours(); // bbr_value = "cubic" (ignored for the revert now)
+        let s = script_with_legacy_markers(&sel, Some(&off), false, false, Some("reno"));
+        assert!(s.contains("tcp_congestion_control=reno"), "the marker's recorded algo must be restored (WR-8): {s}");
+        assert!(!s.contains("tcp_congestion_control=cubic"), "the snapshot must not drive the revert when a marker exists: {s}");
+    }
+
+    #[test]
+    fn package_purge_fires_on_install_marker_even_without_a_snapshot_18_10() {
+        // 18-10 legacy hole (FIX 2/3): a server with NO snapshot whose ufw/fail2ban WE
+        // apt-installed carries the `.tt-installed-{ufw,fail2ban}` marker → the build-time
+        // purge branch MUST be emitted off the marker alone (the in-shell $TT_INSTALLED_*
+        // gate is the belt-and-suspenders second gate).
+        let sel = UninstallSelection::restore_all();
+
+        // (1) LEGACY + ufw install-marker (ours) → ufw purge emitted; fail2ban marker absent → not.
+        let s = script_with_legacy_markers(&sel, None, true, false, None);
+        assert!(s.contains("apt-get purge -y ufw"), "legacy ufw install-marker must emit the ufw purge: {s}");
+        assert!(!s.contains("apt-get purge -y fail2ban"), "no fail2ban marker ⇒ no fail2ban purge: {s}");
+        // Still marker-gated in-shell (double gate).
+        assert!(s.contains(r#"[ "$TT_INSTALLED_UFW" = "1" ]"#), "ufw purge stays in-shell marker-gated");
+
+        // (2) LEGACY + fail2ban install-marker (ours) → fail2ban purge emitted; ufw absent → not.
+        let s = script_with_legacy_markers(&sel, None, false, true, None);
+        assert!(s.contains("apt-get purge -y fail2ban"), "legacy fail2ban install-marker must emit the fail2ban purge: {s}");
+        assert!(!s.contains("apt-get purge -y ufw"), "no ufw marker ⇒ no ufw purge: {s}");
+
+        // (3) LEGACY + NO markers (admin's pre-existing packages) → NEITHER purge (conservative).
+        let s = script_with_legacy_markers(&sel, None, false, false, None);
+        assert!(!s.contains("apt-get purge -y ufw"), "legacy without ufw marker ⇒ ufw kept (admin's): {s}");
+        assert!(!s.contains("apt-get purge -y fail2ban"), "legacy without fail2ban marker ⇒ fail2ban kept (admin's): {s}");
+
+        // (4) marker present but selection UNCHECKED → no purge (the checkbox still gates).
+        let sel_keep = UninstallSelection { ufw: false, fail2ban: false, ..UninstallSelection::restore_all() };
+        let s = script_with_legacy_markers(&sel_keep, None, true, true, None);
+        assert!(!s.contains("apt-get purge -y ufw"), "unchecked ufw ⇒ no purge even with the marker");
+        assert!(!s.contains("apt-get purge -y fail2ban"), "unchecked fail2ban ⇒ no purge even with the marker");
+
+        // (5) admin-shared packages are STILL never purged (C-20 boundary holds under the marker path).
+        let s = script_with_legacy_markers(&sel, None, true, true, None);
+        assert!(!s.contains("purge -y certbot"), "must never purge certbot (C-20)");
+        assert!(!s.contains("purge -y curl"), "must never purge curl (C-20)");
+        assert!(!s.contains("purge -y iptables"), "must never purge iptables (C-20)");
+    }
+
+    #[test]
+    fn pkg_marker_probe_reads_bare_test_f_and_parses_tokens_18_10() {
+        // The probe must be a bare `test -f` (no content read → no leak, D-29) on the two
+        // install-markers, and the parser must map the fixed tokens back to (ufw, fail2ban).
+        let cmd = build_pkg_marker_probe("sudo ");
+        assert!(cmd.contains("test -f /opt/trusttunnel/.tt-installed-ufw"), "must probe the ufw marker: {cmd}");
+        assert!(cmd.contains("test -f /opt/trusttunnel/.tt-installed-fail2ban"), "must probe the fail2ban marker: {cmd}");
+        assert!(!cmd.contains("cat "), "must NOT read marker content (bare test -f only): {cmd}");
+        assert_eq!(parse_pkg_marker_probe("UFW_PKG_OURS\nF2B_PKG_OURS"), (true, true));
+        assert_eq!(parse_pkg_marker_probe("UFW_PKG_NOT_OURS\nF2B_PKG_OURS"), (false, true));
+        assert_eq!(parse_pkg_marker_probe("UFW_PKG_OURS\nF2B_PKG_NOT_OURS"), (true, false));
+        assert_eq!(parse_pkg_marker_probe("UFW_PKG_NOT_OURS\nF2B_PKG_NOT_OURS"), (false, false));
+    }
+
+    #[test]
+    fn sacred_ssh_reassert_stays_last_under_the_legacy_marker_paths_18_10() {
+        // D-INV-1 must hold for the new marker-driven branches too: the FINAL SSH re-assert
+        // is the last firewall word even when the BBR revert + ufw purge fire off markers.
+        let sel = UninstallSelection::restore_all();
+        let s = script_with_legacy_markers(&sel, None, true, true, Some("cubic"));
+        let last_reassert = s.rfind(SSH_REASSERT).expect("final SSH re-assert must exist");
+        let disable = s.rfind("ufw --force disable").expect("ufw disable present");
+        assert!(last_reassert > disable, "SSH re-assert must be after the marker-driven ufw purge");
+        let step6 = s.find("=== Step 6:").expect("Step 6 present");
+        assert!(last_reassert < step6, "final re-assert must precede Step 6");
+    }
+
+    #[test]
+    fn uninstall_always_removes_the_whole_dir_and_verifies_absence() {
+        // 18-UAT: users are part of the protocol → the teardown UNCONDITIONALLY removes the whole
+        // install dir (the optional «keep users» preserve path was removed — owner decision). No
+        // find-with-spares, no selection-aware verify: every uninstall blanket-removes {dir} and
+        // success = {dir} gone.
+        let s = script_with(&UninstallSelection::restore_all(), Some(&snapshot_all_ours()), 0);
+        assert!(s.contains("rm -rfv /opt/trusttunnel"), "must blanket-remove the whole dir: {s}");
+        assert!(
+            !s.contains("! -name credentials.toml"),
+            "the keep-users preserve find must be gone: {s}"
+        );
+        assert!(
+            s.contains("if test -d /opt/trusttunnel; then"),
+            "verify success = dir absence: {s}"
+        );
+        assert!(s.contains("UNINSTALL_OK") && s.contains("UNINSTALL_FAILED"), "OK/FAILED sentinels present");
+        // The service is still torn down.
+        assert!(s.contains("systemctl stop trusttunnel"), "service must still be stopped");
+        assert!(s.contains("rm -f /etc/systemd/system/trusttunnel.service"), "unit must still be removed");
+
+        // «код -1» fix: the CORE_REMOVED_OK sentinel must be emitted right after the dir removal
+        // and BEFORE the ufw/Fail2ban teardown, so uninstall_server can confirm success from the
+        // partial output even if that teardown resets the SSH connection mid-script.
+        let core_ok = s.find("CORE_REMOVED_OK").expect("CORE_REMOVED_OK sentinel present");
+        let dir_rm = s.find("rm -rfv /opt/trusttunnel").expect("dir removal present");
+        // Anchor on the echo marker («=== Step 5e:»), not bare «Step 5e» which also appears in a
+        // header comment far above the actual teardown step.
+        let fw_teardown = s.find("=== Step 5e:").expect("firewall teardown step present");
+        assert!(dir_rm < core_ok, "core-removed sentinel must come AFTER the dir removal: {s}");
+        assert!(core_ok < fw_teardown, "core-removed sentinel must come BEFORE the firewall teardown: {s}");
+        assert!(s.contains("CORE_REMOVE_FAILED"), "the negative core-removal marker must also be present");
+    }
+
+    #[test]
+    fn sacred_ssh_reassert_is_last_firewall_op_under_every_selection() {
+        // D-INV-1: for EVERY selection combo the FINAL SSH re-assert is the last firewall
+        // statement — including after the MTProto fold (whose ufw delete-by-number runs).
+        let combos: &[UninstallSelection] = &[
+            UninstallSelection::restore_all(),
+            UninstallSelection { ufw: false, fail2ban: false, bbr: false, mtproto: false },
+        ];
+        let snap = snapshot_all_ours();
+        for sel in combos {
+            // WR-8: thread OUR markers so restore_all actually emits the telemt/BBR folds (the
+            // snapshot alone no longer would); the all-false combo still folds nothing (selection
+            // gates), so the `if let` below stays tolerant.
+            let s = script_full_ours(sel, Some(&snap), 8443, Some("cubic"));
+            let last_reassert = s.rfind(SSH_REASSERT).expect("final SSH re-assert must exist");
+            // Nothing that manipulates the firewall may come after the final re-assert.
+            if let Some(disable) = s.rfind("ufw --force disable") {
+                assert!(last_reassert > disable, "SSH re-assert must be after ufw disable ({sel:?})");
+            }
+            if let Some(telemt) = s.rfind("=== Step 5g:") {
+                assert!(last_reassert > telemt, "SSH re-assert must be after the MTProto fold ({sel:?})");
+            }
+            // The final re-assert must sit before the non-firewall Step 6 binary removal.
+            let step6 = s.find("=== Step 6:").expect("Step 6 present");
+            assert!(last_reassert < step6, "final re-assert must precede Step 6 ({sel:?})");
+        }
+    }
+
+    #[test]
+    fn component_folds_run_before_the_connection_resetting_step5e_cr2() {
+        // CR-2 (Phase-18 re-review): the MTProto (5g) + BBR (5h) folds must be emitted BEFORE
+        // Step 5e's fail2ban/ufw teardown. That teardown can reset THIS SSH channel (the «код -1»
+        // case); a fold placed after it would silently never run while the app already reported
+        // success — leaving telemt serving with a live secret / BBR still on.
+        let snap = snapshot_all_ours();
+        // WR-8: the folds now require OUR markers (mtproto_is_ours + .tt-bbr-prior), not the snapshot.
+        let s = script_full_ours(&UninstallSelection::restore_all(), Some(&snap), 8443, Some("cubic"));
+        let step5e = s.find("=== Step 5e:").expect("Step 5e present");
+        let telemt = s.find("=== Step 5g:").expect("MTProto fold present under restore_all+markers");
+        let bbr = s.find("=== Step 5h:").expect("BBR fold present under restore_all+markers");
+        assert!(telemt < step5e, "MTProto fold (5g) must run BEFORE Step 5e: {s}");
+        assert!(bbr < step5e, "BBR fold (5h) must run BEFORE Step 5e: {s}");
+    }
+
+    #[test]
+    fn package_purge_is_triple_gated_marker_and_snapshot_absent_and_selection() {
+        // (a) snapshot proves the package was ABSENT + selection set ⇒ purge present
+        //     (still marker-gated in-shell by $TT_INSTALLED_*).
+        let sel = UninstallSelection::restore_all();
+        let absent = snapshot_all_ours(); // ufw_present = fail2ban_present = false
+        let s = script_with(&sel, Some(&absent), 0);
+        assert!(s.contains("apt-get purge -y ufw"), "absent+selection ⇒ ufw purge present");
+        assert!(s.contains("apt-get purge -y fail2ban"), "absent+selection ⇒ fail2ban purge present");
+        assert!(s.contains(r#"[ "$TT_INSTALLED_UFW" = "1" ]"#), "ufw purge stays marker-gated in-shell");
+        assert!(s.contains(r#"[ "$TT_INSTALLED_F2B" = "1" ]"#), "fail2ban purge stays marker-gated in-shell");
+
+        // (b) snapshot proves the package was PRESENT pre-install ⇒ purge ABSENT (package kept).
+        let present = PreInstallSnapshot { ufw_present: true, fail2ban_present: true, ..snapshot_all_ours() };
+        let s = script_with(&sel, Some(&present), 0);
+        assert!(!s.contains("apt-get purge -y ufw"), "snapshot-present ⇒ ufw kept (no purge)");
+        assert!(!s.contains("apt-get purge -y fail2ban"), "snapshot-present ⇒ fail2ban kept (no purge)");
+
+        // (c) M-01: None snapshot (legacy, no snapshot) ⇒ NEVER purge the package —
+        //     matches CONTEXT D-07 + security-posture.md. (Was: purge present.)
+        let s = script_with(&sel, None, 0);
+        assert!(!s.contains("apt-get purge -y ufw"), "None (legacy) ⇒ ufw NEVER purged (D-07)");
+        assert!(!s.contains("apt-get purge -y fail2ban"), "None (legacy) ⇒ fail2ban NEVER purged (D-07)");
+
+        // selection UNCHECKED for a package ⇒ no purge for it even with snapshot-absent.
+        let sel_keep = UninstallSelection { ufw: false, fail2ban: false, ..UninstallSelection::restore_all() };
+        let s = script_with(&sel_keep, Some(&absent), 0);
+        assert!(!s.contains("apt-get purge -y ufw"), "unchecked ufw ⇒ no purge");
+        assert!(!s.contains("apt-get purge -y fail2ban"), "unchecked fail2ban ⇒ no purge");
+
+        // (d) admin-shared packages are NEVER purged (C-20), under any gate combination.
+        for snap in [Some(&absent), None] {
+            let s = script_with(&sel, snap, 0);
+            assert!(!s.contains("purge -y certbot"), "must never purge certbot (C-20)");
+            assert!(!s.contains("purge -y curl"), "must never purge curl (C-20)");
+            assert!(!s.contains("purge -y iptables"), "must never purge iptables (C-20)");
+        }
+    }
+
+    #[test]
+    fn deprovision_helpers_gate_purge_but_keep_rule_cleanup() {
+        // build_fail2ban_deprovision(sudo, selected, emit_purge): selected+purge → full purge.
+        let f2b_purge = build_fail2ban_deprovision("sudo ", true, true);
+        assert!(f2b_purge.contains("apt-get purge -y fail2ban"));
+        assert!(f2b_purge.contains("fail2ban-client unban --all"));
+        // selected but NOT owned (conservative): keep the package but still remove OUR jail.local.
+        let f2b_conservative = build_fail2ban_deprovision("sudo ", true, false);
+        assert!(!f2b_conservative.contains("apt-get purge -y fail2ban"), "conservative must not purge");
+        assert!(!f2b_conservative.contains("systemctl stop fail2ban"), "conservative must not stop the admin daemon");
+        assert!(f2b_conservative.contains("rm -f /etc/fail2ban/jail.local"), "conservative still removes OUR jail");
+        assert!(f2b_conservative.contains(r#"set sshd unbanip "$TT_SSH_IP""#), "conservative scope-unbans this session IP");
+
+        // build_ufw_deprovision(sudo, selected, emit_purge): selected+purge → purge the package.
+        let ufw_purge = build_ufw_deprovision("sudo ", true, true);
+        assert!(ufw_purge.contains("apt-get purge -y ufw"));
+        // selected but NOT owned (conservative): keep the package, only revert an enable WE made.
+        let ufw_conservative = build_ufw_deprovision("sudo ", true, false);
+        assert!(!ufw_conservative.contains("apt-get purge -y ufw"), "conservative must not purge ufw");
+        assert!(ufw_conservative.contains("ufw --force disable"), "conservative still reverts an enable WE made");
+
+        // M-01: the bare system-wide `apt-get autoremove -y` cascade is GONE from both
+        // purge branches — we purge only the named package, never system orphans.
+        assert!(!ufw_purge.contains("apt-get autoremove"), "ufw purge must not cascade-autoremove");
+        assert!(!f2b_purge.contains("apt-get autoremove"), "fail2ban purge must not cascade-autoremove");
+    }
+
+    #[test]
+    fn unchecked_component_is_kept_as_is_not_disabled_or_stripped_wr1_wr2() {
+        // WR-1/WR-2 (Phase-18 re-review): unchecking a component means «keep it». The keep-as-is
+        // branch must NOT disable the firewall (WR-1) and must NOT delete our fail2ban jail.local
+        // (WR-2 — it carries the admin-IP ignoreip self-ban whitelist).
+        // ufw KEEP (selected=false): emit nothing that turns the firewall off.
+        let ufw_keep = build_ufw_deprovision("sudo ", false, false);
+        assert!(!ufw_keep.contains("ufw --force disable"), "keeping ufw must NOT disable it: {ufw_keep}");
+        assert!(!ufw_keep.contains("apt-get purge -y ufw"), "keeping ufw must NOT purge it: {ufw_keep}");
+        // fail2ban KEEP (selected=false): preserve jail.local + the ignoreip whitelist; no reload.
+        let f2b_keep = build_fail2ban_deprovision("sudo ", false, false);
+        assert!(
+            !f2b_keep.contains("rm -f /etc/fail2ban/jail.local"),
+            "keeping fail2ban must NOT delete jail.local (loses the ignoreip whitelist): {f2b_keep}"
+        );
+        assert!(!f2b_keep.contains("systemctl stop fail2ban"), "keeping fail2ban must NOT stop it: {f2b_keep}");
+        assert!(!f2b_keep.contains("apt-get purge -y fail2ban"), "keeping fail2ban must NOT purge it: {f2b_keep}");
+        // The whole-script view: unchecking both keeps them intact even with a snapshot-absent
+        // record. Match the COMMAND form (`… 2>/dev/null`) so the assertion never trips on the
+        // literal `ufw --force disable` that appears in the script's explanatory comments.
+        let sel_keep = UninstallSelection { ufw: false, fail2ban: false, ..UninstallSelection::restore_all() };
+        let s = script_with(&sel_keep, Some(&snapshot_all_ours()), 0);
+        assert!(!s.contains("ufw --force disable 2>/dev/null"), "unchecked ufw must not be disabled at script level: {s}");
+        assert!(!s.contains("rm -f /etc/fail2ban/jail.local 2>/dev/null"), "unchecked fail2ban jail.local must survive: {s}");
+    }
+
+    #[test]
+    fn uninstall_teardown_reads_only_the_telemt_port_never_the_secret_c01() {
+        // C-01 (RUNTIME, replaces the old source-grep D-29 test which was structurally
+        // blind to exec_command's log echo): the uninstall path must resolve the telemt
+        // port WITHOUT `cat`-ing the whole telemt.toml — otherwise exec_command echoes the
+        // `[access.users] trusttunnel = "<hex>"` secret line into stderr + the deploy-log
+        // event + app.log on EVERY uninstall.
+        let cmd = super::super::server_mtproto::build_telemt_port_read("sudo ");
+        assert!(cmd.contains("grep"), "port read must grep, not cat: {cmd}");
+        assert!(
+            !cmd.contains("cat /etc/telemt/telemt.toml"),
+            "port read must NOT cat the whole telemt.toml (that leaks the secret): {cmd}"
+        );
+        assert!(cmd.contains("/etc/telemt/telemt.toml"), "port read must target telemt.toml: {cmd}");
+
+        // The parser turns the grep output (bare digits) into the integer.
+        assert_eq!(super::super::server_mtproto::parse_telemt_port_line("8443\n"), 8443);
+        assert_eq!(super::super::server_mtproto::parse_telemt_port_line(""), 0);
+
+        // Belt-and-suspenders: even a leaked telemt secret LINE is redacted by the log
+        // sanitizer before any emit, so a future accidental full-file read cannot leak it.
+        let hex = "0123456789abcdef0123456789abcdef";
+        let leaked = format!("trusttunnel = \"{hex}\"");
+        assert!(
+            !crate::logging::sanitize(&leaked).contains(hex),
+            "telemt secret must be redacted by sanitize before any emit"
         );
     }
 

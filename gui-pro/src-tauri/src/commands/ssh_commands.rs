@@ -91,7 +91,109 @@ pub fn cancel_deploy() {
 
 ssh_command!(diagnose_server, ssh::diagnose_server);
 ssh_command!(check_server_installation, ssh::check_server_installation);
-ssh_command!(uninstall_server, ssh::uninstall_server);
+// Phase 18 (UN-1, plan 18-05): the uninstall is a MANUAL command (not the `ssh_command!`
+// macro) so the per-component `selection` payload is an explicit, documented part of the
+// command surface the frontend dialog (plan 18-06) wires to. It KEEPS the DIRECT one-shot
+// connect model — the connect happens inside `ssh::uninstall_server`, NOT via the pool
+// (destructive op → never reuse a pooled connection).
+//
+// `selection` stays `Option` so pre-18-05 callers (the wizard cancel-rollback + the
+// DangerZone «удалить протокол» button) that invoke WITHOUT a selection keep working — an
+// omitted payload defaults to restore-to-pre-install (D-03) inside `uninstall_server`.
+// `auth_method` is threaded exactly like the macro so the wizard's single explicit auth
+// choice (D-06) still reaches `SshParams`; hardcoding None here would silently drop it and
+// fall back to the legacy try-key-then-password sequence.
+//
+// D-INV-3: NO new free-text SSH field is introduced — `selection` is five booleans and
+// host/port are already validated upstream (`validate_ssh_host` / u16 port), so NO new
+// `sanitize.rs` validator is required for this command.
+#[tauri::command]
+pub async fn uninstall_server(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+    auth_method: Option<String>,
+    selection: Option<ssh::UninstallSelection>,
+) -> Result<(), String> {
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+        auth_method,
+    };
+    // Direct one-shot connect happens inside ssh::uninstall_server (no pool.acquire).
+    ssh::uninstall_server(&app, params, selection).await
+}
+
+/// Phase 18 (UN-2, plan 18-05, D-06/D-07): read the pre-install snapshot evidence so the
+/// uninstall dialog can decide which package-purge checkboxes are eligible. This is a
+/// POOLED read (non-destructive) — it mirrors `security_get_status`, reusing the persistent
+/// connection, in contrast to the destructive `uninstall_server` which stays a direct connect.
+///
+/// Returns the snapshot serialized as JSON, or JSON `null` when the server has no snapshot
+/// (a legacy server installed before this feature — D-06 → the dialog treats it as
+/// no-evidence and disables the snapshot-gated purge checkboxes).
+///
+/// D-29 / T-18-17: the snapshot carries ONLY ports / package-present booleans / sysctl and
+/// ufw rule-comment strings — there is no secret-bearing field by construction (see
+/// `PreInstallSnapshot`), so this response cannot leak a credential or the telemt secret.
+#[tauri::command]
+pub async fn read_server_snapshot(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    let sudo = ssh::detect_sudo(&handle, &app).await;
+    // Option<PreInstallSnapshot>: None (legacy server) → serde_json null (D-06); Some → object.
+    let snapshot = crate::ssh::server::snapshot::read_preinstall_snapshot(&app, &handle, sudo).await?;
+    serde_json::to_value(&snapshot).map_err(|e| format!("Serialize error: {e}"))
+}
+
+/// Phase 18 (18-10): read the install/enable OWNERSHIP MARKERS the uninstall dialog needs to
+/// offer removal of ufw/fail2ban (package) + BBR on a LEGACY server that has no pre-install
+/// snapshot. Companion to `read_server_snapshot` (a pooled, non-destructive read) — kept a
+/// SEPARATE command because the markers matter MOST on legacy servers where the snapshot is
+/// `null`, so they cannot be piggy-backed on the (null) snapshot response.
+///
+/// Returns `{ ufwInstalledMarker, fail2banInstalledMarker, bbrPriorMarker, bbrSnapshotRevertable }`.
+/// The frontend ANDs each with its own «detected now» probe; the backend still independently
+/// re-gates the actual teardown (defence in depth — never trusts this UI).
+///
+/// D-29: every marker is read with a bare `test -f` (no content) and the struct is secret-free
+/// by shape (see `OwnershipMarkers`), so this response cannot leak a credential or the telemt
+/// secret.
+#[tauri::command]
+pub async fn read_server_ownership_markers(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    let sudo = ssh::detect_sudo(&handle, &app).await;
+    let markers = crate::ssh::server::snapshot::read_ownership_markers(&app, &handle, sudo).await?;
+    serde_json::to_value(&markers).map_err(|e| format!("Serialize error: {e}"))
+}
+
 // country_code (Option<String>, Tauri maps JS `countryCode`): best-effort GeoIP code used
 // only to brand the LOCAL config filename `[<CC>_]TrustTunnel_<login>.toml` so a re-export
 // writes the SAME name the Save-As dialog defaults to. Optional → omitting it (legacy

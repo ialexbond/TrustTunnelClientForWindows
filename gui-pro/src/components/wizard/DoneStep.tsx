@@ -68,10 +68,11 @@ export function DoneStep(w: WizardState) {
             <>
               {/* R-7: «Добавить конфиг» is the PRIMARY next step after a successful install
                   (owner). The freshly-installed config is ALREADY saved to the app config
-                  folder (deploy_export_config, same filename scheme as Save-As) AND already
-                  registered in the «Подключение» list (App.onSetupComplete → add_config);
-                  this button just navigates there so the user sees the new config card.
-                  «Перейти к панели управления» is demoted to secondary below. */}
+                  folder (deploy_export_config, same filename scheme as Save-As). This button is
+                  the EXPLICIT «add this config» action: it registers the config as a card in
+                  «Подключение» (register=true) and navigates there. «Перейти к панели управления»
+                  (secondary, below) does NOT register — leaving to the panel no longer drops an
+                  unwanted card into «Подключение» (BACKLOG auto-add-config fix). */}
               <Button
                 variant="primary"
                 size="sm"
@@ -79,14 +80,17 @@ export function DoneStep(w: WizardState) {
                 icon={<Plug className="w-4 h-4" />}
                 onClick={() => {
                   // App.tsx reads this key in onSetupComplete and switches activeTab to
-                  // «connection» (a valid AppTab member). onSetupComplete also registers
-                  // the config (add_config) + closes the overlay.
+                  // «connection» (a valid AppTab member). register=true → onSetupComplete
+                  // registers the config (add_config) + closes the overlay.
                   localStorage.setItem("tt_navigate_after_setup", "connection");
-                  w.onSetupComplete(w.configPath);
+                  w.onSetupComplete(w.configPath, true);
                 }}
               >
                 {t('wizard.done.add_config')}
               </Button>
+              {/* Secondary: leave to the control panel WITHOUT adding a card. No register flag
+                  (defaults false) → the install finishes, the config stays on disk, but nothing
+                  is dropped into «Подключение» (BACKLOG auto-add-config fix). */}
               <Button
                 variant="secondary"
                 size="sm"

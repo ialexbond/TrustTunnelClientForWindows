@@ -44,6 +44,9 @@ interface ConfigListProps {
   onRename?: (config: ConfigSummary, newName: string) => Promise<string | void> | string | void;
   /** The live VPN status for the active/lead config (drives the lead-card lifecycle). */
   status?: VpnStatus;
+  /** When the current session connected — threaded App→ConnectionPanel→here so the lead card
+   *  renders a live ticking «HH:MM:SS» session-uptime counter. `null` when not connected. */
+  connectedSince?: Date | null;
   /** Path of the currently active/connected config. When set, the matching card becomes the
    *  connected lead and OTHER cards read «Переключиться» (D-20). Matched by normalized path
    *  (samePath), not raw `===`, because this path and the manifest paths come from different
@@ -124,6 +127,7 @@ export function ConfigList({
   onDuplicate,
   onRename,
   status = "disconnected",
+  connectedSince = null,
   activeConfigPath = "",
   isSwitching = false,
   pendingConnectPath = null,
@@ -354,6 +358,9 @@ export function ConfigList({
                 connectPending={pendingConnectPath != null && samePath(lead.path, pendingConnectPath)}
                 activeElsewhere={false}
                 ping={pings[lead.id]}
+                // Session uptime: only the lead card is ever connected → give it the live
+                // connect timestamp so it renders a ticking «HH:MM:SS» counter.
+                connectedSince={connectedSince}
                 existingNames={allNames}
                 // F13: stable per-card closures from the memoized handler map (see cardHandlers) so
                 // React.memo(ConfigCard) can actually skip an unchanged card on a ping tick.

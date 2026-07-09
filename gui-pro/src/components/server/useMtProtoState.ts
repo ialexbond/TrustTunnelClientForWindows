@@ -5,6 +5,18 @@ import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../../shared/utils/formatError";
 import { useConfirm } from "../../shared/ui/useConfirm";
 
+// 18-UAT: map a backend MTProto error code — which may carry a `|`-delimited payload, e.g.
+// "MTPROTO_PORT_BUSY|8443|nginx" — to a friendly localized message under
+// `server.service.mtproto.errors.<CODE>`. Falls back to the raw code so an unknown/new failure
+// is still visible rather than swallowed. (Previously the modal showed the raw
+// "TELEMT_DOWNLOAD_FAILED" token to the user.)
+export function mtprotoErrorText(translate: (key: string) => string, error: string): string {
+  const code = error.split("|")[0];
+  const key = `server.service.mtproto.errors.${code}`;
+  const translated = translate(key);
+  return translated === key ? error : translated;
+}
+
 // ═══════════════════════════════════════════════════════
 // Types mirroring Rust structs
 // ═══════════════════════════════════════════════════════
@@ -265,7 +277,10 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
         return;
       }
       setError(msg);
-      pushSuccess(t("server.service.mtproto.snack.install_error", { error: msg }), "error");
+      pushSuccess(
+        t("server.service.mtproto.snack.install_error", { error: mtprotoErrorText((k) => t(k), msg) }),
+        "error",
+      );
     }
   };
 

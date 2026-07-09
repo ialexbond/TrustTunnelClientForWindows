@@ -9,7 +9,7 @@ import { NumberInput, Skeleton } from "../../shared/ui";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
-import type { MtProtoState } from "./useMtProtoState";
+import { mtprotoErrorText, type MtProtoState } from "./useMtProtoState";
 
 /**
  * MtProtoModal — Phase 17 Plan 04 (D-4.1).
@@ -155,9 +155,31 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
 
   const installed = state.status?.installed ?? false;
 
+  // 18-UAT (point of no return): the install is cancelable ONLY up to — but not including —
+  // the `start_service` step. Once the telemt service is starting/started the proxy is committed
+  // and the backend no longer honors cancel (STEP 5/6 just finish an already-working proxy).
+  // `committing` = past that point → the «Отмена» button goes DISABLED (not hidden), same as the
+  // corner × (the app's canonical in-flight pattern). To remove the proxy afterward the user uses
+  // «Отключить/Удалить».
+  const startServiceIdx = state.steps.findIndex((s) => s.key === "start_service");
+  const committing =
+    state.installing && startServiceIdx >= 0 && state.currentStep >= startServiceIdx;
+
   // T-03: NEVER `if (!isOpen) return null` — Modal primitive owns 200ms exit animation
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" showCloseButton>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="md"
+      showCloseButton
+      // 18-UAT: keep the corner × VISIBLE but DISABLED during install — the app's canonical
+      // in-flight pattern (UserConfigModal's SSH download, UserModal submit). Backdrop-click +
+      // Escape are also gated so the window can't be silently abandoned while the backend install
+      // keeps running on the server.
+      closeButtonDisabled={state.installing}
+      closeOnBackdrop={!state.installing}
+      closeOnEscape={!state.installing}
+    >
       {/* Header — the corner × now comes from Modal (showCloseButton, 09-25);
           this row keeps only the icon + title above the content. */}
       <div className="flex items-center gap-2 mb-4">
@@ -259,13 +281,14 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             </div>
           )}
 
-          {/* Error state — show only the message; retry is folded into footer button */}
+          {/* Error state — show a friendly localized message (mapped from the backend code), not
+              the raw «TELEMT_DOWNLOAD_FAILED» token; retry is folded into the footer button. */}
           {!state.installing && state.error && (
             <p
               className="text-body-sm"
               style={{ color: "var(--color-status-error)" }}
             >
-              {state.error}
+              {mtprotoErrorText((k) => t(k), state.error)}
             </p>
           )}
         </div>
@@ -453,11 +476,15 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                 : t("server.service.mtproto.install")}
             </Button>
           )}
+          {/* «Отмена» stays VISIBLE for the whole install but goes DISABLED once past the point
+              of no return (start_service) — the proxy is up and cancel is no longer honored. Same
+              disable pattern as the corner ×; no separate label (18-UAT «отменяем, и не отменяет»
+              fix — the button never offers a cancel it cannot perform). */}
           {state.installing && (
             <Button
               variant="danger-outline"
               size="sm"
-              disabled={cancelling}
+              disabled={cancelling || committing}
               icon={cancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
               onClick={() => {
                 setCancelling(true);

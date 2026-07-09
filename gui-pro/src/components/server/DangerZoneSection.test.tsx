@@ -50,26 +50,25 @@ describe("DangerZoneSection", () => {
     ).toBeInTheDocument();
   });
 
-  it("clicking uninstall opens confirm dialog (via ConfirmDialogProvider)", async () => {
+  it("clicking uninstall opens the UninstallDialog component picker (UN-1, 18-06)", async () => {
     const state = makeState();
     render(<DangerZoneSection state={state} />);
     fireEvent.click(
       screen.getByRole("button", { name: new RegExp(i18n.t("server.danger.uninstall")) }),
     );
-    // Dialog is rendered by ConfirmDialogProvider (from renderWithProviders wrapper)
+    // The new component-selection dialog opens (title + restore-to-pre-install helper).
+    expect(await screen.findByText(i18n.t("server.uninstall.title"))).toBeInTheDocument();
     expect(
-      await screen.findByText(i18n.t("server.danger.confirm_uninstall_title")),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(i18n.t("server.danger.confirm_uninstall_message")),
+      screen.getByText(i18n.t("server.uninstall.description")),
     ).toBeInTheDocument();
   });
 
-  it("INSTALL-LOCK (16-12): confirming delete shows a loader on the confirm button while the uninstall runs, then invokes uninstall_server", async () => {
-    // Gate the uninstall invoke on a manual resolve so we can observe the
-    // in-flight loading state on the CONFIRM button (the destructive op runs
-    // through the confirm dialog's `action` hook — the modal stays open with a
-    // spinner and can't be interrupted mid-flight).
+  it("INSTALL-LOCK (18-06): confirming shows a loader on the dialog confirm button and invokes uninstall_server WITH the selection payload", async () => {
+    // Gate the uninstall invoke on a manual resolve so we can observe the in-flight
+    // loading state on the dialog's CONFIRM button (the destructive op runs inside
+    // UninstallDialog — the modal stays open with a spinner, can't be interrupted).
+    // Detection commands (security/mtproto/bbr/snapshot) return null → no optional
+    // components detected; user-configs is always offered.
     let resolveUninstall: (() => void) | undefined;
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd === "uninstall_server") {
@@ -77,28 +76,36 @@ describe("DangerZoneSection", () => {
           resolveUninstall = () => res();
         });
       }
-      return Promise.resolve(undefined);
+      return Promise.resolve(null);
     });
     const state = makeState();
     render(<DangerZoneSection state={state} />);
     fireEvent.click(
       screen.getByRole("button", { name: new RegExp(i18n.t("server.danger.uninstall")) }),
     );
-    // Click the danger confirm button in the dialog.
+    // Click the destructive confirm button in the dialog (exact name so it does not
+    // also match the «Удалить TrustTunnel» trigger button).
     const confirmBtn = await screen.findByRole("button", {
-      name: new RegExp(i18n.t("server.danger.confirm_delete_btn")),
+      name: i18n.t("server.uninstall.confirm"),
     });
     fireEvent.click(confirmBtn);
 
-    // While the uninstall is pending: the confirm button is disabled (loading) and
-    // the invoke was fired.
+    // While pending: uninstall_server was invoked WITH a selection payload, and the
+    // confirm button is disabled (loading-lock).
     await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("uninstall_server", state.sshParams);
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "uninstall_server",
+        expect.objectContaining({
+          host: state.sshParams.host,
+          // A per-component selection payload is sent (users are always removed with the
+          // protocol backend-side, so there is no userConfigs field — 18-UAT).
+          selection: expect.any(Object),
+        }),
+      );
     });
-    const dialogConfirm = screen.getByRole("button", {
-      name: new RegExp(i18n.t("server.danger.confirm_delete_btn")),
-    });
-    expect(dialogConfirm).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: i18n.t("server.uninstall.confirm") }),
+    ).toBeDisabled();
 
     // Complete the uninstall → dialog resolves, serverInfo cleared.
     resolveUninstall?.();

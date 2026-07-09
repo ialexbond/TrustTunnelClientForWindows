@@ -3,6 +3,7 @@ import { screen, fireEvent, waitFor } from "@testing-library/react";
 import MtProtoModalSource from "./MtProtoModal.tsx?raw";
 import i18n from "../../shared/i18n";
 import { MtProtoModal } from "./MtProtoModal";
+import { mtprotoErrorText } from "./useMtProtoState";
 import type { MtProtoState, MtProtoStatus, SshParams } from "./useMtProtoState";
 import { renderWithProviders as render } from "../../test/test-utils";
 
@@ -375,6 +376,51 @@ describe("MtProtoModal", () => {
     expect(
       screen.getByRole("button", { name: i18n.t("buttons.close") }),
     ).toBeInTheDocument();
+  });
+
+  // ─── 18-UAT: point of no return (cancel only before start_service) ───
+
+  it("18-UAT cancelable stage (before start_service): Cancel enabled, close × disabled", () => {
+    // currentStep 1 = download_binary → before start_service (idx 4): cancelable.
+    const state = mkState(null, { installing: true, currentStep: 1 });
+    render(<MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />);
+    expect(screen.getByTestId("mtproto-cancel-install-button")).toBeEnabled();
+    // The corner × stays VISIBLE but DISABLED during install (canonical in-flight pattern).
+    expect(screen.getByRole("button", { name: i18n.t("buttons.close") })).toBeDisabled();
+  });
+
+  it("18-UAT point of no return (start_service on): Cancel disabled, close × disabled", () => {
+    // currentStep 4 = start_service → the proxy is up, install is committed.
+    const state = mkState(null, { installing: true, currentStep: 4 });
+    render(<MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />);
+    // «Отмена» stays visible but goes disabled — no separate «finalizing» label.
+    expect(screen.getByTestId("mtproto-cancel-install-button")).toBeDisabled();
+    expect(screen.getByRole("button", { name: i18n.t("buttons.close") })).toBeDisabled();
+  });
+
+  // ─── 18-UAT: friendly error mapping ───
+
+  it("18-UAT mtprotoErrorText maps a known code to a friendly message, falls back to raw", () => {
+    const tr = (k: string) => i18n.t(k);
+    // A known code → the localized friendly text (not the raw token).
+    const friendly = mtprotoErrorText(tr, "TELEMT_DOWNLOAD_FAILED");
+    expect(friendly).not.toBe("TELEMT_DOWNLOAD_FAILED");
+    expect(friendly).toBe(i18n.t("server.service.mtproto.errors.TELEMT_DOWNLOAD_FAILED"));
+    // A `|`-payload code still maps on its leading token.
+    expect(mtprotoErrorText(tr, "MTPROTO_PORT_BUSY|8443|nginx")).toBe(
+      i18n.t("server.service.mtproto.errors.MTPROTO_PORT_BUSY"),
+    );
+    // An unknown/new code falls back to the raw string (never swallowed).
+    expect(mtprotoErrorText(tr, "SOME_BRAND_NEW_ERROR")).toBe("SOME_BRAND_NEW_ERROR");
+  });
+
+  it("18-UAT the modal shows the friendly download-failed text, not the raw code", () => {
+    const state = mkState(null, { error: "TELEMT_DOWNLOAD_FAILED" });
+    render(<MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />);
+    expect(
+      screen.getByText(i18n.t("server.service.mtproto.errors.TELEMT_DOWNLOAD_FAILED")),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("TELEMT_DOWNLOAD_FAILED")).not.toBeInTheDocument();
   });
 
   // When active, the stop control is variant=danger (solid red); when inactive
