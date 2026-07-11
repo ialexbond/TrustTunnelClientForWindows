@@ -129,6 +129,7 @@ pub fn run() {
             last_error: Arc::new(Mutex::new(None)),
             tray_notified: Arc::new(Mutex::new(false)),
             config_path: Arc::new(Mutex::new(None)),
+            pending_error_config_name: Arc::new(Mutex::new(None)),
             log_level: Arc::new(Mutex::new("info".to_string())),
             locale: Arc::new(Mutex::new("ru".to_string())),
             // Phase 17: benchmark cancel channel (None = no benchmark running)

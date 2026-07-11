@@ -169,4 +169,16 @@ describe("useConfigPingSource — F24/F26 freeze (no live probe while connected)
       expect(seeded).not.toHaveProperty(forbidden);
     }
   });
+
+  it("G-19-PING v2: getRetainedPing reads the live frozen band from the ref (null when absent)", () => {
+    // The D-05 revert reads A's honest last-known ping from THIS getter (a live ref read), NOT a
+    // `pings` snapshot a callback closed over, and NOT a fresh probe (which fails through the just-failed
+    // B's killswitch on real hardware → «—»). Disconnected direct probes populate the freeze cache.
+    const { result } = renderHook(() => useConfigPingSource("/cfg/a.toml", "disconnected"));
+    // A's + B's frozen bands come straight from the live direct readings (liveMap 70 / 85).
+    expect(result.current.getRetainedPing("/cfg/a.toml")).toBe(70);
+    expect(result.current.getRetainedPing("/cfg/b.toml")).toBe(85);
+    // A path with no cached band → null (the caller then falls back to a probe).
+    expect(result.current.getRetainedPing("/cfg/unknown.toml")).toBeNull();
+  });
 });

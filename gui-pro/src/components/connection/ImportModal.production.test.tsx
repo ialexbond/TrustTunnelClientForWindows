@@ -224,4 +224,108 @@ describe("ImportModal (production)", () => {
       expect(screen.getByRole("button", { name: new RegExp(L.tileLink) })).toBeEnabled();
     });
   });
+
+  // ─── Phase 19 (19-03): rich partial-import UX (D-09) ──────────────────────────
+  //
+  // A multi-file «Из файла» batch where SOME files fail must keep the result IN-MODAL: a warning
+  // banner with the pluralised ok count + the failed count, a list of ONLY the failed files each
+  // with a short reason, and a «Повторить» button that retries ONLY the failed items. An all-failed
+  // batch (ok===0) is a pure error (red banner, no success snackbar). RED until 19-03 Task 2 ports
+  // the story's rich partial block into ImportModal.tsx (today it renders one flat `partial_count`
+  // banner that discards per-file labels/reasons).
+  describe("Phase 19 — rich partial-import (D-09)", () => {
+    const reasonFile = i18n.t("connection.import.reason_invalid_file");
+    const retryLabel = i18n.t("connection.import.retry");
+
+    // A batch picker whose reads succeed for every path EXCEPT those in `failing` (a mutable Set so
+    // a later retry can flip a path to succeed). import_config_from_string always resolves a dest.
+    function mockBatch(paths: string[], failing: Set<string>) {
+      openMock.mockResolvedValueOnce(paths);
+      invokeMock.mockImplementation((cmd: string, args?: { path?: string }) => {
+        if (cmd === "read_config_file_for_import") {
+          return failing.has(args!.path!)
+            ? Promise.reject(new Error("read fail"))
+            : Promise.resolve("[endpoint]\nhostname='h'");
+        }
+        if (cmd === "import_config_from_string") return Promise.resolve("C:/app/imported.toml");
+        return Promise.resolve(null);
+      });
+    }
+
+    it("partial batch (ok>0) → WARNING banner + ONLY the failed files with their reason", async () => {
+      const user = userEvent.setup();
+      mockBatch(
+        ["C:/dl/ok.toml", "C:/dl/bad1.toml", "C:/dl/bad2.toml"],
+        new Set(["C:/dl/bad1.toml", "C:/dl/bad2.toml"]),
+      );
+      const { onClose } = setup();
+
+      await user.click(screen.getByRole("button", { name: new RegExp(L.tileFile) }));
+
+      // Warning banner (not error): variant is surfaced as data-variant, not asserted via CSS.
+      const banner = await screen.findByRole("alert");
+      expect(banner).toHaveAttribute("data-variant", "warning");
+      const okPlural = i18n.t("connection.import.config_count", { count: 1 });
+      expect(banner).toHaveTextContent(
+        i18n.t("connection.import.partial_ok_failed", { ok_plural: okPlural, failed: 2 }),
+      );
+      // ONLY the failed basenames are listed (the successful one is already committed to the list).
+      expect(screen.getByText("bad1.toml")).toBeInTheDocument();
+      expect(screen.getByText("bad2.toml")).toBeInTheDocument();
+      expect(screen.queryByText("ok.toml")).not.toBeInTheDocument();
+      expect(screen.getAllByText(reasonFile)).toHaveLength(2);
+      // The result STAYS in-modal — never a flyaway toast.
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("all-failed batch (ok===0) → RED error banner and NO success snackbar", async () => {
+      const user = userEvent.setup();
+      mockBatch(
+        ["C:/dl/bad1.toml", "C:/dl/bad2.toml"],
+        new Set(["C:/dl/bad1.toml", "C:/dl/bad2.toml"]),
+      );
+      const { onClose, onImported } = setup();
+
+      await user.click(screen.getByRole("button", { name: new RegExp(L.tileFile) }));
+
+      const banner = await screen.findByRole("alert");
+      expect(banner).toHaveAttribute("data-variant", "error");
+      expect(banner).toHaveTextContent(i18n.t("connection.import.all_failed", { total: 2 }));
+      // Nothing imported → no onImported, modal stays open, no success snackbar fired.
+      expect(onImported).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(
+        screen.queryByText(i18n.t("connection.snackbar.config_added")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("«Повторить» retries ONLY the failed items; all-success then closes + reports", async () => {
+      const user = userEvent.setup();
+      const failing = new Set(["C:/dl/bad1.toml", "C:/dl/bad2.toml"]);
+      mockBatch(["C:/dl/ok.toml", "C:/dl/bad1.toml", "C:/dl/bad2.toml"], failing);
+      const { onClose, onImported } = setup();
+
+      await user.click(screen.getByRole("button", { name: new RegExp(L.tileFile) }));
+      await screen.findByText("bad1.toml");
+
+      // First batch imported ONLY the ok file.
+      const firstImports = invokeMock.mock.calls.filter((c) => c[0] === "import_config_from_string");
+      expect(firstImports).toHaveLength(1);
+
+      // Let the two previously-failed items succeed on retry.
+      failing.clear();
+      invokeMock.mockClear();
+      await user.click(screen.getByRole("button", { name: retryLabel }));
+
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      // Retry re-ran ONLY the two failed paths — never the already-imported ok.toml.
+      const retryReads = invokeMock.mock.calls
+        .filter((c) => c[0] === "read_config_file_for_import")
+        .map((c) => (c[1] as { path: string }).path)
+        .sort();
+      expect(retryReads).toEqual(["C:/dl/bad1.toml", "C:/dl/bad2.toml"]);
+      expect(onImported).toHaveBeenCalled();
+    });
+  });
 });

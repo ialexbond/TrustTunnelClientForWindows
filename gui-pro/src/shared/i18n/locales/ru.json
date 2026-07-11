@@ -299,7 +299,16 @@
       "link_supported_hint": "Также поддерживаются ссылки типа trusttunnel://",
       "error_invalid_file": "Не удалось прочитать файл. Проверьте правильность конфига.",
       "error_invalid_link": "Ссылка повреждена или не является ссылкой tt:// или trusttunnel://.",
-      "partial_count": "Импортировано {{ok}} из {{total}}"
+      "partial_ok_failed": "Добавлено {{ok_plural}}, не удалось — {{failed}}.",
+      "all_failed": "Не удалось добавить ни одного конфига из {{total}}.",
+      "reason_invalid_file": "не удалось прочитать файл",
+      "reason_invalid_link": "повреждённая ссылка",
+      "retry": "Повторить",
+      "config_count_one": "{{count}} конфиг",
+      "config_count_few": "{{count}} конфига",
+      "config_count_many": "{{count}} конфигов",
+      "config_count_other": "{{count}} конфига",
+      "config_added_batch": "Добавлено {{plural}}"
     },
     "list": {
       "add": "Добавить конфиг"

@@ -3,6 +3,10 @@ import { screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+// CR-01 (19-fix): the picker-door partial-import App integration test drives the real OS file
+// picker seam (`open` from plugin-dialog, mocked globally in tauri-mock.ts) to prove a picker
+// batch that partly fails STAYS in-modal instead of closing (the pre-fix defect).
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import i18n from "./shared/i18n";
 import App from "./App";
 import { renderWithProviders as render } from "./test/test-utils";
@@ -458,6 +462,250 @@ describe("App", () => {
     });
   });
 
+  // ─── Drag-drop config-partial → rich in-modal partial UX (19-04, Q3/D-09) ───
+  // The global document-level drop handler (useFileDrop) used to fire a per-file flyaway ERROR
+  // toast for each failed config + a success snackbar for the ok count — a SEPARATE surface from
+  // the file-picker path. 19-04 unifies it: a config batch that partly fails now opens the SAME
+  // rich in-modal ImportModal partial view (failed list + «Повторить») that the picker path shows.
+  describe("drag-drop config-partial → rich in-modal partial UX (19-04, Q3/D-09)", () => {
+    it("opens the ImportModal seeded into its partial view (failed list + «Повторить») when a dropped config batch partly fails", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "read_client_config") return null;
+        if (cmd === "get_auto_connect") return false;
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "import_dropped_content") {
+          // bad.toml is a malformed config → import_dropped_content rejects; good.toml imports.
+          if ((args as { fileName?: string })?.fileName === "bad.toml") {
+            throw new Error("import failed");
+          }
+          return { file_type: "config", config_path: "/path/good.toml" };
+        }
+        if (cmd === "add_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
+      });
+
+      const good = new File(["[endpoint]"], "good.toml", { type: "" });
+      const bad = new File(["broken"], "bad.toml", { type: "" });
+
+      await act(async () => {
+        const event = new Event("drop", { bubbles: true }) as DragEvent;
+        Object.defineProperty(event, "dataTransfer", { value: { files: [good, bad] } });
+        Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+        Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
+        document.dispatchEvent(event);
+      });
+
+      // The SAME rich in-modal partial UX as the picker path opens — its accessible dialog name is
+      // «Добавить конфиг», the failed file is listed by NAME only (D-29), and «Повторить» is offered.
+      await waitFor(() => {
+        expect(
+          screen.getByRole("dialog", { name: i18n.t("connection.import.title") }),
+        ).toBeInTheDocument();
+      });
+      expect(screen.getByText("bad.toml")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: i18n.t("connection.import.retry") }),
+      ).toBeInTheDocument();
+    });
+
+    // WR-05 (19-fix): a SECOND config-partial drop while the modal already shows a partial must NOT
+    // silently discard the first batch's retained failed items — it MERGES into the existing partial
+    // (both failed files stay listed with their retry closures). Pre-fix the seed effect replaced
+    // partial/retryItems, losing the first drop's failures.
+    it("merges a second config-partial drop into the open partial view instead of wiping the first", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "read_client_config") return null;
+        if (cmd === "get_auto_connect") return false;
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "import_dropped_content") {
+          const name = (args as { fileName?: string })?.fileName;
+          if (name === "bad1.toml" || name === "bad2.toml") throw new Error("import failed");
+          return { file_type: "config", config_path: `/path/${name}` };
+        }
+        if (cmd === "add_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
+      });
+
+      const dropFiles = (files: File[]) => {
+        const event = new Event("drop", { bubbles: true }) as DragEvent;
+        Object.defineProperty(event, "dataTransfer", { value: { files } });
+        Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+        Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
+        document.dispatchEvent(event);
+      };
+
+      // First drop: good1 ok, bad1 fails → partial view opens with bad1 listed.
+      await act(async () => {
+        dropFiles([
+          new File(["[endpoint]"], "good1.toml", { type: "" }),
+          new File(["broken"], "bad1.toml", { type: "" }),
+        ]);
+      });
+      await waitFor(() => {
+        expect(screen.getByText("bad1.toml")).toBeInTheDocument();
+      });
+
+      // Second drop while the partial is open: good2 ok, bad2 fails → MERGES (both bad files listed).
+      await act(async () => {
+        dropFiles([
+          new File(["[endpoint]"], "good2.toml", { type: "" }),
+          new File(["broken"], "bad2.toml", { type: "" }),
+        ]);
+      });
+      await waitFor(() => {
+        expect(screen.getByText("bad2.toml")).toBeInTheDocument();
+      });
+      // The first drop's failed item is STILL listed — not wiped by the second seed.
+      expect(screen.getByText("bad1.toml")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Picker-door config-partial → rich in-modal partial UX (CR-01, 19-fix) ───
+  // REGRESSION GUARD for CR-01: before the fix, App's `onImported` prop did
+  // `setImportOpen(false)`, so a FILE-PICKER batch that partly failed closed the modal in the
+  // same render as `setPartial(...)` — the rich partial view (D-09 headline deliverable) was
+  // unreachable through the picker door and stale partial state leaked into the next open. Only
+  // the drag-drop door (covered above) promoted via a non-closing callback, which is why the bug
+  // hid. The fix makes `onImported` PROMOTE-ONLY; the modal decides when to close (it calls
+  // onClose itself only on a FULL-success batch). These tests drive the picker end-to-end.
+  describe("picker-door config-partial → rich in-modal partial UX (CR-01, 19-fix)", () => {
+    it("keeps the modal open on a picker batch with 1 ok + 1 failing file — failed list + «Повторить», no snackbar", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "read_client_config") return null;
+        if (cmd === "get_auto_connect") return false;
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "read_config_file_for_import") return "[endpoint]";
+        if (cmd === "import_config_from_string") {
+          // bad.toml is malformed → the backend import rejects; good.toml imports fine.
+          if ((args as { originalFileName?: string })?.originalFileName === "bad.toml") {
+            throw new Error("import failed");
+          }
+          return "/path/good.toml";
+        }
+        return null;
+      });
+      // The OS multi-select picker hands back both paths.
+      vi.mocked(openDialog).mockResolvedValue(["C:/dl/good.toml", "C:/dl/bad.toml"]);
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
+      });
+      // Open the ImportModal through the panel's import affordance (the picker door).
+      await act(async () => {
+        connectionPanelProps.onImport();
+      });
+      // Click the «Из файла» tile → OS picker → batch import.
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: new RegExp(i18n.t("connection.import.tile_file")) }),
+        );
+      });
+
+      // The modal STAYS OPEN in its partial view (the pre-fix defect closed it here).
+      await waitFor(() => {
+        expect(
+          screen.getByRole("dialog", { name: i18n.t("connection.import.title") }),
+        ).toBeInTheDocument();
+      });
+      // Only the FAILED file is listed (by NAME only, D-29); «Повторить» is offered.
+      expect(screen.getByText("bad.toml")).toBeInTheDocument();
+      expect(screen.queryByText("good.toml")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: i18n.t("connection.import.retry") }),
+      ).toBeInTheDocument();
+      // A partial batch fires NO success snackbar (feedback stays in-modal, D-09).
+      expect(
+        screen.queryByText(i18n.t("connection.snackbar.config_added")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("keeps the modal open when a «Повторить» is again partial", async () => {
+      // First batch: good ok, bad1 + bad2 fail → partial (ok=1, 2 failed). Retry re-runs ONLY the
+      // failed items; bad1 now succeeds (2nd attempt) but bad2 still fails → the retry is AGAIN
+      // partial, so the modal must stay open with bad2 still listed + «Повторить».
+      let bad1Attempts = 0;
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "read_client_config") return null;
+        if (cmd === "get_auto_connect") return false;
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "read_config_file_for_import") return "[endpoint]";
+        if (cmd === "import_config_from_string") {
+          const name = (args as { originalFileName?: string })?.originalFileName;
+          if (name === "bad1.toml") {
+            bad1Attempts++;
+            if (bad1Attempts >= 2) return "/path/bad1.toml"; // recovers on retry
+            throw new Error("import failed");
+          }
+          if (name === "bad2.toml") throw new Error("import failed"); // never recovers
+          return "/path/good.toml";
+        }
+        return null;
+      });
+      vi.mocked(openDialog).mockResolvedValue([
+        "C:/dl/good.toml",
+        "C:/dl/bad1.toml",
+        "C:/dl/bad2.toml",
+      ]);
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
+      });
+      await act(async () => {
+        connectionPanelProps.onImport();
+      });
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: new RegExp(i18n.t("connection.import.tile_file")) }),
+        );
+      });
+
+      // First partial: both bad files listed.
+      await waitFor(() => {
+        expect(screen.getByText("bad1.toml")).toBeInTheDocument();
+      });
+      expect(screen.getByText("bad2.toml")).toBeInTheDocument();
+
+      // Retry — re-runs only the two failed items; bad1 recovers, bad2 still fails.
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: i18n.t("connection.import.retry") }),
+        );
+      });
+
+      // Still partial → modal stays open, bad2 remains, bad1 dropped off the failed list.
+      await waitFor(() => {
+        expect(screen.queryByText("bad1.toml")).not.toBeInTheDocument();
+      });
+      expect(
+        screen.getByRole("dialog", { name: i18n.t("connection.import.title") }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("bad2.toml")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: i18n.t("connection.import.retry") }),
+      ).toBeInTheDocument();
+    });
+  });
+
   // ─── Deep-link config import (06-18 C-22 / D-14) ───
   // A clicked tt:// / trusttunnel:// link funnels into a `deep-link-url` event;
   // App routes to the Connection no-config import surface and pre-fills the modal
@@ -776,6 +1024,75 @@ describe("App", () => {
     // F16: the core's fixed English phrase is localized on the StatusPanel banner (ru locale here),
     // never leaked raw — proves localizeError maps the core strings, not just the ASCII reason codes.
     expect(statusPanelProps.error).toBe(i18n.t("errors.connection_refused"));
+  });
+
+  // ─── Control Panel tab connection-error surface (Phase 19, 19-01 Bug 1 / D-01/D-02) ───
+  //
+  // Verified gap: showStatusPanel = hasConfig && activeTab !== "control" (App.tsx) hid ALL in-app
+  // status — including the error banner — on the Control Panel tab; with the window open the desktop
+  // plate is ALSO suppressed, so a live connection error was invisible in-app on the control tab
+  // (only the tray went red). D-01/D-02 (Q1 = FE route): the in-app connection-error surface (the
+  // StatusPanel error banner, whose × routes through the existing handleDismiss → clear_vpn_error →
+  // gray tray) must render on the control tab too when an error is LIVE — while a NON-error status
+  // still shows no panel there (only the error case bypasses the tab gate; other tabs unchanged).
+  describe("Control Panel tab connection-error surface (Phase 19 — D-01/D-02)", () => {
+    async function renderWithConfigOnControlTab() {
+      localStorage.setItem("tt_config_path", "/config.json");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+      await act(async () => {
+        render(<App />);
+      });
+      // Make the Control Panel tab the active one (that is where the gap lives).
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Панель управления/ }));
+      });
+    }
+
+    it("renders the in-app error surface on the Control Panel tab when a connection error is live", async () => {
+      await renderWithConfigOnControlTab();
+      // Idle / non-error on the control tab → no status panel yet.
+      expect(screen.queryByTestId("status-panel")).not.toBeInTheDocument();
+
+      // A live connection error arrives.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error", error: "Server refused the connection" });
+      });
+
+      // The in-app error surface (StatusPanel) is now visible ON the control tab, carrying the
+      // localized error — its × acknowledges through the SAME StatusPanel.handleDismiss path.
+      expect(screen.getByTestId("status-panel")).toBeInTheDocument();
+      expect(statusPanelProps.status).toBe("error");
+      expect(statusPanelProps.error).toBe(i18n.t("errors.connection_refused"));
+    });
+
+    it("shows NO status panel on the Control Panel tab for a non-error status (unchanged, D-02)", async () => {
+      await renderWithConfigOnControlTab();
+      // A connected (non-error) status must NOT drag the full status panel onto the control tab —
+      // only the error case bypasses the control-tab gate.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+      expect(screen.queryByTestId("status-panel")).not.toBeInTheDocument();
+    });
+
+    it("removes the control-tab error surface once the error is acknowledged (status leaves error)", async () => {
+      await renderWithConfigOnControlTab();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error", error: "Server refused the connection" });
+      });
+      expect(screen.getByTestId("status-panel")).toBeInTheDocument();
+
+      // Acknowledge → status moves off Error to Disconnected (the gray-tray transition); the
+      // error-only surface disappears from the control tab (it is gated on the live error).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+      });
+      expect(screen.queryByTestId("status-panel")).not.toBeInTheDocument();
+    });
   });
 
   it("vpn-status recovering → disconnected resolves to Disconnected (terminal NoConfig — F0)", async () => {
@@ -2940,6 +3257,55 @@ describe("App", () => {
       // Exactly ONE vpn_disconnect (the initial teardown). A second would mean the error-edge revert
       // ran a spurious teardown (the R2-2 stale-statusRef regression).
       expect(disconnectCalls).toBe(1);
+    });
+
+    // G-19-PING (owner UAT): a failed switch that REVERTS to A must push A's connect-time ping, so A's
+    // terminal «Подключено» plate + active card show a real number — NOT «—» (the "восстанавливает
+    // подключение к предыдущему конфигу и не отображает ping"). revertToPrevious was the last path reaching
+    // vpn_connect without a ping push: switchTo's own seeded push lives INSIDE its teardown block, which the
+    // common skipTeardown (error-edge) revert bypasses. Assert the switch+revert pushes set_pending_connect_ping
+    // TWICE — once for the forward switch to B, once for the revert to A. Before the fix the revert pushed none
+    // (only the forward B push), so A rendered «—».
+    it("G-19-PING: an error-edge revert pushes A's connect-time ping (not «—»)", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      let pingPushes = 0;
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd) => {
+          if (cmd === "set_pending_connect_ping") pingPushes += 1;
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      // Snapshot AFTER the initial connect settles, so only the switch+revert pushes are counted.
+      const before = pingPushes;
+
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" }); // A→B teardown settles → forward B push
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "error", error: "sidecar-exit" }); // B dies → revert to A → A push
+        await switchPromise;
+      });
+
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_A);
+      // TWO pushes since the switch began: the forward switch to B AND the revert to A. Before the fix
+      // the revert reconnected A without a push (only the forward B push landed) → A's plate showed «—».
+      expect(pingPushes - before).toBeGreaterThanOrEqual(2);
     });
 
     // FAB-02 + F-1 (Fable-5) status-aware backstop: B spawns but NEVER reaches connected AND never

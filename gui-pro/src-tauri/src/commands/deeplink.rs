@@ -166,6 +166,10 @@ pub async fn import_config_from_string(
     // one (the country-code prefix lives only in the filename). `None` for clipboard/deeplink
     // (no filename) → fall back to the content-derived branded stem (unchanged behaviour).
     original_file_name: Option<String>,
+    // Phase 19 UAT: best-effort country code so a content-derived import (link/clipboard, which has NO
+    // source filename) gets the UNIFIED «[<CC>_]TrustTunnel_<login>.toml» name every other add-path
+    // uses. Usually `None` from the FE → the backend derives it via GeoIP of the endpoint IP below.
+    country_code: Option<String>,
 ) -> Result<String, String> {
     // WR-06: parsing as TOML is NOT enough — the clipboard import path is
     // UNTRUSTED, and any valid-TOML paste would otherwise be written verbatim as
@@ -182,6 +186,24 @@ pub async fn import_config_from_string(
 
     use crate::commands::manifest;
 
+    // Phase 19 UAT: unify the imported .toml filename with «[<CC>_]TrustTunnel_<login>». Only the
+    // content-derived path (no source filename) lacked the country prefix. Derive it BEST-EFFORT via
+    // GeoIP of the endpoint's REAL IP (addresses[0]) — the same source deploy/Users feed into the
+    // branded name — OUTSIDE the manifest lock. A provided country_code wins; a source filename or a
+    // GeoIP failure → None → unchanged behaviour. D-29: only the endpoint host is sent to GeoIP.
+    let country: Option<String> = match (&country_code, &original_file_name) {
+        (Some(c), _) => Some(c.clone()),
+        (None, None) => match manifest::geoip_host_from_content(&content) {
+            Some(host) => crate::commands::geoip::get_server_geoip(host)
+                .await
+                .ok()
+                .map(|g| g.country_code)
+                .filter(|c| !c.is_empty()),
+            None => None,
+        },
+        _ => None, // a source filename is used verbatim (already branded) — no GeoIP needed
+    };
+
     // PP-2 (16-PERF-AUDIT §m-2): run the ENTIRE import — ghost-prune → duplicate decision →
     // unique-name allocation → atomic `.toml` write → manifest append — under ONE hold of
     // MANIFEST_LOCK inside `import_config_under_lock`. The pre-PP-2 path made the duplicate DECISION
@@ -190,7 +212,7 @@ pub async fn import_config_from_string(
     // held lock closes that TOCTOU window: the second caller checks only after the first's write is
     // committed, so it lands as a «(копия)». D-13 «add as copy» + atomic write (PP-1) preserved.
     let (dest_str, was_copy) =
-        manifest::import_config_under_lock(&config_dir, &content, original_file_name.as_deref())?;
+        manifest::import_config_under_lock(&config_dir, &content, original_file_name.as_deref(), country.as_deref())?;
 
     // D-29: log ONLY the source label + destination path — NEVER `content` (it carries the user's
     // host/username/secret). The copy-vs-original distinction is neutral metadata, safe to log.
@@ -210,7 +232,7 @@ pub async fn import_config_from_string(
 /// section.
 #[cfg(test)]
 fn import_under_lock(dir: &std::path::Path, content: &str) -> Result<(String, bool), String> {
-    crate::commands::manifest::import_config_under_lock(dir, content, None)
+    crate::commands::manifest::import_config_under_lock(dir, content, None, None)
 }
 
 #[cfg(test)]
@@ -377,7 +399,7 @@ mod tests {
     #[tokio::test]
     async fn import_rejects_valid_toml_without_endpoint() {
         let blob = "title = \"random\"\n[whatever]\nx = 1\n".to_string();
-        let result = import_config_from_string(blob, "clipboard-toml".into(), None).await;
+        let result = import_config_from_string(blob, "clipboard-toml".into(), None, None).await;
         assert!(
             result.is_err(),
             "valid TOML without an [endpoint] table must be rejected at import"
@@ -429,13 +451,13 @@ mod tests {
         let b = sample("Netherlands", "nl.example.com", "user-b", "SECRET-B");
 
         // First import: no dup → unique file + append.
-        let stem_a = manifest::import_stem_from_content(&a);
+        let stem_a = manifest::import_stem_from_content(&a, None);
         let dest_a = manifest::unique_import_path(&dir, &stem_a);
         std::fs::write(&dest_a, &a).unwrap();
         manifest::append_config_to_manifest(&dir, &dest_a.to_string_lossy()).unwrap();
 
         // Second import: a DIFFERENT host+user → unique file + append (no overwrite).
-        let stem_b = manifest::import_stem_from_content(&b);
+        let stem_b = manifest::import_stem_from_content(&b, None);
         let dest_b = manifest::unique_import_path(&dir, &stem_b);
         std::fs::write(&dest_b, &b).unwrap();
         manifest::append_config_to_manifest(&dir, &dest_b.to_string_lossy()).unwrap();
@@ -456,7 +478,7 @@ mod tests {
         let dir = tmpdir();
         let first = sample("First", "dup.example.com", "same-user", "SECRET-1");
 
-        let stem = manifest::import_stem_from_content(&first);
+        let stem = manifest::import_stem_from_content(&first, None);
         let dest = manifest::unique_import_path(&dir, &stem);
         std::fs::write(&dest, &first).unwrap();
         manifest::append_config_to_manifest(&dir, &dest.to_string_lossy()).unwrap();

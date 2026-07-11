@@ -753,6 +753,22 @@ pub fn migrate_to_manifest(
     Ok(manifest)
 }
 
+/// Lexical, case-insensitive path equality (Windows) — the delete path's FALLBACK confinement check
+/// when the canonical V12 validator drifts (junction/subst/OneDrive-redirect of the portable folder).
+/// Strips the `\\?\` verbatim prefix and normalizes separators/trailing slash/case so a canonical form
+/// and a plain form of the SAME directory compare equal. Used only as a belt for the delete
+/// confinement (never to widen where a file may be written).
+fn same_dir_lexical(a: &Path, b: &Path) -> bool {
+    fn norm(p: &Path) -> String {
+        p.to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    }
+    norm(a) == norm(b)
+}
+
 /// Canonicalize a path, falling back to the path itself if canonicalize fails (e.g. the
 /// file vanished between scan and read). Used only for dedup comparison.
 fn canonical_or_self(p: &Path) -> std::path::PathBuf {
@@ -957,7 +973,100 @@ pub fn migrate_configs(legacy_active_path: Option<String>) -> Result<Vec<ConfigS
     let _guard = lock_manifest();
     let dir = portable_data_dir();
     migrate_to_manifest(&dir, legacy_active_path.as_deref())?;
-    list_configs()
+    // We already hold the lock and migration just reconciled the folder — read via the lock-free
+    // core, NOT `list_configs()` (which now takes the lock itself for its folder reconcile and would
+    // deadlock re-entrantly here).
+    list_configs_in_dir(&dir)
+}
+
+/// Phase 19 UAT (owner model — "the folder is the source of truth"): APPEND to the manifest any valid
+/// config `.toml` in `dir` that is not already tracked (dedup by canonical path). Mirrors
+/// `migrate_to_manifest`'s scan + `looks_like_config` predicate + `derive_name`, but is APPEND-ONLY
+/// (never reorders/renames/deletes an existing entry — P11-02) and runs on every list rather than once.
+/// This makes a config file that landed in the folder via a manifest-BYPASSING add-path (protocol
+/// deploy; and, before their own fixes, Users-tab download staging / Settings file-browse) VISIBLE in
+/// the app AND deletable in-app — the two things a manifest-only list + a manifest-only delete could
+/// never do. Returns true if anything was adopted (so the caller persists). D-29: `derive_name` reads
+/// only the display name, never the password.
+fn adopt_orphans_in_dir(dir: &Path, manifest: &mut Manifest) -> bool {
+    let mut seen: Vec<std::path::PathBuf> = manifest
+        .configs
+        .iter()
+        .map(|e| canonical_or_self(Path::new(&e.path)))
+        .collect();
+    let mut found: Vec<(std::path::PathBuf, String)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            // Only *.toml config files, case-INSENSITIVELY (folder-as-truth: `config.TOML` counts
+            // too, matching the fs-watcher). Cargo.toml is excluded; the `<name>.toml.tmp` atomic-write
+            // temp and `<config>.toml.recovered` sidecars have a DIFFERENT extension and are skipped.
+            let is_toml = p
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|x| x.eq_ignore_ascii_case("toml"))
+                .unwrap_or(false);
+            if !is_toml || p.file_name().and_then(|s| s.to_str()) == Some("Cargo.toml") {
+                continue;
+            }
+            // Dedup by canonical path BEFORE reading the file — an already-tracked path needs no read,
+            // so a steady-state list does zero extra file reads.
+            let canon = canonical_or_self(&p);
+            if seen.iter().any(|s| s == &canon) {
+                continue;
+            }
+            // `looks_like_config` gates on the `[endpoint]`/`[listener]` predicate so a stray
+            // non-config .toml is never adopted.
+            if let Ok(content) = std::fs::read_to_string(&p) {
+                if looks_like_config(&content) {
+                    found.push((p, content));
+                    seen.push(canon); // guard against re-adopting the same canonical path in this scan
+                }
+            }
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    let base_order: u32 = manifest
+        .configs
+        .iter()
+        .map(|e| e.order)
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+    let adopted = !found.is_empty();
+    // Derive each adopted config's order from the enumerate() index (base + i), NOT a hand-incremented
+    // counter: the newer CI clippy toolchain (rust 1.97) denies `clippy::explicit_counter_loop` on a
+    // manual `next_order += 1` — a toolchain-drift lint the local clippy did not yet flag.
+    for (i, (p, content)) in found.into_iter().enumerate() {
+        let name = derive_name(&content, &p);
+        manifest.configs.push(ConfigEntry {
+            id: id_from_path(&p),
+            name,
+            path: p.to_string_lossy().to_string(),
+            order: base_order + i as u32,
+            last_used: false,
+            copy: false, // an adopted orphan is a plain config, never a deliberate copy
+        });
+    }
+    adopted
+}
+
+/// Phase 19 UAT (owner model): reconcile the folder ⇄ manifest before every `list_configs` read so
+/// the app view always mirrors the folder both ways: PRUNE entries whose `.toml` vanished from the
+/// folder (file gone → card gone) and ADOPT valid config `.toml`s the folder has but the manifest
+/// lacks (file present → card present). Takes the manifest lock and persists only when something
+/// changed; best-effort (a failed persist just re-reconciles on the next list). MUST NOT be called
+/// while already holding the lock (it locks itself) — `migrate_configs` uses `list_configs_in_dir`.
+fn reconcile_folder_with_manifest(dir: &Path) {
+    let _guard = lock_manifest();
+    let Ok(mut manifest) = read_manifest(dir) else {
+        return;
+    };
+    let pruned = prune_missing(&mut manifest);
+    let adopted = adopt_orphans_in_dir(dir, &mut manifest);
+    if pruned || adopted {
+        let _ = write_manifest_atomic(dir, &manifest);
+    }
 }
 
 /// Return the manifest entries as non-secret summaries (id/name/host/user/path +
@@ -965,7 +1074,11 @@ pub fn migrate_configs(legacy_active_path: Option<String>) -> Result<Vec<ConfigS
 /// the manifest stores NO password. The last-used entry is surfaced first.
 #[tauri::command]
 pub fn list_configs() -> Result<Vec<ConfigSummary>, String> {
-    list_configs_in_dir(&portable_data_dir())
+    let dir = portable_data_dir();
+    // Folder-as-truth: adopt any orphaned config .toml + prune vanished files BEFORE the read, so a
+    // file in the folder always shows and a file removed from the folder always disappears.
+    reconcile_folder_with_manifest(&dir);
+    list_configs_in_dir(&dir)
 }
 
 /// Testable core of `list_configs` against an explicit dir. NOTE: this does NOT take
@@ -1456,13 +1569,32 @@ fn delete_config_in_dir(dir: &Path, id: &str) -> Result<(), String> {
     let mut first_err: Option<String> = None;
     let mut reinsert: Vec<(usize, ConfigEntry)> = Vec::new();
     for (pos, entry) in &removed {
-        if validate_path_in_dir(&entry.path, dir).is_ok() {
-            if let Err(e) = std::fs::remove_file(&entry.path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    reinsert.push((*pos, entry.clone()));
-                    if first_err.is_none() {
-                        first_err = Some(format!("Failed to delete config file: {e}"));
-                    }
+        // Confinement before removal (never delete outside the data dir — D-06). Prefer the canonical
+        // V12 validator; FALL BACK to a lexical parent-dir check when canonicalize DRIFTS
+        // (junction/subst/OneDrive-redirect of the portable folder). Phase 19 UAT: the old code
+        // SILENTLY skipped remove_file on a validate miss — the entry was already dropped from the
+        // manifest, so the card vanished from the app while the `.toml` stayed in the folder forever (a
+        // UI-only removal, the "не удаляется из папки" report). Now a validate-miss on a file
+        // still lexically inside the data dir is STILL removed, and a path confined by NEITHER check is
+        // treated as a delete FAILURE (re-insert + surface the error) — never a silent orphan.
+        let confined = validate_path_in_dir(&entry.path, dir).is_ok()
+            || Path::new(&entry.path)
+                .parent()
+                .map(|par| same_dir_lexical(par, dir))
+                .unwrap_or(false);
+        if !confined {
+            reinsert.push((*pos, entry.clone()));
+            if first_err.is_none() {
+                first_err =
+                    Some("Failed to delete config file: path is outside the app folder".into());
+            }
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(&entry.path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                reinsert.push((*pos, entry.clone()));
+                if first_err.is_none() {
+                    first_err = Some(format!("Failed to delete config file: {e}"));
                 }
             }
         }
@@ -1725,11 +1857,51 @@ pub fn host_user_from_content(content: &str) -> (String, String) {
     (host, user)
 }
 
+/// Phase 19 UAT: extract the endpoint's REAL IP/host for a GeoIP lookup from config CONTENT —
+/// prefer `endpoint.addresses[0]` (the real `IP:port`, port stripped) over `endpoint.hostname`,
+/// which is often a self-signed SNI like `trusttunnel.local` that GeoIP cannot resolve. Used to
+/// brand a link/clipboard import's filename with the country prefix like every other add-path.
+/// `None` when neither is usable. D-29: never reads the password.
+pub fn geoip_host_from_content(content: &str) -> Option<String> {
+    let v = toml::from_str::<toml::Value>(content).ok()?;
+    let ep = v.get("endpoint")?.as_table()?;
+    // addresses = ["203.0.113.200:443", …] → first entry, strip the trailing :port (and IPv6 [] ).
+    if let Some(addr) = ep
+        .get("addresses")
+        .and_then(|a| a.as_array())
+        .and_then(|a| a.first())
+        .and_then(|x| x.as_str())
+    {
+        let host = addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(addr).trim();
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        if !host.is_empty() {
+            return Some(host.to_string());
+        }
+    }
+    // Fallback: the SNI hostname (GeoIP best-effort — may not resolve).
+    ep.get("hostname")
+        .and_then(|h| h.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Phase 19 UAT: the country-prefix rule shared by ALL add-paths — an optional 2-ASCII-letter code,
+/// uppercased, yields `<CC>_`, anything else yields `""`. Mirrors `client_config_filename` /
+/// `buildConfigFileName` so a link/clipboard import brands the same way as deploy / Users-tab.
+fn country_prefix(country: Option<&str>) -> String {
+    match country {
+        Some(c) if c.len() == 2 && c.chars().all(|ch| ch.is_ascii_alphabetic()) => {
+            format!("{}_", c.to_ascii_uppercase())
+        }
+        _ => String::new(),
+    }
+}
+
 /// Derive a filesystem-safe stem for an imported config from its content: TOML `name` →
 /// else `username` → else `config`. Slugified so the import filename is branded + readable
 /// (e.g. a config named «Германия» for user `swift-fox` → `swift-fox`/`config`). NEVER
 /// reads the password (D-29). Used by the import write path to brand the unique filename.
-pub fn import_stem_from_content(content: &str) -> String {
+pub fn import_stem_from_content(content: &str, country: Option<&str>) -> String {
     // user is the fallback stem when there is no top-level `name` (host is the dup key, not
     // the filename — D-14 naming order: name → username).
     let (_host, user) = host_user_from_content(content);
@@ -1756,7 +1928,11 @@ pub fn import_stem_from_content(content: &str) -> String {
     if slug == "config" {
         "config".to_string()
     } else {
-        format!("TrustTunnel_{slug}")
+        // Phase 19 UAT: UNIFY with the deploy/Users branded name «[<CC>_]TrustTunnel_<slug>» — prepend
+        // the country prefix (best-effort, from a GeoIP of the endpoint IP) so a link/clipboard import
+        // matches every other add-path. The prefix lives ONLY in the filename (never in the TOML), so
+        // the content-derived path used to drop it.
+        format!("{}TrustTunnel_{slug}", country_prefix(country))
     }
 }
 
@@ -1852,6 +2028,10 @@ pub fn import_config_under_lock(
     dir: &Path,
     content: &str,
     original_file_name: Option<&str>,
+    // Phase 19 UAT: best-effort country code (GeoIP of the endpoint IP, derived by the async caller
+    // OUTSIDE this lock) so a content-derived import filename gets the unified «[<CC>_]TrustTunnel_…»
+    // prefix. Ignored when `original_file_name` is used (that path preserves the branded name verbatim).
+    country: Option<&str>,
 ) -> Result<(String, bool), String> {
     // One continuous critical section — the whole point of PP-2.
     let _guard = lock_manifest();
@@ -1877,7 +2057,7 @@ pub fn import_config_under_lock(
     // Branded/derived unique destination filename (atomic create_new claim — never overwrites).
     let stem = original_file_name
         .and_then(safe_import_stem_from_filename)
-        .unwrap_or_else(|| import_stem_from_content(content));
+        .unwrap_or_else(|| import_stem_from_content(content, country));
     let dest = unique_import_path(dir, &stem);
     let dest_str = dest.to_string_lossy().to_string();
 
@@ -2405,6 +2585,91 @@ included_routes = ["0.0.0.0/0"]
         assert_eq!(manifest.schema_version, MANIFEST_SCHEMA_VERSION);
         assert!(manifest.configs.is_empty(), "empty dir → empty manifest");
         cleanup(&tmp);
+    }
+
+    /// Phase 19 UAT (folder-as-truth): adopt_orphans_in_dir ADOPTS a valid config .toml that is in
+    /// the folder but NOT in the manifest (the protocol-deploy / file-browse orphan class), skips a
+    /// non-config .toml, and leaves an already-tracked config untouched (dedup by path).
+    #[test]
+    fn adopt_orphans_picks_up_untracked_configs_only() {
+        let tmp = tempdir();
+        // a.toml is tracked; b.toml is a valid UNTRACKED orphan; junk.toml is not a config.
+        let a = write_toml(&tmp, "a.toml", &endpoint_config(Some("Alpha")));
+        let b = write_toml(&tmp, "b.toml", &endpoint_config(Some("Beta")));
+        std::fs::write(tmp.join("junk.toml"), b"not = \"a config\"\n").unwrap();
+        let mut manifest = Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            configs: vec![ConfigEntry {
+                id: "alpha".into(),
+                name: "Alpha".into(),
+                path: a.to_string_lossy().to_string(),
+                order: 0,
+                last_used: true,
+                copy: false,
+            }],
+        };
+        let adopted = adopt_orphans_in_dir(&tmp, &mut manifest);
+        assert!(adopted, "an untracked valid config must be adopted");
+        assert_eq!(manifest.configs.len(), 2, "only b.toml is adopted (junk skipped)");
+        assert!(
+            manifest.configs.iter().any(|e| e.path == b.to_string_lossy()),
+            "the untracked orphan b.toml is now tracked",
+        );
+        assert!(
+            !manifest.configs.iter().any(|e| e.path.ends_with("junk.toml")),
+            "a non-config .toml is never adopted",
+        );
+        // Idempotent: a second pass adopts nothing (both are now tracked).
+        assert!(!adopt_orphans_in_dir(&tmp, &mut manifest), "second pass adopts nothing");
+        cleanup(&tmp);
+    }
+
+    /// Phase 19 UAT (folder-as-truth): reconcile_folder_with_manifest makes the on-disk configs.json
+    /// mirror the folder both ways — it ADOPTS an orphan and PRUNES an entry whose file is gone.
+    #[test]
+    fn reconcile_adopts_orphans_and_prunes_missing() {
+        let tmp = tempdir();
+        let present = write_toml(&tmp, "present.toml", &endpoint_config(Some("Present")));
+        let orphan = write_toml(&tmp, "orphan.toml", &endpoint_config(Some("Orphan")));
+        // Manifest tracks `present` (real) + `ghost` (file never created → must be pruned).
+        let manifest = Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            configs: vec![
+                ConfigEntry { id: "present".into(), name: "Present".into(), path: present.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                ConfigEntry { id: "ghost".into(), name: "Ghost".into(), path: tmp.join("ghost.toml").to_string_lossy().to_string(), order: 1, last_used: false, copy: false },
+            ],
+        };
+        write_manifest_atomic(&tmp, &manifest).unwrap();
+        reconcile_folder_with_manifest(&tmp);
+        let back = read_manifest(&tmp).unwrap();
+        assert!(back.configs.iter().any(|e| e.path == present.to_string_lossy()), "present stays");
+        assert!(back.configs.iter().any(|e| e.path == orphan.to_string_lossy()), "orphan adopted");
+        assert!(!back.configs.iter().any(|e| e.id == "ghost"), "missing-file entry pruned");
+        assert_eq!(back.configs.len(), 2, "present + adopted orphan, ghost gone");
+        cleanup(&tmp);
+    }
+
+    /// Phase 19 UAT (#3 unified filename): the content-derived import stem gets the SAME
+    /// «[<CC>_]TrustTunnel_<slug>» country prefix every other add-path uses when a country is supplied.
+    #[test]
+    fn import_stem_prefixes_country_when_provided() {
+        let cfg = "[endpoint]\nhostname = \"h\"\nusername = \"alice\"\naddresses = [\"1.2.3.4:443\"]\n";
+        assert_eq!(import_stem_from_content(cfg, Some("de")), "DE_TrustTunnel_alice");
+        assert_eq!(import_stem_from_content(cfg, None), "TrustTunnel_alice");
+        // Junk / non-2-letter country → no prefix (mirrors client_config_filename / buildConfigFileName).
+        assert_eq!(import_stem_from_content(cfg, Some("Germany")), "TrustTunnel_alice");
+        assert_eq!(import_stem_from_content(cfg, Some("D")), "TrustTunnel_alice");
+        assert_eq!(import_stem_from_content(cfg, Some("")), "TrustTunnel_alice");
+    }
+
+    /// Phase 19 UAT (#3): the GeoIP host for an import prefers the real IP in addresses[] over a
+    /// self-signed SNI hostname (which GeoIP cannot resolve).
+    #[test]
+    fn geoip_host_prefers_addresses_over_sni() {
+        let cfg = "[endpoint]\nhostname = \"trusttunnel.local\"\nusername = \"u\"\naddresses = [\"203.0.113.200:443\"]\n";
+        assert_eq!(geoip_host_from_content(cfg).as_deref(), Some("203.0.113.200"));
+        let no_addr = "[endpoint]\nhostname = \"vpn.example.com\"\nusername = \"u\"\n";
+        assert_eq!(geoip_host_from_content(no_addr).as_deref(), Some("vpn.example.com"));
     }
 
     /// Truth: importing a second config APPENDS — two adds → two distinct files

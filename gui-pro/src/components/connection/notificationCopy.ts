@@ -108,9 +108,10 @@ export const notificationCopy = {
     iconColor: TOK.error,
     title: { ru: "Ошибка подключения", en: "Connection error" },
     body: {
-      // No title/body word-dup («подключиться» would echo the title «подключения») — «связаться».
-      ru: (name: string) => `Не удалось связаться с «${name}»`,
-      en: (name: string) => `Couldn't reach "${name}"`,
+      // Owner override (Phase 19 UAT): «связаться» read wrong («собаки»); the plain «подключиться к»
+      // is what the endpoint actually did, even though it lightly echoes the title «подключения».
+      ru: (name: string) => `Не удалось подключиться к «${name}»`,
+      en: (name: string) => `Couldn't connect to "${name}"`,
     },
   },
   reconnecting: {

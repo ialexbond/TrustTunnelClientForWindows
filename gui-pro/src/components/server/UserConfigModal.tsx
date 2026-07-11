@@ -269,6 +269,10 @@ export function UserConfigModal({
         // the Save-As default below, so the file fetch_server_config writes carries the
         // country prefix too. Best-effort cached GeoIP (undefined when unknown).
         countryCode: readCachedCountryCode(sshHost) || undefined,
+        // Phase 19 UAT: the download is a SAVE action, not "add to app" — stage the fetched config
+        // into the OS temp dir (NOT the app data dir) so the folder-as-truth adoption scan never
+        // turns it into an unwanted Connection-tab card and it can't overwrite a tracked config.
+        stageToTemp: true,
       });
       // UAT (06-uat fix 14): branded, consistent default name
       // `[COUNTRY_]TrustTunnel_<username>.toml` (matching the wizard DoneStep save).

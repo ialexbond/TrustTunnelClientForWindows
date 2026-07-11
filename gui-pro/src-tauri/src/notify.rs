@@ -290,6 +290,42 @@ fn switch_pending_cleared_on(prev: VpnStatus, next: VpnStatus) -> bool {
     prev != next && matches!(next, VpnStatus::Connected | VpnStatus::Error)
 }
 
+/// What THIS status edge does to the `pending_error_config_name` stamp (G-19-6 v5).
+///
+/// Extracted as a PURE predicate — mirroring `origin_consumed_on` / `switch_pending_cleared_on` — so
+/// the stamp policy is unit-testable WITHOUT an AppHandle. This is the exact regression the v3 defect
+/// caused (an unconditional take on EVERY edge let the concurrent reconnect's `Connecting` edge drain
+/// the stamp before the failed gen's `Error` edge read it); pinning the policy here stops it recurring.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum StampAction {
+    /// An ERROR edge: TAKE the stamp and KEEP it — the failed gen stamped its own captured name right
+    /// before this Error write, so this is the plate's correct name (used by the ConnectionError branch).
+    Consume,
+    /// A CONNECTED edge: TAKE the stamp only to CLEAR it (value discarded) — a success means no pending
+    /// error name is relevant, bounding a stamp a prior failed attempt left that never hit an Error edge.
+    Clear,
+    /// Every other edge — CRUCIALLY the CONCURRENT reconnect's `Connecting` edge — leaves the stamp
+    /// untouched, so it survives to reach the failed gen's own `Error` maybe_fire (the v3 drain fix).
+    Leave,
+}
+
+/// Pure: map a status transition to its stamp action. Edge-triggered (`prev == next` snapshots leave
+/// the stamp alone — an Error→Error second fatal marker must NOT re-consume). Only the two settled
+/// terminal edges act; every in-flight edge (`Connecting` / `Reconnecting` / `Recovering`) and
+/// `Disconnecting`/`Disconnected` leaves it — most importantly `Connecting`, whose maybe_fire fires in
+/// the window between the failed gen's stamp and its own Error maybe_fire.
+fn error_stamp_action(prev: VpnStatus, next: VpnStatus) -> StampAction {
+    if prev == next {
+        StampAction::Leave
+    } else {
+        match next {
+            VpnStatus::Error => StampAction::Consume,
+            VpnStatus::Connected => StampAction::Clear,
+            _ => StampAction::Leave,
+        }
+    }
+}
+
 /// The `notify-plate` event payload — the ONLY thing that crosses from Rust into the plate
 /// webview (Trust Boundary: Rust decider → plate window). It carries a notification KIND (as the
 /// FE wire key) plus the config DISPLAY NAME only — NEVER the `.toml` content, the endpoint host,
@@ -591,6 +627,50 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
     // `suppress_intermediate_disconnected` folds seamless_switch_active into: a seamless switch that
     // somehow set the cancel intent is treated as a teardown, never a phantom cancel plate).
     let suppress_intermediate_disconnected = switch_teardown_pending || seamless_switch_active;
+
+    // G-19-6 v5: manage the pending error-config-name stamp with EDGE-TRIGGERED, take-once semantics —
+    // computed HERE, BEFORE `decide_notification` and the visibility gate, so those gates can NEVER
+    // leave a stamp un-consumed to linger (Fable D1: the v4 take sat INSIDE the ConnectionError branch,
+    // which is AFTER the visibility gate — so a failed connect with the main window OPEN, the common
+    // case, suppressed the plate and returned BEFORE the take, stranding the stamp for a later
+    // non-stamping Error writer, e.g. the 60s connect-timeout watchdog, to inherit).
+    //
+    // The stamp is touched ONLY on the two terminal edges that matter — NEVER on the CONCURRENT
+    // reconnect's `Connecting` edge (that was the v3 drain: a Connecting-edge maybe_fire fires in the
+    // window between the failed gen's stamp and its OWN Error maybe_fire, and must not touch the stamp):
+    //   - an ERROR edge (`prev != next && next == Error`) CONSUMES the stamp — the failed gen stamped its
+    //     OWN captured name (in `sidecar::handle_fatal_markers`) immediately before THIS Error status
+    //     write, so `take()` yields exactly that name for the ConnectionError plate below, regardless of
+    //     whether the notifications/visibility gates later suppress the actual desktop fire (a suppressed
+    //     fire STILL spends the stamp — a later non-stamping Error can never inherit it).
+    //   - a CONNECTED edge (`prev != next && next == Connected`) CLEARS any stamp a prior failed attempt
+    //     left that never hit an Error edge (e.g. a suppressed Error→Error second fatal marker). Cleared
+    //     on a SETTLED success (a handshake after connect-start — it never interleaves between a failed
+    //     gen's stamp and that gen's Error maybe_fire), NEVER on `Connecting`.
+    // Only an Error edge KEEPS the taken value (for the ConnectionError branch); a Connected edge takes
+    // purely to clear (the value is discarded — no non-error kind reads it). The pure `error_stamp_action`
+    // owns the Consume/Clear/Leave policy (unit-tested without an AppHandle) so a v3-style regression is
+    // caught by a test, not by the owner.
+    let stamp_action = error_stamp_action(prev, next);
+    let taken_stamp = if matches!(stamp_action, StampAction::Consume | StampAction::Clear) {
+        app.try_state::<AppState>()
+            .and_then(|s| {
+                s.pending_error_config_name
+                    .lock()
+                    .ok()
+                    .and_then(|mut g| g.take())
+            })
+            .filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+    // KEEP the taken name only for an Error edge (the ConnectionError plate uses it); a Clear (Connected)
+    // discards it — the take above already cleared the cell, which is the whole point of the Clear edge.
+    let stamped_error_name = match stamp_action {
+        StampAction::Consume => taken_stamp,
+        _ => None,
+    };
+
     let Some(kind) = decide_notification(
         prev,
         next,
@@ -643,6 +723,25 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
         .as_deref()
         .and_then(crate::commands::manifest::current_display_name)
         .unwrap_or_default();
+
+    // G-19-6 v4 (THE wrong-server-name fix): a ConnectionError plate names the config that FAILED — the
+    // name the error-writing sidecar task captured at its OWN spawn and stamped into
+    // `pending_error_config_name` right before its Error status write — NOT the live `config_path`
+    // (which a CONCURRENT reconnect/switch-back repoints to the healthy server the instant the failed
+    // attempt errors; PROVEN by app.log — gen=3's Error maybe_fire read config_path already repointed to
+    // gen=4's calm-otter7, so it wrongly resolved the healthy server's name).
+    //
+    // The stamp was already TAKEN (edge-triggered, take-once) at the top of maybe_fire — before the
+    // gates — into `stamped_error_name`, so it is spent even when the visibility gate suppressed the
+    // desktop fire (Fable D1). Here the ConnectionError plate just USES that already-taken name. Falls
+    // back to config_path when unset (non-sidecar preflight errors, whose config_path is still the
+    // failing config — a preflight failure is not concurrent with any reconnect, so it is never
+    // repointed to a healthy server).
+    let config_name = if matches!(kind, NotifyKind::ConnectionError) {
+        stamped_error_name.unwrap_or(config_name)
+    } else {
+        config_name
+    };
 
     // 13-06: read the FE-mirrored effective theme ("dark" | "light") so the plate stamps the right
     // `data-theme` before it renders (its own webview localStorage is empty — Pitfall 5, UAT round-2
@@ -806,6 +905,76 @@ pub fn fire_start_plate(app: &tauri::AppHandle, wire_key: &'static str) {
         app,
         wire_key,
         config_name,
+        theme,
+        language,
+        None,
+        None,
+        None,
+        COMPACT_PLATE_HEIGHT,
+    );
+}
+
+/// Phase 19 UAT (G-19-6, Option B) — fire the ConnectionError plate for a SUPERSEDED session's
+/// failure, naming the config that ACTUALLY failed (`config_name`, captured at that session's spawn)
+/// rather than the live `config_path` `maybe_fire` reads. After a fallback / seamless-switch revert /
+/// auto-switch moves the app onto the healthy server, `config_path` names the WRONG server; and the
+/// sidecar's generation guard now DROPS the superseded Error STATUS write (so it cannot corrupt the
+/// fresh session), which means `maybe_fire` never runs for it. This dedicated path lets the user still
+/// learn «Не удалось подключиться к «<failed server>»» with the correct name WITHOUT touching
+/// `vpn_status`.
+///
+/// It applies the SAME two gates `maybe_fire` does for the plate FIRE: the master
+/// `notifications_enabled` mirror, and the visibility rule (fire ONLY when the main window is
+/// hidden/minimized — a visible window is covered by the FE snackbar). Compact plate (no
+/// address/login/ping). D-29: carries only the display name — never the `.toml`, host, or password.
+/// The caller (`sidecar::handle_fatal_markers`) latches this to fire AT MOST ONCE per dead session.
+pub fn fire_superseded_error_plate(app: &tauri::AppHandle, config_name: &str) {
+    let state = app.try_state::<AppState>();
+
+    // Master gate: with notifications off, fire nothing (same gate maybe_fire / fire_start_plate read).
+    let notifications_on = state
+        .as_ref()
+        .map(|s| {
+            s.notifications_enabled
+                .load(std::sync::atomic::Ordering::Relaxed)
+        })
+        .unwrap_or(true);
+    if !notifications_on {
+        return;
+    }
+
+    // Visibility gate (mirror maybe_fire): fire ONLY when the main window is NOT in front of the user
+    // (hidden / minimized / lookup miss). A visible-and-not-minimized window is covered by the FE
+    // snackbar, so a desktop plate would be redundant. Lookup miss → fire (never silently swallow).
+    let main_hidden = match app.get_webview_window("main") {
+        Some(w) => should_fire_when(
+            w.is_visible().unwrap_or(true),
+            w.is_minimized().unwrap_or(false),
+        ),
+        None => true,
+    };
+    if !main_hidden {
+        return;
+    }
+
+    // Thread the FE-mirrored theme + language exactly like maybe_fire / fire_start_plate so the plate
+    // renders in the right theme/language on its own empty-localStorage webview (Pitfall 5). Safe
+    // defaults on a lookup miss: "dark" (:root token fallback) and "ru" (the app's primary language).
+    let theme = state
+        .as_ref()
+        .and_then(|s| s.plate_theme.lock().ok().map(|g| g.clone()))
+        .unwrap_or_else(|| "dark".to_string());
+    let language = state
+        .as_ref()
+        .and_then(|s| s.plate_language.lock().ok().map(|g| g.clone()))
+        .unwrap_or_else(|| "ru".to_string());
+
+    // Compact ConnectionError plate — no details, compact height. Latest-wins staging in
+    // fire_plate_tail (D-03). The wire key is the ConnectionError kind's key (matches maybe_fire).
+    fire_plate_tail(
+        app,
+        NotifyKind::ConnectionError.wire_key(),
+        config_name.to_string(),
         theme,
         language,
         None,
@@ -1492,6 +1661,66 @@ mod tests {
         // Snapshot / in-flight never clears.
         assert!(!switch_pending_cleared_on(VpnStatus::Connected, VpnStatus::Connected));
         assert!(!switch_pending_cleared_on(VpnStatus::Connected, VpnStatus::Reconnecting));
+    }
+
+    #[test]
+    fn error_stamp_action_survives_connecting_consumes_error_clears_connected() {
+        // Truth (G-19-6 v5, the wrong-server-name fix): the pending error-config-name stamp is
+        // EDGE-TRIGGERED. Only the failed gen's own Error edge may CONSUME it, and a success CLEARS it;
+        // EVERYTHING else — most importantly the CONCURRENT reconnect's `Connecting` edge — LEAVES it.
+        //
+        // This is the exact policy the v3 defect got wrong: v3 took the stamp on EVERY status write, so
+        // the reconnect's `Connecting` maybe_fire (which fires between the failed gen's stamp and its own
+        // Error maybe_fire) drained the stamp first, and the Error then fell back to the live config_path
+        // — already repointed to the healthy server — naming the WRONG server. Pinning it here means a
+        // future edit that reintroduces a non-edge take fails this test, not the UAT.
+
+        // The failed gen's Error edge CONSUMES (keeps its own stamped name for the plate).
+        assert_eq!(
+            error_stamp_action(VpnStatus::Connecting, VpnStatus::Error),
+            StampAction::Consume
+        );
+        assert_eq!(
+            error_stamp_action(VpnStatus::Reconnecting, VpnStatus::Error),
+            StampAction::Consume
+        );
+
+        // THE v3 REGRESSION GUARD: the concurrent reconnect's Connecting edge must LEAVE the stamp so it
+        // survives to the failed gen's Error maybe_fire. (Any prev → Connecting.)
+        assert_eq!(
+            error_stamp_action(VpnStatus::Error, VpnStatus::Connecting),
+            StampAction::Leave
+        );
+        assert_eq!(
+            error_stamp_action(VpnStatus::Disconnected, VpnStatus::Connecting),
+            StampAction::Leave
+        );
+        assert_eq!(
+            error_stamp_action(VpnStatus::Connected, VpnStatus::Connecting),
+            StampAction::Leave
+        );
+
+        // A settled success CLEARS a stale stamp a prior failed attempt left (linger guard).
+        assert_eq!(
+            error_stamp_action(VpnStatus::Connecting, VpnStatus::Connected),
+            StampAction::Clear
+        );
+
+        // Error→Error is NOT an edge (a repeat fatal marker) — LEAVE, so the re-stamp is not
+        // mis-consumed on a non-edge (mirrors the sidecar `already_error` D2 guard).
+        assert_eq!(
+            error_stamp_action(VpnStatus::Error, VpnStatus::Error),
+            StampAction::Leave
+        );
+        // Other in-flight / teardown edges leave the stamp untouched.
+        assert_eq!(
+            error_stamp_action(VpnStatus::Connected, VpnStatus::Disconnected),
+            StampAction::Leave
+        );
+        assert_eq!(
+            error_stamp_action(VpnStatus::Connecting, VpnStatus::Recovering),
+            StampAction::Leave
+        );
     }
 
     #[test]

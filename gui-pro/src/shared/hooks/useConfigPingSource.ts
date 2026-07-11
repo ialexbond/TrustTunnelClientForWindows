@@ -73,6 +73,15 @@ export interface ConfigPingSource {
    * card + the notification agree.
    */
   seedRetainedPing: (path: string, ms: number) => void;
+  /**
+   * G-19-PING v2: read a config's CURRENT retained pre-connect band (ms) straight from the live
+   * `lastGoodByPath` ref — the SAME honest number the card shows AT REST — or `null` when none is
+   * cached. Unlike the `pings`/`patchedPings` snapshot a caller closes over (which can lag one render
+   * behind during a synchronous switch+revert), this reads the REF, so it is always current. The
+   * D-05 revert uses it to restore A's ping WITHOUT a fresh probe — a fresh probe of the reverted-to
+   * server fails through the just-failed B's killswitch (→ «—»); the frozen band is the honest value.
+   */
+  getRetainedPing: (path: string) => number | null;
 }
 
 /**
@@ -266,6 +275,13 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     setSeedVersion((v) => v + 1);
   }, []);
 
+  // G-19-PING v2: read the live frozen band for a path from the ref (never a memo snapshot), under the
+  // SAME normalized key seedRetainedPing / the effect at line ~217 write. Returns the numeric ms or null.
+  const getRetainedPing = useCallback((path: string): number | null => {
+    const retained = lastGoodByPath.current[normalizePath(path)];
+    return retained && typeof retained.valueMs === "number" ? retained.valueMs : null;
+  }, []);
+
   // F24/F26 (14-UAT round 3): build the card ping map.
   //   - DISCONNECTED: `pings` already holds live DIRECT probes for every card — use as-is (bridged).
   //   - CONNECTED (tunnel up): a manual «Обновить пинг» DOES probe every card now (BUG-B B2 removed the
@@ -403,5 +419,6 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     candidates,
     activeReading,
     seedRetainedPing,
+    getRetainedPing,
   };
 }

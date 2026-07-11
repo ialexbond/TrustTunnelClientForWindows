@@ -42,7 +42,7 @@ import { runViewTransition } from "./shared/utils/viewTransition";
 import { samePath } from "./shared/utils/samePath";
 import { DropOverlay } from "./shared/ui/DropOverlay";
 import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
-import { ImportModal } from "./components/connection/ImportModal";
+import { ImportModal, type SeededPartial } from "./components/connection/ImportModal";
 import { shouldActivateConfig } from "./components/wizard/shouldActivateConfig";
 import { WelcomeTour } from "./components/welcome/WelcomeTour";
 import { useWelcomeTour } from "./shared/hooks/useWelcomeTour";
@@ -166,6 +166,17 @@ function App() {
   // (fetch) choice was removed end-to-end — fetching an existing user's config is done from
   // the Control Panel (per-user QR/Link).
   const [importOpen, setImportOpen] = useState(false);
+  // 19-04 (Q3 / D-09): a drag-drop config batch that partly fails opens the ImportModal DIRECTLY into
+  // its rich partial view, seeded with this outcome (failed list + «Повторить»). null = a normal
+  // (picker / deep-link) open. Cleared whenever the modal opens for a normal import or closes, so a
+  // later manual open is never stale-seeded.
+  const [seededPartial, setSeededPartial] = useState<SeededPartial | null>(null);
+  // WR-05 (19-fix): mirror the ImportModal's in-flight batch state so the document-level drop
+  // handler (useFileDrop) can GATE new drops while a picker/link/retry batch is running — a drop
+  // landing mid-batch would interleave two pipelines whose finishBatch results overwrite each other.
+  // A drop while the modal is merely OPEN (resting or a settled partial) is still allowed; a second
+  // partial drop MERGES into the existing partial view rather than wiping the retained retry items.
+  const [importLoading, setImportLoading] = useState(false);
   // C-22 / D-14 — a clicked tt:// / trusttunnel:// deep-link pre-fills the import
   // modal. The URL survives `consume()` here so it can be passed as the modal's
   // `initialUrl`; it is cleared on modal close/import so a later MANUAL open is not
@@ -264,6 +275,8 @@ function App() {
     // directive itself under --max-warnings 0, so it had to go.)
     setDeepLinkUrl(deepLinkPendingUrl);
     setActiveTab("connection");
+    // A deep-link open is a normal link import — never inherit a stale drag-drop partial seed (19-04).
+    setSeededPartial(null);
     setImportOpen(true);
     // Clear the hook's pending value so the same URL is not re-applied on the next
     // render; our local deepLinkUrl copy keeps it for the modal.
@@ -519,6 +532,10 @@ function App() {
   // make exhaustive-deps demand the whole object as a dep (recreating callbacks every render). The
   // function itself is a `useCallback([])`, so this local is stable.
   const seedRetainedPing = configPingSource.seedRetainedPing;
+  // G-19-PING v2: same stable-identifier treatment for the frozen-band reader — the D-05 revert reads
+  // A's honest last-known ping from the live ref (not a lagging `pings` snapshot / a killswitch-blocked
+  // probe). It is a `useCallback([])` inside the hook, so this local is stable.
+  const getRetainedPing = configPingSource.getRetainedPing;
 
   // Phase 13 (13-08b, reworked 13-12): push the connect-time PING the notification plate shows,
   // RIGHT BEFORE a manual connect/switch. Two-tier source, mirroring the LAUNCH path's fresh probe
@@ -885,7 +902,42 @@ function App() {
       // and force a spurious 5s F-4-silenced teardown on every failed switch. The outcome is
       // authoritative: `error` ⇒ settled ⇒ skipTeardown; only a ceiling `timeout` that saw B still
       // live (read fresh in the tick's own macrotask) tears B down first.
-      const revertResult = await switchTo(previousPath, { skipTeardown: !bStillLive });
+      const willSkipTeardown = !bStillLive;
+
+      // G-19-PING (owner UAT): the revert reconnects A, but nothing pushed A's connect-time ping, so A's
+      // terminal «Подключено» plate + active card fell to «—» (the "восстанавливает подключение к
+      // предыдущему конфигу и не отображает ping"). revertToPrevious was the last path reaching vpn_connect
+      // without a ping push.
+      //
+      // v2 (the WORKING fix — v1 still showed «—»): PRIMARY source is A's LIVE frozen pre-connect band from
+      // the freeze-cache ref (`getRetainedPing`) — the SAME honest number A showed while it was connected
+      // seconds ago. v1 called `pushPendingConnectPingSeeded`, which (a) reads a `pings` snapshot a callback
+      // closed over — it lags one render behind during the synchronous switch+revert — and (b) on a miss
+      // runs a FRESH direct probe of A, which FAILS through the just-failed B's still-active killswitch → it
+      // pushed `null` → «—». Reading the ref is immune to both: no closure snapshot, no probe. Re-seeding
+      // the same value bumps seedVersion so A's reconnected card re-derives and shows it. Stamp origin=Manual
+      // like every other manual initiator. Push AWAITED so the cell is filled before the Rust Connected edge
+      // peeks it. D-29: a bare number crosses, never config content.
+      //   - Fallback (A has NO retained band at all — e.g. it never connected/probed this session): keep the
+      //     v1 behaviour — probe on the skipTeardown path (A is settled/inactive), or defer to switchTo's
+      //     post-teardown `seedAfterTeardown` on the rare wedged-B path (probing A while B is up rides tunnel
+      //     B → F24/F26 garbage).
+      const retainedMs = getRetainedPing(previousPath);
+      if (retainedMs !== null) {
+        void invoke("set_pending_connect_origin", { origin: "manual" }).catch(() => {});
+        await invoke("set_pending_connect_ping", { ms: retainedMs }).catch(() => {});
+        seedRetainedPing(previousPath, retainedMs);
+      } else if (willSkipTeardown && pushPendingConnectPingSeeded) {
+        try {
+          await pushPendingConnectPingSeeded(previousPath);
+        } catch {
+          // A probe/push/seed failure must not block the revert — proceed to switchTo(A).
+        }
+      }
+      const revertResult = await switchTo(previousPath, {
+        skipTeardown: willSkipTeardown,
+        seedAfterTeardown: !willSkipTeardown,
+      });
 
       // 3. WR-02 + F30: STAGE the calm blue «остались на A» info notice; the status effect commits it
       // only on A's real `connected` edge (never during the amber «Подключение», and never at all if A
@@ -897,7 +949,14 @@ function App() {
         pendingRevertNoticeRef.current = i18n.t("connection.revert.body", { name: prevName });
       }
     },
-    [switchTo, configPingSource.configs, i18n],
+    [
+      switchTo,
+      configPingSource.configs,
+      i18n,
+      pushPendingConnectPingSeeded,
+      getRetainedPing,
+      seedRetainedPing,
+    ],
   );
 
   // Phase 14 (CR-01 / IN-03): the SINGLE shared switch-orchestration helper that BOTH the manual
@@ -1283,6 +1342,18 @@ function App() {
     [promoteImportedConfig],
   );
 
+  // 19-04 (Q3 / D-09): a drag-drop CONFIG batch that partly fails routes here — open the ImportModal
+  // seeded with the partial (failed list + «Повторить»), the SAME rich in-modal UX as the file-picker
+  // path, instead of a burst of per-file flyaway error toasts. The successful configs are already
+  // promoted via handleImportedConfigDrop above. deeplink-never-auto holds: opening the modal seeded
+  // with a REPORT never auto-imports; «Повторить» re-runs the SAME dropped files only (T-19-31). The
+  // setters are stable, so this callback is identity-stable (empty deps).
+  const handleConfigDropPartial = useCallback((partial: SeededPartial) => {
+    setSeededPartial(partial);
+    setActiveTab("connection");
+    setImportOpen(true);
+  }, []);
+
   // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..5 = navigate, etc.)
   useKeyboardShortcuts({
     onToggleConnect: useCallback(() => {
@@ -1311,7 +1382,12 @@ function App() {
     onConfigImported: handleImportedConfigDrop,
     onRoutingImported: handleDropRouting,
     pushSuccess,
-    isBusy: false,
+    // 19-04 (Q3 / D-09): a config-partial drop opens the ImportModal seeded with the failed list +
+    // «Повторить» — the SAME rich in-modal UX as the picker path — instead of per-file flyaway toasts.
+    onConfigPartial: handleConfigDropPartial,
+    // WR-05 (19-fix): block document drops while an ImportModal batch is in flight so a drop can't
+    // interleave with the running pipeline. Drops while the modal is open but idle stay allowed.
+    isBusy: importLoading,
     // IN-16: gate the accepted drop format per tab («Подключение» → .toml only, «Маршрутизация»
     // → .json only) so the overlay label is truthful and a wrong-tab file is rejected clearly.
     activeTab,
@@ -1319,6 +1395,15 @@ function App() {
 
   const hasConfig = !!config.configPath;
   const showStatusPanel = hasConfig && activeTab !== "control";
+  // Phase 19 (19-01 Bug 1 / D-01/D-02): a LIVE connection error must be visible in-app on EVERY
+  // tab — including the Control Panel tab, where showStatusPanel is false. With the window open the
+  // desktop error plate is also suppressed (notify.rs visibility gate), so on the control tab a
+  // connection error was invisible in-app (only the tray went red). Bypass the control-tab gate for
+  // the ERROR case ONLY (Q1 = FE route): a non-error status still shows no panel on control. The
+  // error-state StatusPanel never runs the uptime ticker (it ticks only while `connected`), so this
+  // second mount cannot spin up a rival ticker — the IN-11 single-live-ticker discipline holds. Its
+  // × acknowledges through the same StatusPanel.handleDismiss → clear_vpn_error → gray tray path.
+  const showControlTabError = hasConfig && activeTab === "control" && status === "error";
 
   const vpnContextValue = useMemo(
     () => ({
@@ -1343,7 +1428,10 @@ function App() {
   // tickers. Each consumer below takes the node ONLY when its own tab is active
   // (statusPanelFor), so exactly one StatusPanel — and one ticker — is ever live. Uptime is
   // derived from connectedSince, so the remount on tab-switch shows no glitch.
-  const statusPanelNode = showStatusPanel ? (
+  // 19-01 (D-01/D-02): mount the node when the normal tab gate allows it OR when a live connection
+  // error must surface on the control tab. statusPanelFor(tab) still gates each consumer to its own
+  // active tab, so exactly one StatusPanel (and at most one ticker) is ever live.
+  const statusPanelNode = showStatusPanel || showControlTabError ? (
     <StatusPanel
       status={status}
       error={error}
@@ -1446,6 +1534,12 @@ function App() {
           }}
           aria-hidden={activeTab !== "control"}
         >
+          {/* 19-01 (D-01/D-02): the in-app connection-error surface on the Control Panel tab.
+              statusPanelFor("control") yields the StatusPanel node ONLY when a live error is on
+              (showControlTabError) — a non-error status renders nothing here (the tab keeps its
+              normal panel-free layout). Its × acknowledges via StatusPanel.handleDismiss →
+              clear_vpn_error → gray tray, identical to the other tabs. */}
+          {statusPanelFor("control")}
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Control Panel">
             <ControlPanelPage
               key={controlKey}
@@ -1497,7 +1591,11 @@ function App() {
                 ConfigList. */}
             <MultiConfigConnectionPanel
               ref={connectionPanelRef}
-              onImport={() => setImportOpen(true)}
+              onImport={() => {
+                // A normal (picker/link) open must never inherit a stale drag-drop seed (19-04).
+                setSeededPartial(null);
+                setImportOpen(true);
+              }}
               status={status}
               // Session uptime for the connected lead card's live ticking counter (the wire that
               // was missing since Phase 11 — the card slot + Storybook existed, the data did not).
@@ -1543,19 +1641,33 @@ function App() {
               // Phase 14 (D-13): lock the import while a switch is in flight — a mid-switch import
               // could add + auto-promote a competing flow that races the swap.
               isSwitching={isSwitching}
+              // 19-04 (Q3 / D-09): open DIRECTLY into the rich partial view when a config-partial drop
+              // seeded it (failed list + «Повторить») — the SAME UX as the picker path.
+              seededPartial={seededPartial}
+              // WR-05 (19-fix): mirror the modal's in-flight batch state so useFileDrop can gate
+              // drops that would interleave with a running import pipeline.
+              onLoadingChange={setImportLoading}
               onClose={() => {
                 setImportOpen(false);
                 // Clear the stale deep-link URL so a later manual open is not pre-filled.
                 setDeepLinkUrl(null);
+                // Clear the drag-drop seed so a later open is not stale-seeded into the partial view.
+                setSeededPartial(null);
               }}
               onImported={(path) => {
                 // IN-18 (gap F): promote the imported config to active ONLY when safe (no active
                 // config + VPN idle) — never steal a live connection's active pointer. Always
                 // reloads the list so the new card (or copy) appears. The backend import already
                 // appended the manifest entry (no add_config here — that would double-add).
+                //
+                // CR-01 (19-fix): PROMOTE ONLY — the modal decides when to close. It already calls
+                // onClose() on every FULL-success path (single import + full-success batch both do
+                // `resetState(); onClose();`), and App's onClose clears deepLinkUrl/seededPartial.
+                // A PARTIAL batch must STAY in-modal (D-09) so the user sees the failed list +
+                // «Повторить»; closing here (the old `setImportOpen(false)`) tore the modal down
+                // mid-report through the picker door and leaked stale partial state into the next
+                // open. Removing the close/clear here is what makes the picker partial view reachable.
                 promoteImportedConfig(path);
-                setImportOpen(false);
-                setDeepLinkUrl(null);
               }}
             />
           </PanelErrorBoundary>

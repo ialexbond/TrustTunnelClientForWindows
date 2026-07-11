@@ -198,7 +198,7 @@ pub async fn read_server_ownership_markers(
 // only to brand the LOCAL config filename `[<CC>_]TrustTunnel_<login>.toml` so a re-export
 // writes the SAME name the Save-As dialog defaults to. Optional → omitting it (legacy
 // callers) yields None ⇒ unbranded-by-country, still a valid branded filename.
-ssh_command!(fetch_server_config, ssh::fetch_server_config, client_name: String, op_id: u64, country_code: Option<String>);
+ssh_command!(fetch_server_config, ssh::fetch_server_config, client_name: String, op_id: u64, country_code: Option<String>, stage_to_temp: Option<bool>);
 ssh_command!(server_upgrade, ssh::server_upgrade, version: String);
 
 // ─── Pooled server management commands ────────────────────────────

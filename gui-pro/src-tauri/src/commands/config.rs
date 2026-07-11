@@ -190,7 +190,23 @@ pub fn copy_config_to_app_dir(source_path: String) -> Result<String, String> {
     let file_name = src
         .file_name()
         .ok_or("Cannot determine file name")?;
-    let dest = app_dir.join(file_name);
+    // Phase 19 UAT: allocate a NON-COLLIDING destination instead of the old plain `fs::copy` that
+    // SILENTLY OVERWROTE a same-named file in the app dir — that clobbered a tracked config's content
+    // (data loss), and under folder-as-truth adoption the copy now appears as its own card, so a
+    // clobber would also visibly swallow the other config. If `<name>.toml` is free, use it; otherwise
+    // `<stem>-2.toml`, `<stem>-3.toml`, … (bounded). The display name comes from the `.toml` itself, so
+    // the on-disk suffix does not affect the card title.
+    let base = app_dir.join(file_name);
+    let dest = if !base.exists() {
+        base
+    } else {
+        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("config");
+        let ext = src.extension().and_then(|s| s.to_str()).unwrap_or("toml");
+        (2..=999)
+            .map(|n| app_dir.join(format!("{stem}-{n}.{ext}")))
+            .find(|cand| !cand.exists())
+            .ok_or("Cannot allocate a unique config filename in the app folder")?
+    };
 
     std::fs::copy(src, &dest)
         .map_err(|e| format!("Failed to copy config: {e}"))?;
@@ -1022,6 +1038,8 @@ pub async fn import_dropped_content(content: String, file_name: String) -> Resul
                 // Preserve the dropped file's original branded filename (the frontend sends
                 // file.name) instead of re-deriving from content — keeps the «[<CC>_]…» prefix.
                 Some(file_name.clone()),
+                // country_code: None — the verbatim filename already carries the prefix; no GeoIP.
+                None,
             )
             .await?;
             Ok(ImportDropResult {

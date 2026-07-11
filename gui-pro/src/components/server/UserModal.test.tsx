@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { UserModal } from "./UserModal";
@@ -822,6 +822,370 @@ describe("UserModal — Edit mode", () => {
     );
     expect(switchByLabel("server.users.toggle_skip_verify")).toBeDisabled();
     expect(switchByLabel("server.users.toggle_pin_cert")).toBeDisabled();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 19 (19-02) — Bug 2: self-signed/no-domain TLS/cert retro-correction (D-07)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Root cause (19-RESEARCH §Bug2): a protocol installed WITHOUT a domain + a
+// self-signed cert issues `skip_verification = true` + a pinned self-signed leaf
+// at export time (apply_fetched_self_signed_policy), but that policy is NEVER
+// persisted into `users-advanced.toml`. The Edit modal reads users-advanced.toml
+// via `server_get_user_advanced`, so the auto-created user's entry carries the
+// install DEFAULT (skip_verification=false, no pin) → the modal shows the WRONG
+// TLS/cert settings.
+//
+// Fix (D-07 display-correctness only; Q2 resolved = retro-correct on Edit-open):
+// when the endpoint cert is self-signed AND the stored advanced entry is the
+// un-persisted default, seed the ACTUALLY-issued values — deterministically
+// skipVerification=true, plus a best-effort pin recovered via the existing
+// `server_fetch_endpoint_cert` probe (leaf DER + is_system_verifiable). D-08:
+// editability is untouched — no new disabled/read-only state.
+describe("UserModal — Edit mode: self-signed/no-domain TLS retro-correction (19-02, D-07)", () => {
+  // A realistic self-signed endpoint SNI (the endpoint's own internal hostname,
+  // NEVER a bare IP — fetch_endpoint_cert rejects an IP SNI). Sourced by the
+  // implementation from server_get_cert_info.
+  const CERT_SNI = "trusttunnel.local";
+  // Full 64-char SHA-256 hex — asserted ABSENT from the activity log (D-29): only
+  // the sanitized fp.slice(0,8) prefix is ever permitted into the log channel.
+  const FULL_FP =
+    "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
+  const LEAF_DER_B64 = "dGVzdC1zZWxmLXNpZ25lZC1sZWFm"; // base64("test-self-signed-leaf")
+
+  const selfSignedEditProps = {
+    ...defaultEditProps,
+    serverCertType: "self_signed" as const,
+    _storybook: false, // drive the real Edit-load fetch chain
+  };
+
+  /**
+   * Mock the whole Edit-load fetch chain for a self-signed/no-domain
+   * auto-created user. `advancedOverride` lets a test flip the stored entry from
+   * the stale install default to an already-persisted policy.
+   */
+  const mockSelfSignedLoad = (
+    opts: {
+      advanced?: Record<string, unknown> | null;
+      probeSystemVerifiable?: boolean;
+      certInfo?: Record<string, unknown>;
+      // G-19-3: model a no-domain self-signed server whose endpoint TLS probe REJECTS
+      // (the live repro) — the correction must degrade to skip+SNI, not discard.
+      probeThrows?: boolean;
+    } = {},
+  ) => {
+    const advanced =
+      opts.advanced === undefined
+        ? {
+            // STALE install default — the exact shape users-advanced.toml carries
+            // for the auto-created user (skip_verification=false, no pinned cert).
+            username: "alice",
+            skip_verification: false,
+            pin_cert_der_b64: null,
+            dns_upstreams: [],
+            anti_dpi: true,
+          }
+        : opts.advanced;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case "server_get_user_config":
+          return { cidr: "", client_random_prefix: "x" };
+        case "server_get_user_advanced":
+          return advanced;
+        case "server_get_cert_info":
+          return (
+            opts.certInfo ?? {
+              hostname: CERT_SNI,
+              subject: `CN=${CERT_SNI}`,
+              issuer: `CN=${CERT_SNI}`,
+            }
+          );
+        case "server_get_config":
+          return 'listen_address = "0.0.0.0:443"';
+        case "server_get_allowed_sni_list":
+          return [];
+        case "server_fetch_endpoint_cert":
+          if (opts.probeThrows) throw new Error("endpoint TLS probe failed");
+          return {
+            leaf_der_b64: LEAF_DER_B64,
+            fingerprint_hex: FULL_FP,
+            chain_len: 1,
+            is_system_verifiable: opts.probeSystemVerifiable ?? false,
+          };
+        default:
+          return undefined;
+      }
+    });
+  };
+
+  beforeEach(() => {
+    i18n.changeLanguage("ru");
+    vi.clearAllMocks();
+    vi.mocked(invoke).mockReset();
+    installActivityLogSpy();
+    sessionStorage.clear();
+  });
+
+  it("seeds skipVerification=true from the actually-issued policy (D-07)", async () => {
+    mockSelfSignedLoad();
+    render(<UserModal {...selfSignedEditProps} />);
+    // The stored users-advanced.toml default is skip_verification=false, but the
+    // install issued skip_verification=true — the modal must show the truth.
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+  });
+
+  it("recovers the issued self-signed pin (pinCert ON + cert card) via the endpoint probe", async () => {
+    mockSelfSignedLoad();
+    render(<UserModal {...selfSignedEditProps} />);
+    // pinCert is seeded true with the probed leaf, so the CertificateFingerprintCard
+    // (mocked above) renders — matching the pinned self-signed leaf the install issued.
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_pin_cert")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    expect(screen.getByTestId("cert-fingerprint-card")).toBeInTheDocument();
+  });
+
+  it("keeps the TLS/cert toggles editable — no new disabled/read-only state (D-08)", async () => {
+    mockSelfSignedLoad();
+    render(<UserModal {...selfSignedEditProps} />);
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    // Editability is untouched (D-08): the skip-verify + pin-cert toggles stay
+    // enabled for a self-signed endpoint exactly as today.
+    expect(switchByLabel("server.users.toggle_skip_verify")).not.toBeDisabled();
+    expect(switchByLabel("server.users.toggle_pin_cert")).not.toBeDisabled();
+  });
+
+  it("does NOT read as falsely dirty on open — the baseline is anchored to the corrected values", async () => {
+    mockSelfSignedLoad();
+    render(<UserModal {...selfSignedEditProps} />);
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    // Correcting the seed WITHOUT re-anchoring initialDeeplinkRef would flash the
+    // dirty banner immediately (Pitfall 3). It must not appear on open.
+    expect(screen.queryByTestId("deeplink-dirty-banner")).toBeNull();
+  });
+
+  it("leaves an already-persisted self-signed policy untouched (no override, no double-probe)", async () => {
+    // User already has skip_verification=true + a persisted pin in
+    // users-advanced.toml — the correction must NOT fire, and the endpoint probe
+    // must NOT run a second time.
+    mockSelfSignedLoad({
+      advanced: {
+        username: "alice",
+        skip_verification: true,
+        pin_cert_der_b64: LEAF_DER_B64,
+        dns_upstreams: [],
+        anti_dpi: true,
+      },
+    });
+    render(<UserModal {...selfSignedEditProps} />);
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    // The persisted pin already hydrates the card; the retro-correction probe
+    // never runs because the stored entry is not the un-persisted default.
+    expect(invoke).not.toHaveBeenCalledWith(
+      "server_fetch_endpoint_cert",
+      expect.anything(),
+    );
+  });
+
+  it("D-29: the retro-correction never logs the full cert fingerprint nor the SSH password", async () => {
+    mockSelfSignedLoad();
+    render(<UserModal {...selfSignedEditProps} />);
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalled();
+    });
+    // Only fp.slice(0,8) may reach the log channel — the full 64-char hash and
+    // the SSH connection password must be ABSENT from every log arg.
+    expectNoSecretLogged(FULL_FP);
+    expectNoSecretLogged(mockSshParams.password);
+  });
+
+  // WR-01 (19-fix): the panel's serverCertType prop can be "unknown"/undefined when its
+  // server_get_cert_info fetch failed or had not resolved at Edit-open. The correction must NOT
+  // silently no-op (the Bug-2 symptom re-manifesting intermittently) — self-signedness
+  // falls back to the in-load cert parse / the probe's is_system_verifiable.
+  it("WR-01: still corrects skip-verify when serverCertType is unavailable at open (falls back to the probe/cert)", async () => {
+    mockSelfSignedLoad(); // cert info + probe both report a self-signed leaf
+    render(
+      <UserModal
+        {...selfSignedEditProps}
+        // Prop unresolved/failed at Edit-open — the OLD guard early-returned here.
+        serverCertType={"unknown" as const}
+      />,
+    );
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    // And the pin is still recovered via the probe (self-signed confirmed without the prop).
+    expect(switchByLabel("server.users.toggle_pin_cert")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  // WR-02 (19-fix): an explicitly user-saved skip_verification=false must NOT be overridden. A real
+  // save almost always carries a non-default advanced field (here a displayName), which marks the
+  // record as saved so the correction is skipped and the user's OFF choice sticks.
+  it("WR-02: does NOT override a saved skip=false when the advanced entry carries a non-default field", async () => {
+    mockSelfSignedLoad({
+      advanced: {
+        username: "alice",
+        display_name: "Работа", // a real user save — not the install default shape
+        skip_verification: false,
+        pin_cert_der_b64: null,
+        dns_upstreams: [],
+        anti_dpi: true,
+      },
+    });
+    render(<UserModal {...selfSignedEditProps} />);
+    // Give the load + any async recovery a chance to (not) run.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Работа")).toBeInTheDocument();
+    });
+    // The user's explicit OFF choice is preserved — no retro-correction override.
+    expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    // The endpoint probe must NOT run for a record treated as a real save.
+    expect(invoke).not.toHaveBeenCalledWith(
+      "server_fetch_endpoint_cert",
+      expect.anything(),
+    );
+  });
+
+  // G-19-3 (Phase 19 UAT): a THROWING endpoint probe on a no-domain self-signed server (the live
+  // repro: server 203.0.113.200) used to discard the whole correction — «Отключить проверку» stayed
+  // OFF, Custom SNI stayed EMPTY, and the pin toggle stayed permanently gated (it disables while
+  // Custom SNI is blank). The degrade must now still emit the DETERMINISTIC skip=true + the resolved
+  // Custom SNI (recovered from server_get_cert_info), even with an `unknown` cert prop.
+  it("G-19-3: a failing endpoint probe still seeds skip-verify ON + Custom SNI (no silent discard)", async () => {
+    mockSelfSignedLoad({ probeThrows: true });
+    render(
+      <UserModal
+        {...selfSignedEditProps}
+        serverCertType={"unknown" as const} // the live repro: prop unresolved at open
+      />,
+    );
+    // The deterministic correction survives the probe failure: skip-verify ON.
+    await waitFor(() => {
+      expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    // Custom SNI is filled from the in-load cert — the OLD outer catch dropped it (→ empty field →
+    // permanently-gated pin toggle). It now carries the endpoint hostname.
+    expect(
+      (screen.getByLabelText(/custom sni/i) as HTMLInputElement).value,
+    ).toBe(CERT_SNI);
+    // And with Custom SNI populated the pin toggle is no longer gated (chicken-and-egg resolved).
+    expect(switchByLabel("server.users.toggle_pin_cert")).not.toBeDisabled();
+  });
+
+  // Owner (Phase 19 UAT): the retro-correction must resolve UNDER the loader — the fields must be
+  // correct on reveal, not hydrate a beat AFTER the spinner clears. The recovery is now awaited inside
+  // the config-load chain, so configLoading stays true until skip+SNI (+pin) are applied. Prove the
+  // loader is STILL shown while the endpoint probe is pending (even after the base config fetches have
+  // resolved), then clears WITH the corrected values already present. The modal renders EITHER the
+  // loader OR the form (never both), so "loader present" is proof the fields have no pop-in surface.
+  it("owner: the self-signed retro-correction resolves under the loader (no pop-in after the spinner)", async () => {
+    let releaseProbe: (v: unknown) => void = () => {};
+    const probePromise = new Promise((resolve) => {
+      releaseProbe = resolve;
+    });
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case "server_get_user_config":
+          return { cidr: "", client_random_prefix: "x" };
+        case "server_get_user_advanced":
+          return {
+            username: "alice",
+            skip_verification: false,
+            pin_cert_der_b64: null,
+            dns_upstreams: [],
+            anti_dpi: true,
+          };
+        case "server_get_cert_info":
+          return { hostname: CERT_SNI, subject: `CN=${CERT_SNI}`, issuer: `CN=${CERT_SNI}` };
+        case "server_get_config":
+          return 'listen_address = "0.0.0.0:443"';
+        case "server_get_allowed_sni_list":
+          return [];
+        case "server_fetch_endpoint_cert":
+          return probePromise; // deferred — the awaited recovery blocks here
+        default:
+          return undefined;
+      }
+    });
+
+    render(<UserModal {...selfSignedEditProps} serverCertType={"unknown" as const} />);
+
+    // The base config fetches resolve, but the loader must STAY while the awaited recovery is still
+    // probing the endpoint. Flush several microtask turns so the base fetches have definitely settled.
+    await waitFor(() => {
+      expect(screen.getByTestId("user-modal-loading")).toBeInTheDocument();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("user-modal-loading")).toBeInTheDocument();
+
+    // Release the endpoint probe → the recovery completes → the loader clears WITH the corrected
+    // values already applied (skip-verify ON + Custom SNI filled), not hydrated a beat later.
+    await act(async () => {
+      releaseProbe({
+        leaf_der_b64: LEAF_DER_B64,
+        fingerprint_hex: FULL_FP,
+        chain_len: 1,
+        is_system_verifiable: false,
+      });
+      await probePromise;
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-modal-loading")).toBeNull();
+    });
+    expect(switchByLabel("server.users.toggle_skip_verify")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      (screen.getByLabelText(/custom sni/i) as HTMLInputElement).value,
+    ).toBe(CERT_SNI);
   });
 });
 

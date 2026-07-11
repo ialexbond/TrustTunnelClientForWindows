@@ -52,7 +52,7 @@ declared in `commands/mod.rs` and every command is wired into the `invoke_handle
 
 | Module | Responsibility |
 |---|---|
-| `vpn.rs` | VPN connect/disconnect, status (`vpn_connect`, `vpn_disconnect`, `check_vpn_status`, …) |
+| `vpn.rs` | VPN connect/disconnect, status (`vpn_connect`, `vpn_disconnect`, `check_vpn_status_full`, …) |
 | `ssh_commands.rs` | Server deploy/diagnose, SSH credentials, host-key handling |
 | `config.rs` | Reading/writing the VPN config |
 | `network.rs` | Network/connectivity helpers |
