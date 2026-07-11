@@ -323,6 +323,31 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
             }
         }
 
+        // Phase 19 UAT (G-19-2, all-entry-points): bump the connection generation HERE — right
+        // after the in-lock liveness re-check (which already bailed on an active session, so there
+        // is no bump-after-refuse) and BEFORE emit Connecting, the pre-connect ping await, and
+        // kill_stale_sidecar + its 500ms sleep. The bump used to sit at the pre-spawn point (AFTER
+        // kill_stale + the sleep), which was TOO LATE: a stale sidecar from a prior idle/failed
+        // session, killed by kill_stale_sidecar, delivered its Terminated during the 500ms sleep
+        // with `live == its captured generation`, so the F12 guard (terminated_arm_may_write_status)
+        // let its non-zero exit write Error("sidecar-exit") onto this fresh Connecting — and the new
+        // tray sidecar could never emit Connected through that stale Error (probe_task_may_emit gates
+        // on Connecting/Reconnecting). Same root cause the window `vpn_connect` R8-block fix closes;
+        // this is the tray entry point (owner rule: fix ALL paths to the same behaviour). Bumping
+        // while holding the `sidecar_child` lock orders it before the reader task's Terminated
+        // owns-check, which re-acquires that lock before it reads the live generation. `connect_
+        // generation` (post-bump) is used for the connect-timeout watchdog / supervisor below.
+        // (The FAB-R4 stamp is separately reset below; a tray connect never bails on it.)
+        let connect_generation;
+        {
+            let _slot = state
+                .sidecar_child
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            connect_generation =
+                state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        }
+
         // Fable R3 (MAJOR-A): emit `Connecting` FIRST — BEFORE the pre-connect ping probe below. The probe
         // eats its FULL 1.5s timeout on an unreachable endpoint, and it used to run while status was still
         // `Disconnected` → up to 1.5s of ZERO feedback (grey tray icon, menu still «Подключить») AND an
@@ -382,16 +407,12 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
             .switch_authorized_generation
             .swap(u64::MAX, Ordering::SeqCst);
 
-        // CR-03: bump the connection generation so THIS tray-started session owns a
-        // distinct number, exactly like `vpn_connect` does. Without this bump a stale
-        // reconnect supervisor from a previous session is NOT neutralized by a
-        // tray-initiated connect (the Codex HIGH stale-actor guard was bypassed on
-        // the tray path) — the old supervisor could still fire and kill/respawn over
-        // the tray-started session. `fetch_add` returns the PRE-increment value, so
-        // the captured generation for this session is that + 1. Mirror of Light's
-        // tray path.
-        let connect_generation =
-            state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        // CR-03: the connection-generation bump moved UP (Phase 19 UAT G-19-2) — to right after
+        // the in-lock liveness re-check, BEFORE kill_stale_sidecar + the 500ms sleep — so a
+        // superseded child's late Terminated is suppressed by F12 (see the long note above). It
+        // still neutralizes a stale reconnect supervisor from a previous session (the Codex HIGH
+        // stale-actor guard), just earlier; `connect_generation` was captured there. Mirror of the
+        // window `vpn_connect` R8-block fix and of Light's tray path.
 
         let child_arc = Arc::clone(&state.sidecar_child);
         let disc_arc = Arc::clone(&state.disconnecting);
@@ -865,4 +886,53 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             crate::dns_guard::restore_system_dns();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Phase 19 (19-01, Bug 1 / D-04) — lock the status→tray-icon bucket mapping that the
+    // gray-on-acknowledge chain depends on. When the desktop error plate's × acknowledges
+    // (`clear_vpn_error` → `Error → Disconnected` → `vpn-status` emit → lib.rs listener →
+    // `update_tray_icon("disconnected")`), the icon MUST land in the gray `"off"` bucket, never
+    // stay in the red `"error"` bucket. `status_bucket` is the pure function that decides this;
+    // pinning its mapping here is the automated proof of the D-04 "gray, not stuck red" contract
+    // (the live-tray render is the Manual-Only item — the bucket math is what makes it correct).
+
+    #[test]
+    fn status_bucket_maps_error_to_the_red_bucket() {
+        // A live connection error → the dedicated red shield glyph (02-22 redesign).
+        assert_eq!(status_bucket("error"), "error");
+    }
+
+    #[test]
+    fn status_bucket_maps_disconnected_to_the_gray_off_bucket() {
+        // D-04: the post-acknowledge status is `disconnected`; it must resolve to the gray
+        // `"off"` bucket so the tray icon turns gray the moment the error is acknowledged —
+        // never left red. This is the exact bucket the acknowledge chain drives the icon into.
+        assert_eq!(status_bucket("disconnected"), "off");
+    }
+
+    #[test]
+    fn status_bucket_never_leaves_a_non_error_status_in_the_red_bucket() {
+        // Guard the D-04 invariant across every non-error status: only a genuine `error` may
+        // land in the red bucket. A stuck-red tray after a non-error transition is exactly the
+        // bug this phase fixes — so no non-error status may ever map to `"error"`.
+        for status in [
+            "connected",
+            "connecting",
+            "reconnecting",
+            "recovering",
+            "disconnected",
+            "disconnecting",
+            "unknown-future-status",
+        ] {
+            assert_ne!(
+                status_bucket(status),
+                "error",
+                "non-error status {status:?} must never resolve to the red bucket",
+            );
+        }
+    }
 }

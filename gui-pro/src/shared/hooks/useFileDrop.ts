@@ -5,6 +5,10 @@ import type { AppTab, VpnStatus } from "../types";
 // IN-41: reuse the established Russian one/few/many helper so the batch toast declines «конфиг»
 // («Добавлено 2 конфига» / «Добавлено 5 конфигов»). English uses i18next _one/_other keys instead.
 import { pluralRu } from "../lib/pluralRu";
+// 19-04 (Q3 / D-09): reuse the SAME PartialResult / ImportItem / SeededPartial shapes the picker path
+// (ImportModal, Plan 03) exported, so a config-partial DROP surfaces the identical rich in-modal UX
+// instead of per-file flyaway toasts. Type-only import — no runtime coupling to the component.
+import type { PartialResult, ImportItem, SeededPartial } from "../../components/connection/ImportModal";
 
 interface FileDropResult {
   file_type: "config" | "routing";
@@ -17,6 +21,15 @@ interface UseFileDropOptions {
   onConfigImported: (configPath: string) => void;
   onRoutingImported: () => void;
   pushSuccess: (message: string, variant?: "success" | "error") => void;
+  /**
+   * 19-04 (Q3 / D-09): a CONFIG drop batch that partly fails routes HERE instead of firing a per-file
+   * flyaway error toast for each failed config. The App opens the ImportModal seeded with this partial
+   * (failed list + «Повторить») — the SAME rich in-modal UX as the file-picker path. The successful
+   * configs are still promoted via onConfigImported; a fully-successful drop keeps its batch snackbar;
+   * the routing (.json) failure path is UNCHANGED. When omitted (defensive — the hook used without the
+   * modal), config failures fall back to the legacy per-file error toast so they are never lost.
+   */
+  onConfigPartial?: (partial: SeededPartial) => void;
   isBusy?: boolean;
   /**
    * IN-16: the active tab, used to gate the accepted format so the drop overlay's label stays
@@ -37,6 +50,7 @@ export function useFileDrop({
   onConfigImported,
   onRoutingImported,
   pushSuccess,
+  onConfigPartial,
   isBusy = false,
   activeTab,
 }: UseFileDropOptions) {
@@ -108,6 +122,13 @@ export function useFileDrop({
       let configCount = 0;
       let routingCount = 0;
       let lastConfigPath: string | undefined;
+      // 19-04 (Q3 / D-09): accumulate CONFIG-file failures into the SAME PartialResult shape the picker
+      // path uses, so a partial config batch opens the ImportModal (failed list + «Повторить») instead
+      // of a burst of per-file flyaway error toasts. D-29: only the file NAME is retained — never the
+      // config content / password. `configFailedItems` retains a retry closure per failed file that
+      // re-runs the SAME dropped file (no new payload, T-19-31).
+      const configFailed: PartialResult["failed"] = [];
+      const configFailedItems: ImportItem[] = [];
 
       for (const file of fileList) {
         const fileName = file.name.toLowerCase();
@@ -156,10 +177,42 @@ export function useFileDrop({
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          // IN-57: the backend returns i18n key codes for routing-import failures
-          // (routing.import_too_large / routing.import_invalid) so they show localized, not raw
-          // English on a Russian UI. Any other error passes through verbatim.
-          pushSuccess(msg.startsWith("routing.import_") ? t(msg) : msg, "error");
+          if (isToml && onConfigPartial) {
+            // 19-04 (Q3 / D-09): a CONFIG-file failure accumulates into the shared PartialResult
+            // instead of a per-file flyaway toast — surfaced below via onConfigPartial (App opens the
+            // ImportModal seeded with it). Retain a retry closure that re-runs the SAME dropped file
+            // (re-reads its content + re-imports — no new/auto payload, T-19-31). D-29: label = the
+            // file NAME only; the config content / password is never surfaced or logged here.
+            configFailed.push({ label: file.name, reason: "invalid-file" });
+            configFailedItems.push({
+              label: file.name,
+              run: async () => {
+                const retryContent = await file.text();
+                const retryResult = await invoke<FileDropResult>("import_dropped_content", {
+                  content: retryContent,
+                  fileName: file.name,
+                });
+                if (retryResult.file_type === "config" && retryResult.config_path) {
+                  // Best-effort manifest add (idempotent) — mirrors the initial-drop path.
+                  try {
+                    await invoke("add_config", { path: retryResult.config_path });
+                  } catch {
+                    // Already manifest-tracked by the Rust import path.
+                  }
+                  return retryResult.config_path;
+                }
+                // Not a config on re-run → a config-import failure for the partial UX.
+                throw new Error("import.not_a_config");
+              },
+            });
+          } else {
+            // Routing (.json) failures — UNCHANGED — keep the per-file error toast. IN-57: the backend
+            // returns i18n key codes for routing-import failures (routing.import_too_large /
+            // routing.import_invalid) so they show localized, not raw English on a Russian UI. Any
+            // other error (or a config failure with NO onConfigPartial wired — defensive fallback)
+            // passes through verbatim so it is never silently lost.
+            pushSuccess(msg.startsWith("routing.import_") ? t(msg) : msg, "error");
+          }
         }
       }
 
@@ -168,6 +221,23 @@ export function useFileDrop({
       // path is passed (at most one config is activated, per IN-18).
       if (lastConfigPath) onConfigImported(lastConfigPath);
       if (routingCount > 0) onRoutingImported();
+
+      // 19-04 (Q3 / D-09): if any CONFIG file failed, route the config batch through the SAME rich
+      // in-modal partial UX as the picker path — the App opens the ImportModal seeded with the failed
+      // list + «Повторить». The successful configs are already promoted above, so their batch snackbar
+      // is intentionally SUPPRESSED here (parity with the picker path, where a partial batch stays
+      // in-modal and fires NO success snackbar). A fully-successful config drop falls through to the
+      // unchanged snackbar path below. Any routing outcome in the same (mixed, off-gated-tab) batch is
+      // still reported the usual way.
+      if (configFailed.length > 0 && onConfigPartial) {
+        onConfigPartial({ ok: configCount, failed: configFailed, failedItems: configFailedItems });
+        if (routingCount === 1) {
+          pushSuccess(t("drop.routing_imported", "Routing rules imported"));
+        } else if (routingCount > 1) {
+          pushSuccess(t("drop.configs_added_n", "Добавлено {{count}}", { count: routingCount }));
+        }
+        return;
+      }
 
       const okCount = configCount + routingCount;
       if (okCount === 1) {
@@ -185,8 +255,13 @@ export function useFileDrop({
         // routing-only or mixed batch (only reachable off the gated tabs) keeps the generic count.
         if (routingCount === 0) {
           pushSuccess(
+            // IN-05 (19-fix): batch copy folded into the shared i18n key (config_added_batch) instead
+            // of a hardcoded «Добавлено …» literal — same idiom as the picker path (ImportModal). ru
+            // declension via pluralRu ({{plural}}); en uses its own count key.
             i18n.language === "ru"
-              ? `Добавлено ${pluralRu(configCount, "конфиг", "конфига", "конфигов")}`
+              ? t("connection.import.config_added_batch", {
+                  plural: pluralRu(configCount, "конфиг", "конфига", "конфигов"),
+                })
               : t("drop.configs_added", { count: configCount }),
           );
         } else {
@@ -206,7 +281,7 @@ export function useFileDrop({
       document.removeEventListener("dragleave", handleDragLeave);
       document.removeEventListener("drop", handleDrop);
     };
-  }, [isBlocked, onConfigImported, onRoutingImported, pushSuccess, t, i18n.language, activeTab]);
+  }, [isBlocked, onConfigImported, onRoutingImported, pushSuccess, onConfigPartial, t, i18n.language, activeTab]);
 
   return { isDragging };
 }

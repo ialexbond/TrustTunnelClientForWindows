@@ -19,7 +19,7 @@ use crate::ssh;
 /// uses, so introducing the typed owner does not touch the cross-process contract
 /// ({status, error}) that the main window, tray webview and Rust `listen_any`
 /// consume. The round-trip test in this file locks that mapping (RESEARCH A1).
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum VpnStatus {
     Disconnected,
@@ -114,6 +114,14 @@ pub struct AppState {
     pub tray_notified: Arc<Mutex<bool>>,
     /// Last-used config path for tray-initiated connect.
     pub config_path: Arc<Mutex<Option<String>>>,
+    /// Phase 19 UAT (G-19-6 v3): the DISPLAY NAME of the config whose connect FAILED, captured by the
+    /// Error-writing sidecar reader task (its own `my_config_name`) IMMEDIATELY before it writes
+    /// `Error`. `notify::maybe_fire` consumes this for a `ConnectionError` plate INSTEAD of the live
+    /// `config_path` — because a concurrent reconnect/switch-back can repoint `config_path` to the
+    /// HEALTHY server between the error being decided and `maybe_fire` resolving the name (the
+    /// wrong-server-name bug the log proved). Take-once: `maybe_fire` clears it after use; a later
+    /// error overwrites it. D-29: a display name only — never the `.toml`, host, or password.
+    pub pending_error_config_name: Arc<Mutex<Option<String>>>,
     /// Last-used log level for tray-initiated connect.
     pub log_level: Arc<Mutex<String>>,
     /// Current UI locale ("ru" or "en") for tray menu text.
@@ -389,7 +397,14 @@ impl AppState {
     /// transient `switch_or_reconnect_pending` bool the FE has already cleared by now — the
     /// dead-guard defect). Returns `true` when the caller must bail without spawning and
     /// WITHOUT clearing `user_disconnect_requested` (the explicit Disconnect wins).
-    pub fn consume_switch_stamp_and_should_bail(&self) -> bool {
+    ///
+    /// `live_generation` — the PRE-bump `connection_generation` the caller captured.
+    /// Phase 19 UAT (G-19-2) moved `vpn_connect`'s own generation bump AHEAD of this
+    /// read (so a superseded sidecar's late exit is suppressed), so we can no longer
+    /// `.load()` it fresh here — that would see the POST-bump value and false-bail a
+    /// normal switch. `switch_disconnect_wins` needs `live == stamped + 1` for the
+    /// normal-switch case, i.e. the generation as it stood BEFORE this connect's bump.
+    pub fn consume_switch_stamp_and_should_bail(&self, live_generation: u64) -> bool {
         // Read-and-reset in one shot: swap the sentinel in, take whatever was there.
         let raw = self
             .switch_authorized_generation
@@ -399,7 +414,7 @@ impl AppState {
         crate::lifecycle::switch_disconnect_wins(
             self.user_disconnect_requested.load(Ordering::SeqCst),
             switch_stamp,
-            self.connection_generation.load(Ordering::SeqCst),
+            live_generation,
         )
     }
 }
@@ -1343,9 +1358,17 @@ pub async fn vpn_connect(
         std::thread::spawn(crate::diagnostics::write_system_snapshot);
     }
 
-    // Remember config for tray-initiated reconnect
-    if let Ok(mut cp) = state.config_path.lock() { *cp = Some(config_path.clone()); }
-    if let Ok(mut ll) = state.log_level.lock() { *ll = log_level.clone(); }
+    // Phase 19 UAT (G-19-6 v2): the `state.config_path` / `state.log_level` writes moved DOWN into the
+    // R8 committed critical section (right after the generation bump below), so they are written ONLY
+    // once this connect has COMMITTED (passed the R8 refuse). Writing config_path EAGERLY here corrupted
+    // the desktop error-plate NAME: notify::maybe_fire resolves the plate name from the LIVE config_path,
+    // and a revert connect that R8-REFUSES (its destination server is still the live session) would
+    // repoint config_path to the new/healthy server, then return Err WITHOUT restoring it AND WITHOUT
+    // bumping the generation. A later error from the STILL-LIVE old session (a genuinely CURRENT
+    // generation — so no generation guard can catch it) then resolved its plate name from the repointed
+    // config_path and named the WRONG (healthy) server — «Не удалось подключиться к «Server1»» for a
+    // Server2 failure. Coupling the config_path write to the generation bump keeps "who owns the live
+    // generation" and "who names the plate" the SAME session.
 
     // D-08 lifecycle marker (1): connect start. A FIXED phrase (no config path —
     // the old "Connecting with config: {config_path}" emit leaked the path onto
@@ -1364,6 +1387,23 @@ pub async fn vpn_connect(
     // the handle is stale (status Disconnected/Error) → take + kill it and proceed, so
     // the user recovers without restarting the app. Gating on the status (not just
     // presence) is the liveness check Codex flagged — a bare presence check is unsafe.
+    // Phase 19 UAT (G-19-2): the connection-generation bump moved HERE — into the R8 block,
+    // AFTER the refuse-if-active decision but BEFORE any stale sidecar is killed and BEFORE the
+    // first `.await` below. The bump used to sit just before the sidecar spawn (after the preflight
+    // await), which was TOO LATE: an old/stale child reaped during R8's kill (or during the
+    // preflight await) still had `live == its captured generation`, so the F12 guard
+    // (terminated_arm_may_write_status) let its non-zero exit write Error("sidecar-exit") ONTO this
+    // fresh Connecting — and the new sidecar, once genuinely CONNECTED, could never emit Connected
+    // through that stale Error (probe_task_may_emit gates on Connecting/Reconnecting). Bumping while
+    // STILL holding the `sidecar_child` lock orders the bump before the reader task's Terminated arm
+    // can read the live generation (that arm re-acquires this same lock for its owns-check before it
+    // reads live), so a superseded child is reliably suppressed. We must NOT bump before the refuse
+    // check: a bump over a genuinely ACTIVE session would advance the live generation past that
+    // session's captured one and wrongly suppress ITS own future crash Error. `connect_generation`
+    // (post-bump) is captured for the connect-timeout watchdog; `live_generation` (pre-bump) is fed
+    // to the FAB-R4 stamp decision, which needs the pre-bump value (normal switch = live == stamped+1).
+    let live_generation: u64;
+    let connect_generation: u64;
     {
         let status_now = *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner());
         let session_active = matches!(
@@ -1382,13 +1422,33 @@ pub async fn vpn_connect(
             .sidecar_child
             .lock()
             .map_err(|e| format!("Lock error: {e}"))?;
-        if guard.is_some() {
-            if session_active {
-                return Err("VPN is already running".into());
-            }
-            if let Some(child) = guard.take() {
-                child.child.kill().ok();
-            }
+        // Refuse a rival connect over a genuinely active session BEFORE bumping (see above).
+        if guard.is_some() && session_active {
+            return Err("VPN is already running".into());
+        }
+        // Committed to connect. Bump the generation now — inside the child lock, before the
+        // stale-handle kill below and before the first await — so a superseded child's late
+        // Terminated is suppressed by F12. fetch_add returns the PRE-increment value.
+        live_generation = state.connection_generation.fetch_add(1, Ordering::SeqCst);
+        connect_generation = live_generation + 1;
+        // Phase 19 UAT (G-19-6 v2): COMMIT the config path + log level to AppState HERE — only after
+        // this connect passed the R8 refuse and bumped the generation. config_path is the SOLE source
+        // notify::maybe_fire uses to NAME the error plate, so committing it together with the generation
+        // bump keeps the plate name aligned with the session that owns the live generation: an error
+        // from the CURRENT session names its own server; an old-session error arriving after a real bump
+        // is superseded (is_current_generation=false) and fires the correctly-named superseded plate. A
+        // connect that R8-refuses above returns BEFORE this, so it can never repoint config_path out from
+        // under the still-live session (the wrong-server-name bug). Same sidecar_child lock is held — a
+        // DIFFERENT mutex, so no deadlock.
+        if let Ok(mut cp) = state.config_path.lock() {
+            *cp = Some(config_path.clone());
+        }
+        if let Ok(mut ll) = state.log_level.lock() {
+            *ll = log_level.clone();
+        }
+        // R8: take + kill a stale handle left by an idle/failed session (status not active).
+        if let Some(child) = guard.take() {
+            child.child.kill().ok();
             crate::logging::log_app(
                 "WARN",
                 "[vpn] stale sidecar handle on an idle/failed session — cleared it and proceeding with connect (R8)",
@@ -1475,7 +1535,7 @@ pub async fn vpn_connect(
     // connect (no stamp, sentinel `u64::MAX` → `None`) and the reconnect supervisor path
     // (never stamps) NEVER bail here. The seam is shared with the integration test so the
     // stamp-alive-and-consulted behaviour is pinned against the real AppState atomics.
-    if state.consume_switch_stamp_and_should_bail() {
+    if state.consume_switch_stamp_and_should_bail(live_generation) {
         crate::logging::log_app(
             "INFO",
             "[vpn] genuine user-disconnect landed during a config switch — bailing to Disconnected, NOT spawning B (FAB-R4)",
@@ -1518,13 +1578,13 @@ pub async fn vpn_connect(
         sidecar::emit_preflight_offline_marker(&app);
     }
 
-    // Bump the connection generation so THIS session owns a distinct number
-    // (Codex HIGH stale-actor guard). The connect-timeout watchdog spawned below
-    // captures the post-bump value and re-checks it before any kill / status-write;
-    // a later manual reconnect / disconnect bumps it again and neutralizes this
-    // watchdog. `fetch_add` returns the PRE-increment value, so the captured
-    // generation for this session is that + 1.
-    let connect_generation = state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    // Phase 19 UAT (G-19-2): the connection-generation bump moved UP into the R8 block
+    // above — BEFORE any stale-sidecar kill and the first `.await` — so a superseded
+    // child's late Terminated is suppressed by F12 (see the long note there).
+    // `connect_generation` (post-bump) was captured there for the connect-timeout
+    // watchdog spawned below, and `live_generation` (pre-bump) fed the FAB-R4 guard
+    // above; nothing to bump here anymore. (Codex HIGH stale-actor guard: a later manual
+    // reconnect / disconnect bumps the generation again and neutralizes this watchdog.)
 
     // Check if user cancelled during routing rules resolution / the awaited pre-flight.
     // AUDIT-2026-06-11 #19: ALSO consult the durable T-31 flag — a vpn_disconnect that
@@ -3008,6 +3068,7 @@ mod tests {
             last_error: Arc::new(Mutex::new(None)),
             tray_notified: Arc::new(Mutex::new(false)),
             config_path: Arc::new(Mutex::new(None)),
+            pending_error_config_name: Arc::new(Mutex::new(None)),
             log_level: Arc::new(Mutex::new("info".to_string())),
             locale: Arc::new(Mutex::new("ru".to_string())),
             benchmark_cancel_tx: Arc::new(tokio::sync::Mutex::new(None)),
@@ -3085,7 +3146,7 @@ mod tests {
         state.switch_or_reconnect_pending.store(false, Ordering::Relaxed);
 
         // 5. `vpn_connect(B)` reaches its guard: consume-and-decide against the real atomics.
-        state.consume_switch_stamp_and_should_bail()
+        state.consume_switch_stamp_and_should_bail(state.connection_generation.load(Ordering::SeqCst))
     }
 
     #[test]
@@ -3168,12 +3229,12 @@ mod tests {
         // Now a plain manual connect reaches the guard: live (1) == stamped (0) + 1 →
         // must NOT bail. The connect then consumes the (now-harmless) stamp.
         assert!(
-            !state.consume_switch_stamp_and_should_bail(),
+            !state.consume_switch_stamp_and_should_bail(state.connection_generation.load(Ordering::SeqCst)),
             "a plain manual connect after an aborted switch must NOT be falsely bailed",
         );
         // Stamp consumed → a subsequent connect sees the sentinel and never bails.
         assert_eq!(state.switch_authorized_generation.load(Ordering::SeqCst), u64::MAX);
-        assert!(!state.consume_switch_stamp_and_should_bail());
+        assert!(!state.consume_switch_stamp_and_should_bail(state.connection_generation.load(Ordering::SeqCst)));
     }
 
     #[test]
@@ -3185,7 +3246,7 @@ mod tests {
         state.user_disconnect_requested.store(true, Ordering::SeqCst);
         state.connection_generation.fetch_add(1, Ordering::SeqCst);
         assert!(
-            !state.consume_switch_stamp_and_should_bail(),
+            !state.consume_switch_stamp_and_should_bail(state.connection_generation.load(Ordering::SeqCst)),
             "a plain manual connect with no stamp must never bail",
         );
     }
@@ -3208,7 +3269,48 @@ mod tests {
             "tray connect must reset the stamp so it cannot leak into a later vpn_connect",
         );
         // A subsequent vpn_connect now reads the sentinel → never bails.
-        assert!(!state.consume_switch_stamp_and_should_bail());
+        assert!(!state.consume_switch_stamp_and_should_bail(state.connection_generation.load(Ordering::SeqCst)));
+    }
+
+    #[test]
+    fn fab_r4_consume_uses_caller_pre_bump_generation_not_a_fresh_load() {
+        // Phase 19 UAT (G-19-2): vpn_connect now bumps connection_generation BEFORE it reads the
+        // FAB-R4 guard (so a superseded sidecar's late Terminated is suppressed). consume must
+        // therefore judge against the caller's PRE-bump generation, not a fresh load — otherwise a
+        // NORMAL switch (own teardown = stamped+1) would see the POST-bump value (stamped+2) and
+        // WRONGLY bail to Disconnected. Model: stamp at gen 0, teardown bump → 1 (the pre-bump live
+        // the connect captured), then the connect's OWN early bump → 2 (what a fresh load would now
+        // return). Passing the pre-bump 1 must NOT bail; a fresh load of 2 WOULD have (2 > 0+1).
+        let state = test_app_state();
+        state.stamp_switch_authorized_if_pending(true); // stamp 0
+        state.user_disconnect_requested.store(true, Ordering::SeqCst);
+        state.connection_generation.fetch_add(1, Ordering::SeqCst); // teardown → 1
+        let live_pre_bump = state.connection_generation.load(Ordering::SeqCst); // 1
+        state.connection_generation.fetch_add(1, Ordering::SeqCst); // connect's own early bump → 2
+        assert_eq!(state.connection_generation.load(Ordering::SeqCst), 2);
+        assert!(
+            !state.consume_switch_stamp_and_should_bail(live_pre_bump),
+            "a normal switch must NOT false-bail when the connect already bumped the generation (G-19-2)",
+        );
+    }
+
+    #[test]
+    fn fab_r4_consume_still_bails_a_genuine_disconnect_with_pre_bump_generation() {
+        // The dual of the test above: a GENUINE tray «Отключить» in the teardown→connect gap still
+        // wins even now that the connect bumps early. stamp 0, teardown → 1, extra disconnect → 2
+        // (the pre-bump live), then the connect's own early bump → 3. Passing the pre-bump 2 must
+        // still bail (2 > stamped 0 + 1). The early bump does not mask a real disconnect.
+        let state = test_app_state();
+        state.stamp_switch_authorized_if_pending(true); // stamp 0
+        state.user_disconnect_requested.store(true, Ordering::SeqCst);
+        state.connection_generation.fetch_add(1, Ordering::SeqCst); // teardown → 1
+        state.connection_generation.fetch_add(1, Ordering::SeqCst); // genuine extra disconnect → 2
+        let live_pre_bump = state.connection_generation.load(Ordering::SeqCst); // 2
+        state.connection_generation.fetch_add(1, Ordering::SeqCst); // connect's own early bump → 3
+        assert!(
+            state.consume_switch_stamp_and_should_bail(live_pre_bump),
+            "a genuine mid-switch disconnect must still bail with the pre-bump generation (G-19-2)",
+        );
     }
 
     // ─── Phase 17 Wave 0 (17-01) — GREEN by 17-04: PA-1 typed payloads + CA-2 guard ───────
@@ -3348,6 +3450,64 @@ mod tests {
             returned.file_name(),
             requested.file_name(),
             "the canonical path must preserve the requested config file name"
+        );
+    }
+
+    // ─── Phase 19 (19-01, Bug 1 / D-04, T-19-02) — clear_vpn_error race-safety guard ────────
+    //
+    // The desktop error plate's × acknowledges by invoking `clear_vpn_error`. That command is a
+    // NO-OP unless the live status is `Error` (T-09-02 guard, vpn.rs above): a stale plate closed
+    // AFTER an in-flight reconnect/auto-switch has already moved status off `Error` (to
+    // Connecting/Connected/Recovering/Reconnecting) must NEVER knock the live session offline.
+    // `clear_vpn_error` itself needs a live `AppHandle`/`State` to emit (unavailable in a unit
+    // test), so — exactly as the snapshot-payload tests here lock the cross-process contract
+    // without invoking the command — these tests pin the GUARD PREDICATE the command reads off the
+    // real `AppState.vpn_status` field: proceed iff status == Error. The predicate is the whole
+    // race-safety property; a regression that let the ack fire off-Error fails HERE.
+
+    /// The exact acknowledge-guard `clear_vpn_error` evaluates: the Error→Disconnected clear is
+    /// legal ONLY from `Error`. Reads the real `AppState.vpn_status` the command reads.
+    fn error_ack_would_proceed(state: &AppState) -> bool {
+        state
+            .vpn_status
+            .lock()
+            .map(|g| *g == VpnStatus::Error)
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn clear_vpn_error_is_a_noop_for_every_non_error_status() {
+        // Drive the live status through every non-Error value; the acknowledge guard must be a
+        // no-op each time — closing a stale error plate can never clobber a live/reconnecting
+        // session (T-19-02). This is the held-out race-safety property from RESEARCH.
+        let state = test_app_state();
+        for status in [
+            VpnStatus::Disconnected,
+            VpnStatus::Connecting,
+            VpnStatus::Connected,
+            VpnStatus::Disconnecting,
+            VpnStatus::Recovering,
+            VpnStatus::Reconnecting,
+        ] {
+            // VpnStatus derives no Debug; use the serde wire string for the failure message.
+            let wire = serde_json::to_string(&status).unwrap();
+            *state.vpn_status.lock().unwrap() = status;
+            assert!(
+                !error_ack_would_proceed(&state),
+                "clear_vpn_error must NO-OP off-Error (status {wire}) — a stale plate close \
+                 must never knock a live session offline",
+            );
+        }
+    }
+
+    #[test]
+    fn clear_vpn_error_proceeds_only_from_error() {
+        // The one legal case: from `Error` the acknowledge proceeds (→ Disconnected → gray tray).
+        let state = test_app_state();
+        *state.vpn_status.lock().unwrap() = VpnStatus::Error;
+        assert!(
+            error_ack_would_proceed(&state),
+            "clear_vpn_error must proceed from Error — the acknowledge that turns the tray gray (D-04)",
         );
     }
 }

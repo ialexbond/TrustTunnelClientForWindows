@@ -7,6 +7,7 @@ import {
   isLikelyCaChain,
   deriveFingerprintFromDerB64,
 } from "../../shared/utils/userAdvanced";
+import { parseCertInfo } from "./certUtils";
 import { formatError } from "../../shared/utils/formatError";
 import { sanitizeLogMessage } from "../../shared/utils/sanitizeLogMessage";
 import type { ActivityTag } from "../../shared/hooks/useActivityLog";
@@ -101,10 +102,246 @@ export interface UseUserFormStateArgs {
   editUsername?: string;
   existingUsers: string[];
   sshParams: SshParams;
+  /**
+   * Cert type detected for the endpoint (from `server_get_cert_info`, threaded
+   * by UserModal). Drives the Phase-19 (D-07) self-signed retro-correction: a
+   * `"self_signed"` endpoint whose stored advanced entry carries the
+   * un-persisted install DEFAULT is re-seeded with the actually-issued TLS/cert
+   * policy on Edit-open. `undefined` / `"lets_encrypt"` / `"unknown"` leave the
+   * existing mapping untouched.
+   */
+  serverCertType?: "self_signed" | "lets_encrypt" | "unknown";
   /** Structured activity-log sink (passed in so the hook stays UI-agnostic). */
   activityLog: (tag: ActivityTag, message: string, details?: string) => void;
   /** Storybook-only: skip backend calls. */
   _storybook?: boolean;
+}
+
+/** Endpoint TLS cert probe response (subset consumed here). Mirrors the Rust
+ *  `EndpointCertInfo` returned by `server_fetch_endpoint_cert`. */
+interface EndpointCertProbe {
+  leaf_der_b64?: string;
+  fingerprint_hex?: string;
+  chain_len?: number;
+  is_system_verifiable?: boolean;
+}
+
+/**
+ * True for a bare IPv4 literal (e.g. "192.168.1.1"). `fetch_endpoint_cert`
+ * REJECTS an IP SNI (cert_probe.rs FIX-M), so the Phase-19 retro-correction
+ * probe must be handed the endpoint's own hostname, never a dotted-quad. Mirrors
+ * the exact `all-digits/dots + 4 labels` check the Rust side uses.
+ */
+function isIpv4Literal(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.split(".").length === 4 &&
+    value.split("").every((c) => (c >= "0" && c <= "9") || c === ".")
+  );
+}
+
+/**
+ * Phase 19 (19-02, D-07) — is the stored `users-advanced.toml` entry the
+ * un-persisted install DEFAULT that the self-signed retro-correction targets?
+ *
+ * ROOT CAUSE (19-RESEARCH §Bug2): the install applies `skip_verification=true` +
+ * a pinned self-signed leaf at export time (`apply_fetched_self_signed_policy`,
+ * server_config.rs:504) but NEVER persists that TLS policy into
+ * `users-advanced.toml` — the exact file the Edit modal reads. So the modal
+ * seeds the DEFAULT (`skipVerification=false`, no pin) and shows the WRONG
+ * TLS/cert settings.
+ *
+ * WR-02 — distinguishing «never saved» from «saved a default-looking value»:
+ * the naive `!skip && !pin && !certDer` check cannot tell the install default
+ * apart from a user who DELIBERATELY toggled skip-verify OFF (no pin) and saved
+ * (same shape). `server_get_user_advanced` can't disambiguate either — the
+ * install writes a record (username/dns/anti_dpi) with the default TLS policy,
+ * so «entry absent» is not the signal. We use the reviewer's accepted MINIMUM:
+ * additionally require every ADVANCED-owned field (displayName / Custom SNI /
+ * upstream / DNS) to still be at its default — a real user save almost always
+ * carries at least one such change, so any non-default field ⇒ treat the record
+ * as saved and NEVER override it. (A user who saved ONLY skip=false with no
+ * other change remains the documented residual ambiguity.) `cidr`/`antiDpi` are
+ * deliberately EXCLUDED: they come from rules.toml, not the advanced entry.
+ */
+/**
+ * IN-03 (19-fix): a DEV-gated, SANITIZED one-liner for the best-effort self-signed pin recovery
+ * degrade — mirrors `logImportFailure`'s D-29 discipline. The bare `catch {}` left no way to see
+ * WHY a pin did not recover (wrong port, SNI rejected, offline), so diagnosing the Manual-Only UAT
+ * (D7) item was blind. Only a short reason LABEL (routed through the shared sanitizer, which also
+ * length-caps) ever reaches the console; NEVER the SSH password, cert private material, or any
+ * secret. Gated behind `import.meta.env.DEV` (same gate as the vpn-log F12 mirror) so a release
+ * build never streams it.
+ */
+function logSelfSignedDeriveDegrade(reason: unknown): void {
+  if (!import.meta.env.DEV) return;
+  // console.error is permitted by the no-console rule (only console.log is flagged).
+  console.error(
+    `[user-edit] self-signed pin recovery degraded: ${sanitizeLogMessage(formatError(reason))}`,
+  );
+}
+
+function isUnpersistedInstallDefault(base: DeeplinkFields): boolean {
+  return (
+    !base.skipVerification &&
+    !base.pinCert &&
+    !base.certDerB64 &&
+    base.displayName === DEFAULT_DEEPLINK.displayName &&
+    base.customSni === DEFAULT_DEEPLINK.customSni &&
+    base.upstreamProtocol === DEFAULT_DEEPLINK.upstreamProtocol &&
+    base.dnsUpstreams.length === 0
+  );
+}
+
+/**
+ * Phase 19 (19-02, D-07) — BEST-EFFORT async recovery of the actually-issued
+ * self-signed pin/SNI. This is the ASYNC half of the retro-correction; the
+ * DETERMINISTIC `skipVerification=true` is seeded synchronously at the call site
+ * (WR-04) so the modal never blocks the whole form on SSH round-trips.
+ *
+ * WR-01 — self-signed detection: the panel's `serverCertType` prop is preferred,
+ * but it can be `unknown`/`undefined` when its `server_get_cert_info` fetch failed
+ * or had not resolved at Edit-open. Rather than silently no-op (the Bug-2
+ * symptom re-manifesting intermittently), we fall back to the IN-LOAD
+ * `server_get_cert_info` parse and, finally, the probe's `is_system_verifiable`
+ * (`=== false` ⇒ self-signed). A system-verifiable (LE-like) endpoint that none of
+ * the three flag as self-signed yields `null` — no correction.
+ *
+ * WR-03(b) — the recovered SNI seeds `customSni` whenever a valid non-IP SNI
+ * resolved (matching the backend degrade `custom_sni="trusttunnel.local"`),
+ * INDEPENDENT of whether the leaf pin could be recovered (moved out of the
+ * probe-success branch).
+ *
+ * Reuses the EXISTING FE-invokable `server_fetch_endpoint_cert` — no new backend
+ * command. On any failure we DEGRADE (bare catch here; a DEV-only sanitized trail
+ * is layered in by IN-03) to skip-verification-only when the endpoint is already
+ * known self-signed, else `null`. D-08: only VALUES change. D-29: no secret is
+ * logged. Returns the recovered fields, or `null` when no correction applies.
+ */
+async function recoverIssuedSelfSignedPin(
+  base: DeeplinkFields,
+  args: {
+    serverCertType?: "self_signed" | "lets_encrypt" | "unknown";
+    sshParams: SshParams;
+  },
+): Promise<Partial<DeeplinkFields> | null> {
+  const propSelfSigned = args.serverCertType === "self_signed";
+  // WR-05 (Phase 19 UAT G-19-3): hoist the self-signed verdict AND the resolved
+  // non-IP SNI to function scope so BOTH degrade paths (a throwing leaf-pin probe
+  // and the outer catch) still emit the DETERMINISTIC correction. The live repro
+  // (a no-domain self-signed server) combined an `unknown` cert prop
+  // (propSelfSigned=false) with a THROWING endpoint probe: the OLD outer catch
+  // returned `propSelfSigned ? {skip} : null` → null, silently discarding the
+  // already-known self-signedness (in-load cert) AND the already-resolved
+  // customSni="trusttunnel.local". Result: «Отключить проверку» stayed OFF, Custom
+  // SNI stayed EMPTY, and the pin toggle stayed permanently gated (it disables while
+  // Custom SNI is blank — a chicken-and-egg). Now a KNOWN self-signed endpoint always
+  // yields at least {skipVerification:true, customSni} even when the leaf can't be
+  // TLS-probed.
+  let selfSigned = propSelfSigned;
+  let resolvedSni = "";
+  // The deterministic (no-leaf-pin) correction from whatever we currently know.
+  // customSni is only ever a non-IP SNI — resolvedSni is set solely PAST the IP
+  // guard below, so an IP subject never lands in Custom SNI (validateCustomSni
+  // would otherwise block submit).
+  const deterministic = (): Partial<DeeplinkFields> | null => {
+    if (!selfSigned) return null;
+    const corrected: Partial<DeeplinkFields> = { skipVerification: true };
+    if (resolvedSni) corrected.customSni = base.customSni || resolvedSni;
+    return corrected;
+  };
+  // Best-effort pin recovery. Source a non-IP SNI (the endpoint's own hostname)
+  // from server_get_cert_info; without it we cannot probe (IP SNI is rejected).
+  try {
+    const rawCert = await invoke<unknown>(
+      "server_get_cert_info",
+      args.sshParams,
+    ).catch(() => null);
+    const cert = parseCertInfo(rawCert);
+    const sni = (cert.subjectCn || cert.domain || "").trim();
+    // WR-01: fall back to the in-load cert parse when the prop was unavailable.
+    if (cert.certType === "self_signed") selfSigned = true;
+
+    if (!sni || isIpv4Literal(sni)) {
+      // No usable SNI → cannot probe. Seed skip=true only when we ALREADY know the
+      // endpoint is self-signed (prop or in-load cert); otherwise leave untouched.
+      return deterministic();
+    }
+    resolvedSni = sni;
+
+    // Detect the endpoint TLS port from vpn.toml (listen_address), else 443 —
+    // mirrors CertificateFingerprintCard's port auto-detect.
+    let certPort = 443;
+    const toml = await invoke<string>("server_get_config", {
+      host: args.sshParams.host,
+      port: args.sshParams.port,
+      user: args.sshParams.user,
+      password: args.sshParams.password,
+      keyPath: args.sshParams.keyPath,
+    }).catch(() => null);
+    if (typeof toml === "string") {
+      const m = toml.match(/listen_address\s*=\s*"[^"]*:(\d+)"/);
+      if (m) {
+        const detected = Number.parseInt(m[1], 10);
+        if (Number.isInteger(detected) && detected >= 1 && detected <= 65535) {
+          certPort = detected;
+        }
+      }
+    }
+
+    // WR-05: wrap ONLY the leaf-pin probe. A probe failure must DEGRADE to the
+    // deterministic skip+SNI correction we can already emit — NEVER to null. The
+    // old code let a probe throw fall through to the outer catch, which dropped the
+    // resolved SNI and left the pin permanently gated (the G-19-3 regression).
+    let probe: EndpointCertProbe | null = null;
+    try {
+      probe = await invoke<EndpointCertProbe | null>(
+        "server_fetch_endpoint_cert",
+        {
+          ...args.sshParams,
+          hostname: args.sshParams.host, // TCP-connect to the real endpoint (IP OK)
+          certPort,
+          sniHost: sni, // TLS SNI must be the endpoint hostname, not the IP
+        },
+      );
+    } catch (probeErr) {
+      logSelfSignedDeriveDegrade(probeErr);
+      return deterministic();
+    }
+    // WR-01: the endpoint is self-signed if the prop OR the in-load cert OR the
+    // probe says so (is_system_verifiable === false ⇒ self-signed).
+    if (probe?.is_system_verifiable === false) selfSigned = true;
+
+    // A system-verifiable endpoint (none of the three flag it self-signed) is NOT
+    // self-signed → no correction (skip-verify stays OFF, no pin).
+    if (!selfSigned) return null;
+
+    const corrected: Partial<DeeplinkFields> = { skipVerification: true };
+    // WR-03(b): seed the SNI whenever a valid SNI resolved — matches the backend
+    // degrade (custom_sni="trusttunnel.local"). OUTSIDE the probe-success branch
+    // so it applies even when the leaf pin cannot be recovered.
+    corrected.customSni = base.customSni || sni;
+    // Only pin when the probe confirms the cert is NOT system-verifiable — a
+    // self-signed leaf. (A system-verifiable result means it isn't really
+    // self-signed; leave the pin off, skip-verification already seeded.)
+    if (probe?.leaf_der_b64 && probe.is_system_verifiable === false) {
+      const fp =
+        probe.fingerprint_hex ||
+        (await deriveFingerprintFromDerB64(probe.leaf_der_b64));
+      corrected.pinCert = true;
+      corrected.certDerB64 = probe.leaf_der_b64;
+      corrected.certFingerprint = fp;
+      corrected.certIsSystemVerifiable = false;
+    }
+    return corrected;
+  } catch (err) {
+    // DEGRADE (WR-05): honor the in-load cert verdict + resolved SNI, not just the
+    // prop — the minimum working correct state, matching the backend's own
+    // probe-failure degrade (server_config.rs). IN-03: leave a DEV-only,
+    // sanitized trail (reason label only, never a secret — D-29).
+    logSelfSignedDeriveDegrade(err);
+    return deterministic();
+  }
 }
 
 // ── Deeplink params snapshot for dirty-tracking ─────────────────────────────
@@ -181,6 +418,7 @@ export function useUserFormState({
   editUsername,
   existingUsers,
   sshParams,
+  serverCertType,
   activityLog,
   _storybook,
 }: UseUserFormStateArgs) {
@@ -399,30 +637,67 @@ export function useUserFormState({
                   dnsUpstreams: advanced.dnsUpstreams,
                 }
               : { ...DEFAULT_DEEPLINK, cidr, antiDpi };
-            setDeeplink(next);
-            // Snapshot AFTER both fetches resolve, so isDeeplinkDirty
-            // compares against the full server state — not against hardcoded
-            // defaults that would flash the dirty banner for a moment.
-            initialDeeplinkRef.current = toSnapshot(next);
+
+            // Phase 19 (19-02, D-07): retro-correct a self-signed/no-domain
+            // auto-created user whose stored users-advanced.toml carries the
+            // un-persisted install DEFAULT. The install issued
+            // skip_verification=true + a pinned self-signed leaf, but that policy
+            // was never written back into users-advanced.toml (root cause
+            // 19-RESEARCH §Bug2), so `next` above seeds the wrong TLS/cert values.
+            //
+            // WR-02: correct ONLY the un-persisted install default that shows no
+            // sign of a real user save (isUnpersistedInstallDefault). WR-01: an LE
+            // endpoint is authoritative and never corrected. WR-04: seed the
+            // DETERMINISTIC skip=true immediately (no network) so the
+            // headline symptom is fixed without blocking the form; recover the
+            // pin/SNI BEST-EFFORT asynchronously below.
+            //
+            // WR-03(a) — documented choice: for a server whose cert was switched
+            // LE→self-signed AFTER install, the LE-era user's issued .toml carried
+            // skip_verification=false, but their stored entry looks like the
+            // default, so the modal now displays skip=true. That reflects the
+            // CURRENT-issue policy (what a fresh export would issue), NOT the
+            // original LE-era config — an accepted semantic choice, not a bug.
+            const canRetroCorrect =
+              serverCertType !== "lets_encrypt" && isUnpersistedInstallDefault(next);
+            // Deterministic core: a KNOWN self-signed endpoint (prop) issued
+            // skip_verification=true — seed it synchronously. When the prop was
+            // unavailable at open (WR-01), skip=true is applied by the async
+            // recovery below once the probe/cert confirms self-signedness.
+            const seeded: DeeplinkFields =
+              canRetroCorrect && serverCertType === "self_signed"
+                ? { ...next, skipVerification: true }
+                : next;
+
+            setDeeplink(seeded);
+            // Snapshot AFTER both fetches (and the retro-correction) resolve, so
+            // isDeeplinkDirty compares against the full corrected server state —
+            // not against hardcoded defaults that would flash the dirty banner
+            // for a moment (Pitfall 3: the correction MUST re-anchor the baseline
+            // or the form reads as falsely dirty on open).
+            initialDeeplinkRef.current = toSnapshot(seeded);
             // M-05: mirror the flat DeeplinkFields so the Revert button can
             // restore values. Snapshot string above is for dirty-compare only.
-            initialDeeplinkFieldsRef.current = next;
+            initialDeeplinkFieldsRef.current = seeded;
             // CRIT-2 follow-up: server doesn't persist SHA-256 — recompute
             // from DER locally so CertificateFingerprintCard can hydrate.
             // Without this the card boots into the idle «Загрузить» state
             // even though the pin is already saved. Log event for
             // traceability but NEVER leak the full fingerprint into the
             // activity log (first 8 hex chars are enough to correlate).
-            if (next.certDerB64) {
-              deriveFingerprintFromDerB64(next.certDerB64)
+            // Phase 19 (19-02): when the retro-correction already recovered the
+            // fingerprint from the endpoint probe, skip the redundant local
+            // derive (same value) — otherwise derive it locally as before.
+            if (seeded.certDerB64 && !seeded.certFingerprint) {
+              deriveFingerprintFromDerB64(seeded.certDerB64)
                 .then((fp) => {
                   if (cancelled) return;
                   setDeeplink((prev) =>
-                    prev.certDerB64 === next.certDerB64
+                    prev.certDerB64 === seeded.certDerB64
                       ? { ...prev, certFingerprint: fp }
                       : prev,
                   );
-                  const snapshotWithFp = { ...next, certFingerprint: fp };
+                  const snapshotWithFp = { ...seeded, certFingerprint: fp };
                   initialDeeplinkRef.current = toSnapshot(snapshotWithFp);
                   initialDeeplinkFieldsRef.current = snapshotWithFp;
                   activityLog(
@@ -439,6 +714,46 @@ export function useUserFormState({
                     // inline .slice(0, 80) precedent that seeded this helper).
                     `user.edit.cert_fp_derive_failed user=${editUsername} err=${sanitizeLogMessage(formatError(err))}`,
                   );
+                });
+            }
+
+            // Phase 19 UAT (owner): AWAIT the pin/SNI recovery UNDER the loader. WR-04 used to run
+            // it fire-and-forget (a detached .then), so the deterministic skip=true showed at once
+            // but Custom SNI + the recovered pin POPPED IN a beat AFTER the spinner cleared — the
+            // owner saw those fields hydrate late instead of being correct on reveal. RETURNING the
+            // promise into the load chain keeps configLoading=true (the `.finally` below awaits the
+            // value returned from this `.then`) until the correction is applied, so the modal reveals
+            // already-correct values. Only the un-persisted self-signed auto-created user reaches here
+            // (canRetroCorrect) — every other server type skips this and pays NO extra probe latency.
+            // recoverIssuedSelfSignedPin degrades internally (never throws for a self-signed
+            // endpoint), and the .catch swallows any stray reject so a recovery hiccup can never turn
+            // the whole config load into an error — the form still reveals the seeded values.
+            // (WR-01: it also confirms self-signedness when the serverCertType prop was unavailable.)
+            if (canRetroCorrect) {
+              return recoverIssuedSelfSignedPin(seeded, { serverCertType, sshParams })
+                .then((pin) => {
+                  if (cancelled || !pin) return;
+                  setDeeplink((prev) =>
+                    // Respect a concurrent user edit to any corrected field during
+                    // the probe window — otherwise leave `prev` untouched.
+                    prev.skipVerification === seeded.skipVerification &&
+                    prev.pinCert === seeded.pinCert &&
+                    prev.certDerB64 === seeded.certDerB64 &&
+                    prev.customSni === seeded.customSni
+                      ? { ...prev, ...pin }
+                      : prev,
+                  );
+                  // Re-anchor the dirty baseline to the recovered policy (mirrors
+                  // the snapshotWithFp precedent) so the corrected form does not
+                  // read as falsely dirty on open (Pitfall 3).
+                  const snapshotWithPin = { ...seeded, ...pin };
+                  initialDeeplinkRef.current = toSnapshot(snapshotWithPin);
+                  initialDeeplinkFieldsRef.current = snapshotWithPin;
+                })
+                .catch(() => {
+                  // recoverIssuedSelfSignedPin already degrades internally; this is a
+                  // defensive backstop so a rejection never surfaces unhandled and never
+                  // fails the config load (the seeded values still reveal).
                 });
             }
           })

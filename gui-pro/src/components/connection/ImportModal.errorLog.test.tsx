@@ -39,7 +39,7 @@ function setup() {
   return { onClose, onImported };
 }
 
-describe("ImportModal — CA-3 import-error log + «N из M» + D-29 (RED until 17-06)", () => {
+describe("ImportModal — CA-3 import-error log + warning-banner/failed-list + D-29", () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -51,7 +51,7 @@ describe("ImportModal — CA-3 import-error log + «N из M» + D-29 (RED until
     errorSpy.mockRestore();
   });
 
-  it("logs a partial-import failure to a log sink WITHOUT leaking the password, and shows «N из M»", async () => {
+  it("logs a partial-import failure to a log sink WITHOUT leaking the password, and shows the failed file", async () => {
     const user = userEvent.setup();
     // Two picked files: the first imports OK, the second fails at the backend.
     openMock.mockResolvedValue(["/pick/ok.toml", "/pick/bad.toml"]);
@@ -91,10 +91,13 @@ describe("ImportModal — CA-3 import-error log + «N из M» + D-29 (RED until
       expect(joined).not.toContain(SECRET);
     }
 
-    // CA-3 (2): a partial-failure «N из M» message is shown (1 of 2 imported). Matched by the
-    // digits so it is language-agnostic — the «N из M»/«N of M» wording lands with 17-06.
+    // CA-3 (2) / D-09: the partial result stays IN-MODAL as the rich story block — a WARNING banner
+    // (1 imported, some failed) with a list of ONLY the failed files. The old flat «N из M» copy was
+    // replaced in 19-03, so assert the language-agnostic signals instead: the warning-kind banner +
+    // the failed file's basename in the failed list.
     await waitFor(() => {
-      expect(document.body.textContent ?? "").toMatch(/1\D+2/);
+      expect(screen.getByRole("alert")).toHaveAttribute("data-variant", "warning");
     });
+    expect(screen.getByText("bad.toml")).toBeInTheDocument();
   });
 });

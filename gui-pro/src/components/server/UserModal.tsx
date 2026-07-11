@@ -186,6 +186,10 @@ export function UserModal({
     editUsername,
     existingUsers,
     sshParams,
+    // Phase 19 (19-02, D-07): threaded so the Edit-load can retro-correct a
+    // self-signed/no-domain user's stale TLS/cert seed to the actually-issued
+    // policy. Display-correctness only — editability (D-08) is unchanged.
+    serverCertType,
     activityLog,
     _storybook,
   });

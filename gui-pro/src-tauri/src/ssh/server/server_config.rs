@@ -260,6 +260,13 @@ pub async fn fetch_server_config(
     // SAME branded name the Save-As dialog defaults to. None when unknown → no prefix.
     // client_config_filename ignores any non-2-ASCII-letter value, so it is safe unvalidated.
     country_code: Option<String>,
+    // Phase 19 UAT: the Users-tab «Скачать конфиг» is a SAVE-to-a-chosen-location action, NOT an
+    // "add to app". When Some(true) the export stages into the OS temp dir instead of
+    // portable_data_dir(), so the folder-as-truth adoption scan (which only reads the data dir) never
+    // sees it → no unwanted Connection-tab card, and no in-place overwrite of a same-named tracked
+    // config. The wizard's FINALIZE re-export omits this (None) → still writes the active config into
+    // the data dir as before. (Tauri maps JS `stageToTemp`.)
+    stage_to_temp: Option<bool>,
 ) -> Result<String, String> {
     super::super::set_deploy_op_id(op_id);
     emit_step(app, "connect", "progress", "Connecting to server...");
@@ -512,7 +519,13 @@ pub async fn fetch_server_config(
     // Save locally
     emit_step(app, "save", "progress", "Saving configuration...");
 
-    let config_dir = portable_data_dir();
+    // Phase 19 UAT: a DOWNLOAD stages outside the data dir (temp) so adoption never turns it into a
+    // card; the wizard re-export keeps writing the active config into the data dir.
+    let config_dir = if stage_to_temp.unwrap_or(false) {
+        std::env::temp_dir()
+    } else {
+        portable_data_dir()
+    };
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
 

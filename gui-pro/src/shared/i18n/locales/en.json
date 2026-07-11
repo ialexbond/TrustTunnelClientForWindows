@@ -299,7 +299,16 @@
       "link_supported_hint": "trusttunnel:// links are also supported",
       "error_invalid_file": "Could not read the file. Check that the config is valid.",
       "error_invalid_link": "The link is broken or is not a tt:// or trusttunnel:// link.",
-      "partial_count": "Imported {{ok}} of {{total}}"
+      "partial_ok_failed": "Added {{ok_plural}}, failed — {{failed}}.",
+      "all_failed": "Could not add any config out of {{total}}.",
+      "reason_invalid_file": "could not read the file",
+      "reason_invalid_link": "broken link",
+      "retry": "Retry",
+      "config_count_one": "{{count}} config",
+      "config_count_few": "{{count}} configs",
+      "config_count_many": "{{count}} configs",
+      "config_count_other": "{{count}} configs",
+      "config_added_batch": "Added {{plural}}"
     },
     "list": {
       "add": "Add config"

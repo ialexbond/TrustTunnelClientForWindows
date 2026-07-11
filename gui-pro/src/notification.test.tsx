@@ -11,7 +11,7 @@
 // These tests mount the real `NotificationPlate` (exported for test) with the shared Tauri-mock
 // discipline (invoke / listen / getCurrentWindow().hide), driving both branches of the mount pull.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import type { EventCallback } from "@tauri-apps/api/event";
 import { AUTO_DISMISS_MS } from "./components/connection/plateLifetime";
 
@@ -468,5 +468,123 @@ describe("NotificationPlate — CONNECT detail block (13-08)", () => {
     expect(screen.getByText("Connected")).toBeInTheDocument();
     expect(screen.getByText("142 ms")).toBeInTheDocument();
     expect(screen.queryByText("142 мс")).not.toBeInTheDocument();
+  });
+});
+
+describe("NotificationPlate — error plate × acknowledges (Phase 19, 19-01 Bug 1 / D-04)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    invokeMock.mockReset();
+    listenMock.mockClear();
+    unlistenSpy.mockClear();
+    hideMock.mockClear();
+    listenCallback = null;
+    document.documentElement.removeAttribute("data-theme");
+    document.documentElement.removeAttribute("lang");
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("clicking × on a connectionError plate invokes clear_vpn_error THEN hides (→ gray tray)", async () => {
+    // D-04: the error plate's × used to only hide the window (`onClose={hideSelf}`), so status
+    // stayed `Error` and the tray icon stayed red. The × now, for the connectionError kind only,
+    // acknowledges via the backend `clear_vpn_error` (mirroring StatusPanel.handleDismiss) — that
+    // routes Error→Disconnected through the single status writer → vpn-status emit → lib.rs
+    // listener → update_tray_icon("disconnected") → gray. Assert the invoke fired AND the plate
+    // still hides locally.
+    invokeMock.mockResolvedValue({ kind: "connectionError", configName: "My VPN" });
+    render(<NotificationPlate />);
+    await flushMicrotasks();
+
+    // The sticky error plate is up (the pull redelivered it; no auto-dismiss).
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Ошибка подключения")).toBeInTheDocument();
+
+    // Drop the pull's invoke calls so the assertion sees only the ×-driven acknowledge.
+    invokeMock.mockClear();
+    hideMock.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Закрыть уведомление" }));
+      await Promise.resolve();
+    });
+
+    // The acknowledge fired (fire-and-forget) and the plate hid locally.
+    expect(invokeMock).toHaveBeenCalledWith("clear_vpn_error");
+    expect(hideMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking × on a NON-error plate hides only — it does NOT invoke clear_vpn_error", async () => {
+    // Only the connectionError kind acknowledges; every other kind keeps the plain hide-only close,
+    // so a disconnect/connect plate close must never call clear_vpn_error (it would be a spurious
+    // status write). Drive a disconnect plate and assert the × hides without the acknowledge.
+    invokeMock.mockResolvedValue({ kind: "disconnected", configName: "My VPN" });
+    render(<NotificationPlate />);
+    await flushMicrotasks();
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Отключено")).toBeInTheDocument();
+
+    invokeMock.mockClear();
+    hideMock.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Закрыть уведомление" }));
+      await Promise.resolve();
+    });
+
+    expect(invokeMock).not.toHaveBeenCalledWith("clear_vpn_error");
+    expect(hideMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking the BODY of a connectionError plate ALSO acknowledges (clear_vpn_error) then restores (→ gray tray)", async () => {
+    // Phase 19 UAT (G-19-1): the × was fixed to acknowledge, but clicking the notification BODY
+    // (the natural "take me to the app" gesture) only invoked restore_main_window and left status
+    // at `Error`, so the tray icon stayed RED. The body click now ALSO clears the error for the
+    // connectionError kind — mirroring the ×. Assert BOTH invokes fire on a body click.
+    invokeMock.mockResolvedValue({ kind: "connectionError", configName: "My VPN" });
+    render(<NotificationPlate />);
+    await flushMicrotasks();
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Ошибка подключения")).toBeInTheDocument();
+
+    invokeMock.mockClear();
+    hideMock.mockClear();
+
+    await act(async () => {
+      // Click the title (the body), NOT the × — the root onClick=onBodyClick fires via bubbling.
+      fireEvent.click(screen.getByText("Ошибка подключения"));
+      await Promise.resolve();
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("clear_vpn_error");
+    expect(invokeMock).toHaveBeenCalledWith("restore_main_window");
+  });
+
+  it("clicking the BODY of a NON-error plate restores only — it does NOT invoke clear_vpn_error", async () => {
+    // Only the connectionError kind acknowledges on a body click; every other kind keeps the plain
+    // restore-only behaviour, so a disconnect/connect plate body click must never call
+    // clear_vpn_error (it would be a spurious status write).
+    invokeMock.mockResolvedValue({ kind: "disconnected", configName: "My VPN" });
+    render(<NotificationPlate />);
+    await flushMicrotasks();
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Отключено")).toBeInTheDocument();
+
+    invokeMock.mockClear();
+    hideMock.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Отключено"));
+      await Promise.resolve();
+    });
+
+    expect(invokeMock).not.toHaveBeenCalledWith("clear_vpn_error");
+    expect(invokeMock).toHaveBeenCalledWith("restore_main_window");
   });
 });

@@ -31,7 +31,8 @@ import { buildConnectDetails } from "./components/connection/plateDetails";
  *   - D-03: a new event REPLACES the plate and RESETS the auto-dismiss timer (clear-then-restart)
  *   - D-02: `connectionError` is sticky (no timer); every other kind auto-dismisses (~4.5s)
  *   - D-04: body click → invoke("restore_main_window") (Rust restores main + hides this plate);
- *           × → hide self only; the auto-timer callback also hides self
+ *           × → hide self; for a connectionError plate it FIRST invoke("clear_vpn_error") so the
+ *           acknowledge turns the tray gray (19-01 Bug 1), then hides. The auto-timer callback also hides self
  */
 
 /** The event payload the Rust decider emits — a KIND plus the config DISPLAY NAME only (D-29;
@@ -277,11 +278,40 @@ export function NotificationPlate() {
       closeTooltip={plateCloseCopy[plate.language].tooltip}
       // D-04: body click restores the main window from the tray AND hides this plate. The Rust
       // command owns BOTH (show+focus main, hide notification) so the two windows stay in step.
+      // Phase 19 UAT (G-19-1): a connectionError plate must ALSO acknowledge the error on a BODY
+      // click — mirroring the × path below. The × was fixed in 19-01 to clear the error, but the
+      // body click (the natural "take me to the app" gesture) only restored the window and left
+      // status at `Error`, so the tray icon stayed RED (restore_main_window performs no status
+      // write). clear_vpn_error routes Error→Disconnected through the single status writer →
+      // vpn-status emit → lib.rs listener → update_tray_icon("disconnected") → GRAY tray. It is
+      // fire-and-forget (.catch swallows) and a no-op unless live status is `Error` (vpn.rs
+      // T-09-02), so firing it alongside restore can never knock a live reconnecting/connected
+      // session offline. Every OTHER plate kind keeps the plain restore-only behaviour. D-29:
+      // clear_vpn_error carries `None` error — no secret reaches the log/status channel.
       onBodyClick={() => {
+        if (plate.kind === "connectionError") {
+          void invoke("clear_vpn_error").catch(() => {});
+        }
         void invoke("restore_main_window");
       }}
-      // D-04: × hides the plate only — no window restore.
-      onClose={hideSelf}
+      // D-04 (Phase 19, 19-01 Bug 1): the × on a connectionError plate ACKNOWLEDGES the error
+      // before hiding — mirroring StatusPanel.handleDismiss. The plate used to only hide its window
+      // (hideSelf), so status stayed `Error` and the tray icon stayed RED after the user closed the
+      // desktop error notification. Now the connectionError × also invokes the backend
+      // `clear_vpn_error`, which routes Error→Disconnected through the single status writer →
+      // `vpn-status` emit → lib.rs listener → update_tray_icon("disconnected") → GRAY tray. It is
+      // fire-and-forget (.catch swallows): a backend miss still hides locally and the next
+      // vpn-status reconciles. `clear_vpn_error` is a no-op unless the live status is `Error`
+      // (vpn.rs T-09-02), so closing a STALE error plate after an in-flight reconnect already moved
+      // status off Error cannot knock a live session offline — safe to fire unconditionally on the
+      // error plate. Every OTHER plate kind keeps the plain hide-only close (no status write). D-29:
+      // clear_vpn_error carries `None` error — no secret reaches the log/status channel.
+      onClose={() => {
+        if (plate.kind === "connectionError") {
+          void invoke("clear_vpn_error").catch(() => {});
+        }
+        hideSelf();
+      }}
     />
   );
 }

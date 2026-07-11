@@ -168,18 +168,86 @@ fn config_parse_error(line: &str) -> Option<&'static str> {
     }
 }
 
-fn handle_fatal_markers(trimmed: &str, app: &tauri::AppHandle) {
-    if let Some(derived) = fatal_marker_error(trimmed) {
-        if let Some(state) = app.try_state::<AppState>() {
-            set_vpn_status(app, &state, VpnStatus::Error, Some(derived.to_string()));
+fn handle_fatal_markers(
+    trimmed: &str,
+    app: &tauri::AppHandle,
+    my_generation: u64,
+    // Phase 19 UAT (G-19-6, Option B): THIS session's config DISPLAY NAME, captured at reader-task
+    // spawn, so a SUPERSEDED session's failure plate can name the server that ACTUALLY failed rather
+    // than the live config_path (which has moved to the fallback server). D-29: display name only.
+    my_config_name: &str,
+    // G-19-6 (Option B): a per-reader-task latch so a burst of fatal lines from a dead session fires
+    // the superseded error plate AT MOST ONCE (the normal-path Error write is edge-triggered by
+    // maybe_fire, so only the superseded direct-fire path needs this).
+    superseded_error_plate_fired: &mut bool,
+) {
+    // A fatal marker (auth/refused/…) OR the config-parse marker. Both write the SAME fixed DERIVED
+    // phrase — NEVER the raw `&trimmed[pos..]` slice, which could carry a credential out of a malformed
+    // config (D-29 / Codex HIGH). `.or_else` keeps the original precedence (fatal markers first) and the
+    // single early return keeps a line from double-emitting (WR-02).
+    let Some(derived) = fatal_marker_error(trimmed).or_else(|| config_parse_error(trimmed)) else {
+        return;
+    };
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    // 3.1 R-GEN (Phase 19 UAT G-19-6): gate the fatal-marker Error write on THIS session's
+    // generation, exactly like the Terminated arm (terminated_arm_may_write_status) and the
+    // connect-timeout watchdog already do. This was the ONE Error writer missing the guard. Without
+    // it, a SUPERSEDED sidecar's late fatal log line — drained by this reader task AFTER a newer
+    // connect (a fallback / seamless-switch revert / auto-switch to a healthy server) bumped the
+    // generation and repointed AppState.config_path — wrote Error onto a session it no longer owns.
+    // That both (a) NAMED THE WRONG SERVER in the desktop error plate (notify::maybe_fire resolves the
+    // plate name from the LIVE config_path, now the healthy server) and (b) flipped the fresh session's
+    // Connecting/Connected back to Error.
+    let live_generation = state
+        .connection_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    if !crate::lifecycle::is_current_generation(my_generation, live_generation) {
+        // SUPERSEDED: this session is dead — its pid-gated housekeeping still runs in the Terminated
+        // arm. Do NOT write vpn_status (it would corrupt the fresh session that now owns the adapter).
+        // Option B (owner): still tell the user the FAILED server's name via a dedicated plate path
+        // that names `my_config_name` (the config THIS session connected), NOT the live config_path.
+        // Fire at most once per reader task (the latch) so a fatal-line burst cannot spam.
+        crate::logging::log_app(
+            "INFO",
+            "[sidecar] superseded sidecar fatal marker — dropping Error status; firing a correctly-named error plate for the failed server (3.1 R-GEN, G-19-6)",
+        );
+        if !*superseded_error_plate_fired {
+            *superseded_error_plate_fired = true;
+            crate::notify::fire_superseded_error_plate(app, my_config_name);
         }
-    } else if let Some(derived) = config_parse_error(trimmed) {
-        // Fixed DERIVED phrase — NEVER the raw `&trimmed[pos..]` slice, which could
-        // carry a credential out of a malformed config (D-29 / Codex HIGH).
-        if let Some(state) = app.try_state::<AppState>() {
-            set_vpn_status(app, &state, VpnStatus::Error, Some(derived.to_string()));
-        }
+        return;
     }
+    // R3/WR-01 + G-19-6 v5 (Fable D2): a terminal Error already on `vpn_status` is AUTHORITATIVE — the
+    // FIRST specific reason wins. A SECOND fatal marker from the SAME process must NOT re-stamp or
+    // re-write: an Error→Error is not an edge, so maybe_fire's edge-triggered take would NOT consume the
+    // re-stamp — it would LINGER with this dead server's name for a later unrelated Error to inherit.
+    // Mirror the Terminated arm's `already_error` guard (which exists for the same reason) so the
+    // CURRENT branch also stamps + writes AT MOST ONCE per failure.
+    let already_error = state
+        .vpn_status
+        .lock()
+        .ok()
+        .map(|g| *g == VpnStatus::Error)
+        .unwrap_or(false);
+    if already_error {
+        crate::logging::log_app(
+            "INFO",
+            "[sidecar] repeat fatal marker after a terminal Error — keeping the authoritative reason + stamp (R3/WR-01, G-19-6 D2)",
+        );
+        return;
+    }
+    // CURRENT session's genuine failure. G-19-6 v5: stamp THIS session's captured name so
+    // notify::maybe_fire names the ConnectionError plate after the config that FAILED — NOT the live
+    // config_path, which a CONCURRENT reconnect/switch-back can repoint to the healthy server between
+    // this Error being decided and maybe_fire resolving the name (the wrong-server-name bug the log
+    // proved: [fatal CURRENT my_name="16166"] → [maybe_fire … resolved_name="US relay7 PL"]). The
+    // stamp is take-once (maybe_fire's edge-triggered take consumes/clears it). D-29: a display name only.
+    if let Ok(mut g) = state.pending_error_config_name.lock() {
+        *g = Some(my_config_name.to_string());
+    }
+    set_vpn_status(app, &state, VpnStatus::Error, Some(derived.to_string()));
 }
 
 pub struct SidecarChild {
@@ -287,6 +355,13 @@ pub async fn spawn_trusttunnel(
     // 3.1 R-GEN (F12): capture THIS session's generation alongside my_pid; the Terminated arm gates
     // its status writes on it so a superseded child's late exit cannot corrupt a newer session.
     let my_generation = session_generation;
+    // Phase 19 UAT (G-19-6, Option B): capture THIS session's config DISPLAY NAME at spawn — resolved
+    // from the config path this sidecar connected — so a SUPERSEDED session's fatal marker can fire an
+    // error plate naming the server that ACTUALLY failed. By the time a superseded marker is drained,
+    // the live AppState.config_path (what notify::maybe_fire reads) has moved to the fallback server,
+    // so the live path names the WRONG server. D-29: display name only (never the .toml/host/password).
+    let my_config_name =
+        crate::commands::manifest::current_display_name(config_path).unwrap_or_default();
     tokio::spawn(async move {
         let mut handshake_done = false;
         let mut dns_proxy_ready = false;
@@ -301,6 +376,11 @@ pub async fn spawn_trusttunnel(
         // first connect; a respawned sidecar gets its own fresh task with a fresh latch
         // and emits Connected for the new session.
         let mut connected_emitted = false;
+
+        // G-19-6 (Option B): fire the SUPERSEDED-session error plate AT MOST ONCE per reader task, so
+        // a burst of fatal log lines from a dead session cannot spam the desktop with duplicate error
+        // plates. The normal (current-generation) Error write is already edge-triggered by maybe_fire.
+        let mut superseded_error_plate_fired = false;
 
         // T-32 (2026-06-11): collapse the core's noisy-line floods. When the tunnel
         // dies the C++ core emits THOUSANDS of identical "DNS proxy request id=N
@@ -376,7 +456,15 @@ pub async fn spawn_trusttunnel(
 
                     // CR-01: a fatal marker can arrive on stdout too — run the
                     // authoritative Error detection here as well, not only on stderr.
-                    handle_fatal_markers(trimmed, &app_handle);
+                    // G-19-6: pass this session's generation + captured config name so a
+                    // superseded child's late marker names the failed server (see handle_fatal_markers).
+                    handle_fatal_markers(
+                        trimmed,
+                        &app_handle,
+                        my_generation,
+                        &my_config_name,
+                        &mut superseded_error_plate_fired,
+                    );
                 }
                 CommandEvent::Stderr(line) => {
                     let line_str = String::from_utf8_lossy(&line);
@@ -406,7 +494,14 @@ pub async fn spawn_trusttunnel(
                     // used to guess from log text (RESEARCH A3). Same helper as the
                     // Stdout arm (CR-01) — one place, both streams, single early
                     // return so a line can never double-emit (WR-02).
-                    handle_fatal_markers(trimmed, &app_handle);
+                    // G-19-6: superseded-marker guard + captured config name (Option B).
+                    handle_fatal_markers(
+                        trimmed,
+                        &app_handle,
+                        my_generation,
+                        &my_config_name,
+                        &mut superseded_error_plate_fired,
+                    );
                 }
                 CommandEvent::Terminated(payload) => {
                     // Clear PID file — process is gone.
@@ -653,6 +748,14 @@ pub async fn spawn_trusttunnel(
                                 "[sidecar] exit after a terminal Error — keeping the authoritative reason (R3/WR-01)",
                             );
                         } else if let Some(state) = state_opt {
+                            // G-19-6 v3: for an Error exit, stamp THIS session's captured name so
+                            // maybe_fire names the ConnectionError plate after the config that FAILED,
+                            // not a config_path a concurrent reconnect/switch-back already repointed.
+                            if status == VpnStatus::Error {
+                                if let Ok(mut g) = state.pending_error_config_name.lock() {
+                                    *g = Some(my_config_name.to_string());
+                                }
+                            }
                             set_vpn_status(&app_handle, &state, status, error_msg);
                         }
                     }
