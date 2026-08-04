@@ -566,6 +566,8 @@ void Http3Upstream::socket_handler(void *arg, UdpSocketEvent what, void *data) {
         http::QuicNetworkPath path = make_network_path(local, peer);
 
         upstream->m_in_handler = true;
+        bool data_received = false;
+        std::string input_error;
         for (size_t i = 0; i < READ_BUDGET; ++i) {
             ssize_t r = udp_socket_recv(upstream->m_socket.get(), buf, sizeof(buf));
             if (r <= 0) {
@@ -576,16 +578,25 @@ void Http3Upstream::socket_handler(void *arg, UdpSocketEvent what, void *data) {
                 break;
             }
             log_upstream(upstream, trace, "Read {} bytes from endpoint", r);
-            upstream->cancel_health_check();
+            data_received = true;
             if (auto err = upstream->m_h3_client->input(path, {buf, (size_t) r}); err != nullptr) {
-                log_upstream(upstream, dbg, "input() error: {}", err->str());
+                input_error = err->str();
+                log_upstream(upstream, dbg, "input() error: {}", input_error);
                 break;
             }
         }
         upstream->m_in_handler = false;
 
+        // The health check response arrives from inside input(), so cancel only after the loop.
+        if (data_received) {
+            upstream->cancel_health_check();
+        }
+
         if (upstream->m_closed) {
             upstream->close_session_inner(std::exchange(upstream->m_pending_session_error, std::nullopt));
+        } else if (!input_error.empty()) {
+            // `input()` only reports the error, so nothing else tears down the dead QUIC connection.
+            upstream->close_session_inner(VpnError{VPN_EC_ERROR, input_error.c_str()});
         } else if (upstream->m_h3_client) {
             upstream->m_h3_client->flush();
             // Schedule post-receive work (retry_connect_requests, poll_connections)

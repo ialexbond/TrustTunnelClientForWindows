@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- HTTP/3 upstream: close the session when `input()` fails instead of only logging the error.
+- HTTP/3 upstream: cancel the pending health check after the read loop, so that the health check response, which is delivered from inside `input()`, is not mistaken for an unknown stream.
+
 ### Security
 
 ## [1.1.5-rc.2] - 2026-07-24
