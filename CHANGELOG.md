@@ -16,10 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+### Security
+
+## [1.1.5-rc.3] - 2026-08-04
+
+### Fixed
+
 - HTTP/3 upstream: close the session when `input()` fails instead of only logging the error.
 - HTTP/3 upstream: cancel the pending health check after the read loop, so that the health check response, which is delivered from inside `input()`, is not mistaken for an unknown stream.
-
-### Security
 
 ## [1.1.5-rc.2] - 2026-07-24
 
@@ -528,7 +532,8 @@ For this purpose, new event `VPN_EVENT_CONNECTION_INFO` was introduced in `VpnEv
 
 - VpnLibs is now open-source.
 
-[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.2...HEAD
+[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.3...HEAD
+[1.1.5-rc.3]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.2...v1.1.5-rc.3
 [1.1.5-rc.2]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.1...v1.1.5-rc.2
 [1.1.5-rc.1]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.16...v1.1.5-rc.1
 [1.1.5-beta.16]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.15...v1.1.5-beta.16
