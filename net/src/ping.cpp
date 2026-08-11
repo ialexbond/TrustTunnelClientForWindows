@@ -719,6 +719,12 @@ bool conn_prepare(Ping *ping, PingConn *conn) {
 
 void conn_protect_socket(PingConn *conn, SocketProtectEvent *event) {
 #ifndef _WIN32
+#ifndef __ANDROID__
+    if (conn->bound_if == 0 && vpn_network_manager_get_tunnel_active()) {
+        event->result = -1;
+        return;
+    }
+#endif // #ifndef __ANDROID__
     if (conn->bound_if != 0) {
 #ifdef __MACH__
         int option = (event->peer->sa_family == AF_INET) ? IP_BOUND_IF : IPV6_BOUND_IF;
