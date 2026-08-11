@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Ownership-tracked process-wide tunnel state to fail closed when an outgoing socket cannot be protected from VPN routing while any tunnel is active.
-
 ### Changed
 
 ### Deprecated
@@ -19,6 +17,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 ### Security
+
+## [1.1.5-rc.4] - 2026-08-11
+
+### Added
+
+- Ownership-tracked process-wide tunnel state to fail closed when an outgoing socket cannot be protected from VPN routing while any tunnel is active.
 
 ## [1.1.5-rc.3] - 2026-08-04
 
@@ -534,7 +538,8 @@ For this purpose, new event `VPN_EVENT_CONNECTION_INFO` was introduced in `VpnEv
 
 - VpnLibs is now open-source.
 
-[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.3...HEAD
+[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.4...HEAD
+[1.1.5-rc.4]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.3...v1.1.5-rc.4
 [1.1.5-rc.3]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.2...v1.1.5-rc.3
 [1.1.5-rc.2]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.1...v1.1.5-rc.2
 [1.1.5-rc.1]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.16...v1.1.5-rc.1
