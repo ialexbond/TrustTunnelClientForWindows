@@ -18,6 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+## [1.1.5-rc.5] - 2026-08-12
+
+### Changed
+
+- Updated nlc to 8.1.49 with new win_detect_active_if algorithm
+
 ## [1.1.5-rc.4] - 2026-08-11
 
 ### Added
@@ -538,7 +544,8 @@ For this purpose, new event `VPN_EVENT_CONNECTION_INFO` was introduced in `VpnEv
 
 - VpnLibs is now open-source.
 
-[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.4...HEAD
+[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.5...HEAD
+[1.1.5-rc.5]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.4...v1.1.5-rc.5
 [1.1.5-rc.4]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.3...v1.1.5-rc.4
 [1.1.5-rc.3]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.2...v1.1.5-rc.3
 [1.1.5-rc.2]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.1...v1.1.5-rc.2
