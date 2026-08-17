@@ -135,6 +135,11 @@ mod imp {
         pub has_unicast: bool,
         pub has_gateway: bool,
         pub description: String,
+        /// The connection name Windows shows the user (what `Get-NetAdapter` calls `Name`). Ours is
+        /// `TrustTunnel (<host>)`, which is how we tell our own tunnel from a foreign one — the
+        /// DESCRIPTION cannot do that job, because WireGuard ships the very same `wintun` driver and
+        /// therefore the same description as us.
+        pub friendly_name: String,
         pub dns: Vec<String>,
     }
 
@@ -155,6 +160,15 @@ mod imp {
         pub fn looks_virtual(&self) -> bool {
             let lower = self.description.to_lowercase();
             SUSPECT_ADAPTER_PATTERNS.iter().any(|p| lower.contains(p))
+        }
+
+        /// Is this OUR tunnel adapter? Matched on the connection NAME (`TrustTunnel (<host>)`),
+        /// never the description: our description is plain `wintun Tunnel`, which WireGuard also
+        /// produces because it ships the same driver — excluding by description would hide a
+        /// genuine WireGuard conflict. Once our tunnel is up it holds the default route, so without
+        /// this it would report itself as a foreign adapter.
+        pub fn is_own_tunnel(&self) -> bool {
+            self.friendly_name.to_lowercase().contains("trusttunnel")
         }
     }
 
@@ -240,6 +254,7 @@ mod imp {
                     has_unicast: !a.FirstUnicastAddress.is_null(),
                     has_gateway: !a.FirstGatewayAddress.is_null(),
                     description: wide_to_string(a.Description),
+                    friendly_name: wide_to_string(a.FriendlyName),
                     dns,
                 });
                 cur = a.Next;
@@ -394,7 +409,9 @@ mod imp {
     use super::*;
     pub struct AdapterRow {
         pub index: u32,
+        pub ipv6_index: u32,
         pub description: String,
+        pub friendly_name: String,
         pub has_gateway: bool,
         pub dns: Vec<String>,
     }
@@ -402,6 +419,7 @@ mod imp {
         pub fn is_physical(&self) -> bool { false }
         pub fn owns(&self, _index: u32) -> bool { false }
         pub fn looks_virtual(&self) -> bool { false }
+        pub fn is_own_tunnel(&self) -> bool { false }
     }
     pub fn enumerate_adapters() -> Vec<AdapterRow> { Vec::new() }
     pub fn default_route_ifs() -> (HashSet<u32>, HashSet<u32>) { (HashSet::new(), HashSet::new()) }
@@ -439,6 +457,54 @@ fn should_inject(best_if: Option<u32>, best_is_usable: bool, core_picks: &HashSe
     if provably_agrees { None } else { Some(best) }
 }
 
+/// The adapters that can actually steal the core's egress pick: a FOREIGN (not ours) virtual NIC
+/// that the core's own filter would accept as "physical" AND that holds a default route.
+///
+/// All three conditions matter. Without the physical-by-IfType filter we would list adapters the
+/// core could never choose; without the default-route condition we would list every virtual NIC on
+/// the machine, most of which are idle and harmless; and without the own-tunnel exclusion we would
+/// report ourselves the moment our tunnel comes up and takes the default route.
+fn foreign_rows<'a>(
+    adapters: &'a [imp::AdapterRow],
+    route_v4: &'a HashSet<u32>,
+    route_v6: &'a HashSet<u32>,
+) -> impl Iterator<Item = &'a imp::AdapterRow> {
+    adapters
+        .iter()
+        .filter(|a| a.is_physical() && a.looks_virtual() && !a.is_own_tunnel())
+        .filter(move |a| {
+            route_v4.contains(&a.index)
+                || route_v6.contains(&a.index)
+                || route_v6.contains(&a.ipv6_index)
+        })
+}
+
+/// Foreign VPN-ish adapters currently able to hijack our egress, by the name Windows shows the user.
+///
+/// This is the single definition of "another VPN is in the way", shared by the connect-time egress
+/// guard and the UI's second-VPN banner (`commands::vpn::detect_conflicting_adapters`). The banner
+/// used to run its own PowerShell scan with a substring match on
+/// `WireGuard|Wintun|TAP-Windows|tun|Amnezia|OpenVPN`, which was wrong in three ways at once: the
+/// bare `tun` matched Windows' own hidden `… Tunneling Adapter` pseudo-devices and any description
+/// that merely contained those letters; it fired on adapters that were merely INSTALLED and idle
+/// (an `OpenVPN Data Channel Offload` driver is not a running client); and it could not match the
+/// one product that provably breaks connects — Radmin VPN's adapter contains none of those words.
+/// Reading the names through `GetAdaptersAddresses` (UTF-16) also fixes the mojibake the PowerShell
+/// path produced for non-ASCII names, since its stdout is the console codepage, not UTF-8.
+pub fn foreign_adapters_on_default_route() -> Vec<String> {
+    let adapters = imp::enumerate_adapters();
+    let (route_v4, route_v6) = imp::default_route_ifs();
+    foreign_rows(&adapters, &route_v4, &route_v6)
+        .map(|a| {
+            if a.friendly_name.is_empty() {
+                a.description.clone()
+            } else {
+                a.friendly_name.clone()
+            }
+        })
+        .collect()
+}
+
 /// Inspect this machine and decide whether the core needs its egress interface pinned.
 ///
 /// `server_ip` is the resolved dial address of the server we are about to connect to. Without it we
@@ -451,14 +517,7 @@ pub fn decide(server_ip: Option<IpAddr>) -> EgressDecision {
     // Suspicious = a virtual/VPN-ish adapter that the core WOULD consider (physical-by-IfType and
     // holding a default route). A virtual adapter without a default route can never win the pick,
     // so flagging it would be noise. This drives LOGGING only — never the decision.
-    let suspects: Vec<String> = adapters
-        .iter()
-        .filter(|a| a.is_physical() && a.looks_virtual())
-        .filter(|a| {
-            route_v4.contains(&a.index)
-                || route_v6.contains(&a.index)
-                || route_v6.contains(&a.ipv6_index)
-        })
+    let suspects: Vec<String> = foreign_rows(&adapters, &route_v4, &route_v6)
         .map(|a| format!("{} (if {})", a.description, a.index))
         .collect();
 
@@ -709,6 +768,39 @@ mod tests {
                 "GetBestInterfaceEx returned index {b}, which is not a real adapter — FFI is wrong"
             );
         }
+    }
+
+    /// Our own tunnel must never be reported as "another VPN".
+    ///
+    /// It is excluded by connection NAME, not description: ours reads `wintun Tunnel`, exactly like
+    /// a real WireGuard adapter, so a description-based exclusion would either nag about ourselves
+    /// or hide a genuine WireGuard conflict. This matters the moment we connect — the tunnel then
+    /// holds the default route and would otherwise qualify as a hijacker of our own egress.
+    #[cfg(windows)]
+    #[test]
+    fn our_own_tunnel_is_identified_by_name_not_description() {
+        fn row(friendly: &str, desc: &str) -> imp::AdapterRow {
+            imp::AdapterRow {
+                index: 18,
+                ipv6_index: 18,
+                if_type: 6,
+                oper_status: 1,
+                has_unicast: true,
+                has_gateway: false,
+                description: desc.into(),
+                friendly_name: friendly.into(),
+                dns: vec![],
+            }
+        }
+        assert!(row("TrustTunnel (de1.example.com)", "wintun Tunnel").is_own_tunnel());
+        // Same DRIVER, different product — must NOT be mistaken for ours.
+        assert!(!row("WireGuard Tunnel", "wintun Tunnel").is_own_tunnel());
+        assert!(!row("Ethernet", "Intel(R) Ethernet Controller I226-V").is_own_tunnel());
+        // The description alone cannot tell the two tunnels apart — that is the whole point.
+        assert_eq!(
+            row("TrustTunnel (x)", "wintun Tunnel").description,
+            row("WireGuard Tunnel", "wintun Tunnel").description,
+        );
     }
 
     #[test]

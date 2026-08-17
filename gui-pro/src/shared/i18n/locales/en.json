@@ -281,7 +281,7 @@
       "fallback_name": "the previous server"
     },
     "secondVpn": {
-      "warning": "Another VPN client ({{adapter}}) is running — this may cause connection problems."
+      "warning": "Another VPN's network adapter ({{adapter}}) was detected — it may interfere with the connection."
     },
     "empty": {
       "heading": "No configs",
