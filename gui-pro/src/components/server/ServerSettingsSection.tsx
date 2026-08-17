@@ -236,7 +236,7 @@ export function ServerSettingsSection({ state }: Props) {
       {!configRaw && (
         <div
           className="flex items-center gap-2 text-xs"
-          style={{ color: "var(--color-warning-500)" }}
+          style={{ color: "var(--color-warning-fg)" }}
         >
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span>{t("server.config.loading")}</span>

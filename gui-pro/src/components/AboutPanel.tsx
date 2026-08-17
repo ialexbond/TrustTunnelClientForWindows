@@ -170,8 +170,8 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 className="flex items-center gap-3 rounded-lg p-3"
                 style={{ backgroundColor: "var(--color-accent-tint-08)", border: "1px solid var(--color-accent-tint-20)" }}
               >
-                <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-accent-500)" }} />
-                <p className="text-xs font-medium" style={{ color: "var(--color-accent-500)" }}>
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-accent-fg)" }} />
+                <p className="text-xs font-medium" style={{ color: "var(--color-accent-fg)" }}>
                   {updateProgress.message}
                 </p>
               </div>
@@ -189,8 +189,8 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 className="flex items-center gap-2.5 rounded-lg p-2.5"
                 style={{ backgroundColor: "var(--color-success-tint-06)", border: "1px solid var(--color-status-connected-border)" }}
               >
-                <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
-                <p className="text-xs font-medium" style={{ color: "var(--color-success-500)" }}>
+                <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-fg)" }} />
+                <p className="text-xs font-medium" style={{ color: "var(--color-success-fg)" }}>
                   {t("about.update_available", { version: updateInfo.latestVersion })}
                 </p>
               </div>
@@ -199,7 +199,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                   onClick={handleSelfUpdate}
                   disabled={!updateInfo.downloadUrl}
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: "var(--color-status-connected-bg)", color: "var(--color-success-500)" }}
+                  style={{ backgroundColor: "var(--color-status-connected-bg)", color: "var(--color-success-fg)" }}
                 >
                   <ArrowUpCircle className="w-3.5 h-3.5" />
                   {t("buttons.update")}
@@ -233,7 +233,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
               className="flex items-center gap-2.5 rounded-lg p-2.5"
               style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
             >
-              <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
+              <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-fg)" }} />
               <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
                 {t("about.up_to_date")}
               </p>
@@ -278,7 +278,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             className="flex items-start gap-2 rounded-lg p-2.5 mt-3"
             style={{ backgroundColor: "var(--color-bg-elevated)" }}
           >
-            <Heart className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-accent-400)" }} />
+            <Heart className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-accent-fg)" }} />
             <p className="text-[11px] leading-relaxed">
               {t("about.vibe_coding")}
             </p>

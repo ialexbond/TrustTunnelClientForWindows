@@ -18,7 +18,7 @@ export function UserQRModal({ qrUser, qrLink, qrLoading, onClose }: UserQRModalP
       <div className="text-center">
         {qrLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-500)]" />
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-fg)]" />
           </div>
         ) : qrLink ? (
           <>

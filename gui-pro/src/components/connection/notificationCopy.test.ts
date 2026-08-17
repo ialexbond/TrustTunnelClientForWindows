@@ -32,6 +32,9 @@ const EXPECTED_KINDS = [
   // moment a deliberate auto-switch begins, so the owner SEES «Переключение…» before the terminal
   // «Переключено автоматически» replaces it.
   "switching",
+  // Phase 22 UAT: the FE-only VOLUNTARY save-and-reconnect start kind. Split from `reconnecting` so a
+  // deliberate settings save no longer shows its link-drop body «Связь прервалась — идёт восстановление».
+  "applyingSettings",
   // Part B (cancel notification): a USER CANCEL of an in-flight connect — «Подключение отменено». A
   // DIFFERENT event from `disconnected` (owner requirement); fired by the pure Rust decider
   // (NotifyKind::Cancelled) when the FE-raised `pending_cancel` intent is set on a terminal Disconnected.
@@ -81,6 +84,16 @@ describe("notificationCopy", () => {
     // never speaks as a person, so «Переключаю сервер…» → «Переход на другой сервер».
     expect(buildBody("switching", "любой сервер", "ru")).toBe("Переход на другой сервер");
     expect(buildBody("switching", "any server", "en")).toBe("Moving to another server");
+
+    // Phase 22 UAT: the `applyingSettings` START kind — the voluntary save-and-reconnect plate. Same
+    // RefreshCw + warning family as `reconnecting`, bilingual «Переподключение» / "Reconnecting", but a
+    // body that says the SAVE succeeded — NOT the involuntary «Связь прервалась …». Name-independent.
+    expect(notificationCopy.applyingSettings.icon).toBe(RefreshCw);
+    expect(notificationCopy.applyingSettings.iconColor).toBe("var(--color-status-warning)");
+    expect(notificationCopy.applyingSettings.title.ru).toBe("Переподключение");
+    expect(notificationCopy.applyingSettings.title.en).toBe("Reconnecting");
+    expect(buildBody("applyingSettings", "любой сервер", "ru")).toBe("Настройки применены — переподключение");
+    expect(buildBody("applyingSettings", "any server", "en")).toBe("Settings applied — reconnecting");
 
     // Part B (cancel notification): the `cancelled` kind — «Подключение отменено» / "Connection
     // cancelled", NEUTRAL (Ban icon + muted colour, like `disconnected`), name-independent body.

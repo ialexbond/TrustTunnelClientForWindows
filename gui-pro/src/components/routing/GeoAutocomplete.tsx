@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Globe, FileText, Download } from "lucide-react";
+import { Globe, FileText, Folder, Download } from "lucide-react";
 
 interface GeoAutocompleteProps {
-  prefix: "geoip" | "geosite";
+  prefix: "geoip" | "geosite" | "iplist_group";
   query: string;
   categories: string[];
   downloaded: boolean;
@@ -72,7 +72,9 @@ export function GeoAutocomplete({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  const Icon = prefix === "geoip" ? Globe : FileText;
+  // geoip → Globe (countries), geosite → FileText (site categories), iplist_group → Folder
+  // (a named group of sites, D-03). Lucide-only, soft style; color stays neutral via token.
+  const Icon = prefix === "geoip" ? Globe : prefix === "iplist_group" ? Folder : FileText;
 
   if (!downloaded) {
     return (
@@ -84,7 +86,7 @@ export function GeoAutocomplete({
         }}
       >
         <div className="flex items-center gap-2 px-4 py-3">
-          <Download className="w-4 h-4" style={{ color: "var(--color-warning-400)" }} />
+          <Download className="w-4 h-4" style={{ color: "var(--color-warning-fg)" }} />
           <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
             {t("routing.downloadGeoDataFirst")}
           </span>

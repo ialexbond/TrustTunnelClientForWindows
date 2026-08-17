@@ -157,7 +157,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
             // FIX-E: only color the border red — dropping the red bg because it
             // was visually heavy for a simple "Max: 255" hint and fought with
             // tokens-based theming in dark mode.
-            displayError && "border-[var(--color-danger-500)]",
+            displayError && "border-[var(--color-danger-fg)]",
             className
           )}
         />

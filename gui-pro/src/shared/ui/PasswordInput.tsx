@@ -40,7 +40,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
               "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
               "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
               // FIX-II: error state = red border only, no tinted background.
-              error && "border-[var(--color-danger-500)]",
+              error && "border-[var(--color-danger-fg)]",
               showIcon ? "pl-9" : "px-[var(--space-3)]",
               className
             )}

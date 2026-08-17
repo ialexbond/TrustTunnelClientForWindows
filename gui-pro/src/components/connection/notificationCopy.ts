@@ -43,8 +43,9 @@ import {
  *  (the terminal «Переключено автоматически» / «Подключено» then REPLACES it via the latest-wins
  *  staging). It is FE-only: it is NOT produced by the pure Rust `decide_notification` decider
  *  (which stays at its 7 outcome kinds) — the setter fires this wire key straight to
- *  `fire_plate_tail`. A manual save-and-reconnect (same server) reuses the EXISTING `reconnecting`
- *  kind for its start plate, so no second manual-start kind is needed. */
+ *  `fire_plate_tail`. A manual save-and-reconnect (same server) has its OWN FE-only start kind
+ *  `applyingSettings` (Phase 22 UAT — see its entry below), so the voluntary save no longer borrows
+ *  `reconnecting`'s link-drop copy. */
 export type NotifyKind =
   | "connected"
   | "connectionError"
@@ -54,6 +55,12 @@ export type NotifyKind =
   | "autoConnected"
   | "disconnected"
   | "switching"
+  // A VOLUNTARY same-server save-and-reconnect start plate («Настройки применены — переподключение»).
+  // Split off `reconnecting` (Phase 22 UAT): reusing `reconnecting` made a deliberate settings-save
+  // falsely announce «Связь прервалась — идёт восстановление» (a link-drop message). FE-only, like
+  // `switching` — the pure Rust `decide_notification` never emits it; `start_plate_wire_key` maps the
+  // FE `isSwitch:false` hint to it. The INVOLUNTARY drop keeps `reconnecting`.
+  | "applyingSettings"
   // Part B (cancel notification): a USER CANCEL of an in-flight connect — «Подключение отменено». A
   // DIFFERENT event from `disconnected` («Отключено») per the owner (a cancel aborts a connect that
   // never completed). Fired by the pure Rust `decide_notification` (NotifyKind::Cancelled, wire key
@@ -185,8 +192,8 @@ export const notificationCopy = {
   // the owner SEES the switch happening. A TRANSIENT/start kind — no config-name interpolation in the
   // body (the target server is not yet chosen at start time; the terminal «Переключено автоматически»
   // carries the name when it replaces this). ArrowRightLeft + warning colour mirror `autoSwitched`, so
-  // the start→result pair reads as one continuous switch. (A manual save-and-reconnect reuses the
-  // `reconnecting` kind for its start plate, so it is not a second entry here.)
+  // the start→result pair reads as one continuous switch. (A manual save-and-reconnect uses its own
+  // `applyingSettings` kind below, so it is not a second entry here.)
   //
   // Fable-A review #6 (owner decision): the copy is NEUTRAL — no degraded-signal claim (this kind now
   // fires for the MANUAL switch too, where nothing degraded), and IMPERSONAL — the plate never speaks in
@@ -200,6 +207,20 @@ export const notificationCopy = {
     body: {
       ru: () => "Переход на другой сервер",
       en: () => "Moving to another server",
+    },
+  },
+  // Phase 22 UAT: the VOLUNTARY same-server save-and-reconnect start plate. handleReconnect is always a
+  // save-and-reconnect (routing rules OR a config edit), so the body honestly states «настройки применены»
+  // — NOT the involuntary `reconnecting` body «Связь прервалась …», which falsely implied a link drop when
+  // the user had just saved. Same RefreshCw + warning visual family as `reconnecting`; impersonal, no
+  // config-name interpolation (a start plate; the terminal «Подключено» replaces it via latest-wins staging).
+  applyingSettings: {
+    icon: RefreshCw,
+    iconColor: TOK.warning,
+    title: { ru: "Переподключение", en: "Reconnecting" },
+    body: {
+      ru: () => "Настройки применены — переподключение",
+      en: () => "Settings applied — reconnecting",
     },
   },
 } satisfies Record<NotifyKind, NotificationCopy>;

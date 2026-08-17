@@ -24,8 +24,8 @@ export interface DirtyChangesBannerProps {
  *
  * Token map (Phase 15 UI-SPEC §Color):
  *   - background  → `--color-warning-tint-08` (theme-aware yellow tint)
- *   - border      → `--color-warning-500` (midpoint, readable on both themes)
- *   - icon colour → `--color-warning-500`
+ *   - border      → `--color-warning-fg` (midpoint, readable on both themes)
+ *   - icon colour → `--color-warning-fg`
  *
  * Returns null when there are no changes — hides itself entirely.
  */
@@ -43,14 +43,14 @@ export function DirtyChangesBanner({
       role="status"
       className={cn(
         "flex items-center justify-between gap-3 rounded-[var(--radius-md)] p-3",
-        "bg-[var(--color-warning-tint-08)] border border-[var(--color-warning-500)]",
+        "bg-[var(--color-warning-tint-08)] border border-[var(--color-warning-fg)]",
         className,
       )}
     >
       <div className="flex items-center gap-2 text-body-sm">
         <AlertTriangle
           size={16}
-          className="text-[var(--color-warning-500)] shrink-0"
+          className="text-[var(--color-warning-fg)] shrink-0"
           aria-hidden="true"
         />
         <span>

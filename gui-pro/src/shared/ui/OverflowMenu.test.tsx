@@ -296,5 +296,24 @@ describe("OverflowMenu", () => {
         expect(screen.queryByRole("menu")).not.toBeInTheDocument();
       });
     });
+
+    it("closes menu on a main-tab change (Phase 22 UAT fix)", async () => {
+      // Regression guard: this menu is a fixed createPortal on document.body and the tab panels are
+      // hidden-not-unmounted (App IN-11), so switching tabs does NOT tear it down. A MOUSE click on
+      // the tab bar happens to fire the outside-mousedown close — but keyboard (Ctrl+1..5), tray and
+      // deep-link navigation emit no such DOM event, and the menu was left floating over the newly
+      // shown tab. App broadcasts `app:tabchange` on every activeTab change; this asserts we listen.
+      const items = makeItems();
+      render(<OverflowMenu items={items} triggerAriaLabel="actions" />);
+
+      fireEvent.click(screen.getByRole("button", { name: "actions" }));
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+
+      fireEvent(window, new CustomEvent("app:tabchange"));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      });
+    });
   });
 });

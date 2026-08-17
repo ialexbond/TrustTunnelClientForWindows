@@ -52,7 +52,7 @@ export function SshPortSection({ state }: SshPortSectionProps) {
 
       {state.portBusy ? (
         <div className="flex items-center gap-2 py-2">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--color-accent-500)" }} />
+          <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--color-accent-fg)" }} />
           <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
             {t("server.security.ssh_port.changing")}
           </span>

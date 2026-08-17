@@ -1511,6 +1511,13 @@ pub async fn vpn_connect(
         }).ok();
     }
 
+    // Egress guard (net_egress.rs): if the core's own interface picker would choose a foreign
+    // virtual adapter (Radmin VPN & co) instead of the interface that actually reaches the server,
+    // spawn an override COPY that pins `bound_if` (and, when suspect, in-tunnel DNS). `None` on a
+    // healthy machine → the real config is spawned unchanged. The real config is never modified.
+    let egress_override = crate::net_egress::override_for_connect(&config_path)
+        .map(|p| p.to_string_lossy().into_owned());
+
     // FAB-R4 (Fable-5 review of Phase 14) — DECOUPLE-STAMP-FROM-BOOL re-fix: a genuine
     // tray/manual «Отключить» that lands DURING a config switch / save-and-reconnect (in
     // the teardown→connect gap) must WIN over the blind intent-clear — otherwise
@@ -1620,7 +1627,9 @@ pub async fn vpn_connect(
     crate::dns_guard::snapshot_system_dns();
     crate::dns_guard::flush_dns_cache();
 
-    let child = sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
+    // Spawn the egress-guard override copy when present, else the real config (unmodified).
+    let spawn_config_path = egress_override.as_deref().unwrap_or(config_path.as_str());
+    let child = sidecar::spawn_trusttunnel(&app, spawn_config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
         .await
         .map_err(|e| {
             let msg = format!("Failed to start sidecar: {e}");
@@ -1810,6 +1819,12 @@ pub async fn respawn_sidecar(
         }
     }
 
+    // Egress guard: recompute on every supervised respawn, so a roaming machine (Wi-Fi → cable,
+    // adapter enabled/disabled) is re-evaluated at reconnect granularity rather than being stuck
+    // with the index chosen at the first connect.
+    let egress_override = crate::net_egress::override_for_connect(&config_path)
+        .map(|p| p.to_string_lossy().into_owned());
+
     // 5. Reset disconnecting + spawn the job-armed sidecar (Plan 03).
     //
     // WR-05: re-check intent IMMEDIATELY before clearing the flag / spawning. The
@@ -1859,9 +1874,11 @@ pub async fn respawn_sidecar(
     };
     let child_arc = Arc::clone(&state.sidecar_child);
     let disc_arc = Arc::clone(&state.disconnecting);
+    // Spawn the egress-guard override copy when present, else the real config (unmodified).
+    let spawn_config_path = egress_override.as_deref().unwrap_or(&config_path);
     let child = match sidecar::spawn_trusttunnel(
         app,
-        &config_path,
+        spawn_config_path,
         sidecar_log_level,
         child_arc,
         disc_arc,

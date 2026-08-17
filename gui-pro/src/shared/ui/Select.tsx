@@ -23,7 +23,7 @@ export interface SelectProps {
   disabled?: boolean;
   className?: string;
   // CC-6: error/helperText mirror Input's treatment verbatim — red border via
-  // --color-danger-500 on the trigger + a role="alert" message in
+  // --color-danger-fg on the trigger + a role="alert" message in
   // --color-status-error below. Standardizes Select's validation feedback on
   // the same tokens Input already uses (CC-1).
   error?: string;
@@ -197,7 +197,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
             // CC-6: error border copies Input's treatment — red border only,
             // no tinted background (Input FIX-II rationale: border speaks just
             // as clearly and keeps the control visually calm).
-            error && "border-[var(--color-danger-500)]",
+            error && "border-[var(--color-danger-fg)]",
             icon && "pl-9",
           )}
         >

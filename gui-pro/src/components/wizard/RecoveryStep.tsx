@@ -72,10 +72,10 @@ export function RecoveryStep(w: WizardState) {
         <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
           <div className="max-w-sm w-full text-center space-y-5 my-auto">
             <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-status-connecting-bg)]">
-              <KeyRound className="w-8 h-8 text-[var(--color-warning-500)]" />
+              <KeyRound className="w-8 h-8 text-[var(--color-warning-fg)]" />
             </div>
             <div className="space-y-1.5">
-              <h2 id="wizard-heading" className="text-display-sm text-[var(--color-warning-500)]">
+              <h2 id="wizard-heading" className="text-display-sm text-[var(--color-warning-fg)]">
                 {t("wizard.recovery.hostKeyChanged.title")}
               </h2>
               <p className="text-body text-[var(--color-text-secondary)]">
@@ -113,10 +113,10 @@ export function RecoveryStep(w: WizardState) {
       <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
         <div className="max-w-sm w-full text-center space-y-5 my-auto">
           <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-status-connecting-bg)]">
-            <AlertTriangle className="w-8 h-8 text-[var(--color-warning-500)]" />
+            <AlertTriangle className="w-8 h-8 text-[var(--color-warning-fg)]" />
           </div>
           <div className="space-y-1.5">
-            <h2 id="wizard-heading" className="text-display-sm text-[var(--color-warning-500)]">
+            <h2 id="wizard-heading" className="text-display-sm text-[var(--color-warning-fg)]">
               {t("wizard.recovery.title")}
             </h2>
             <p className="text-body text-[var(--color-text-secondary)]">
@@ -154,7 +154,7 @@ export function RecoveryStep(w: WizardState) {
           </div>
 
           {w.errorMessage && (
-            <p className="text-body-sm text-[var(--color-danger-500)]">{w.errorMessage}</p>
+            <p className="text-body-sm text-[var(--color-danger-fg)]">{w.errorMessage}</p>
           )}
         </div>
       </div>

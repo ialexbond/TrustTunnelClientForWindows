@@ -10,6 +10,7 @@ mod logging;
 pub mod notify;
 mod processes;
 mod routing_rules;
+mod net_egress;
 mod sidecar;
 pub mod ssh;
 mod tray;
@@ -229,6 +230,11 @@ pub fn run() {
             // restoring system DNS, the machine is still pointing at the dead tunnel
             // resolver (Claude Code 403 until restart). Restore the snapshot now.
             dns_guard::sweep_stale_dns_on_startup();
+
+            // Egress guard: drop leftover throwaway connect-override copies from previous sessions.
+            // Their only reader (that session's sidecar) is long gone, and they carry the endpoint
+            // password, so nothing should outlive the session that wrote it.
+            net_egress::sweep_stale_overrides();
 
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {

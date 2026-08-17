@@ -16,6 +16,24 @@ vi.mock("./RuleEntryRow", () => ({
   ),
 }));
 
+// Group entries (geosite / iplist_group) render via GroupChip; mock it to expose the branch +
+// the wired label / onRemove / onMove without pulling in the real OverflowMenu portal.
+vi.mock("./GroupChip", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  GroupChip: ({ entry, label, onRemove, onMove, currentAction }: any) => (
+    <div data-testid={`group-chip-${entry.id}`}>
+      <span>{label}</span>
+      <button onClick={() => onRemove(entry.id)} data-testid={`chip-remove-${entry.id}`}>remove</button>
+      <button
+        onClick={() => onMove(entry.id, currentAction === "direct" ? "proxy" : "direct")}
+        data-testid={`chip-move-${entry.id}`}
+      >
+        move
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("./AddRuleInput", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   AddRuleInput: ({ action }: any) => (
@@ -61,6 +79,8 @@ describe("RoutingBlockCard", () => {
   function renderCard(overrides: {
     action?: RouteAction;
     entries?: RuleEntry[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    iplistGroups?: any;
   } = {}) {
     return render(
       <RoutingBlockCard
@@ -68,9 +88,11 @@ describe("RoutingBlockCard", () => {
         entries={overrides.entries ?? sampleEntries}
         geodataStatus={defaultGeoStatus}
         geodataCategories={defaultGeoCategories}
+        iplistGroups={overrides.iplistGroups ?? []}
         onAdd={onAdd}
         onRemove={onRemove}
         onMove={onMove}
+        onEnsureGroupCache={vi.fn()}
       />,
     );
   }
@@ -101,6 +123,38 @@ describe("RoutingBlockCard", () => {
     expect(screen.getByText("example.com")).toBeInTheDocument();
     expect(screen.getByText("1.2.3.4")).toBeInTheDocument();
     expect(screen.getByText("geosite:category-ads")).toBeInTheDocument();
+  });
+
+  it("renders group entries (geosite / iplist_group) via GroupChip, plain rules via RuleEntryRow", () => {
+    renderCard();
+    // geosite (id 3) goes through GroupChip; domain (1) / ip (2) stay RuleEntryRow.
+    expect(screen.getByTestId("group-chip-3")).toBeInTheDocument();
+    expect(screen.getByTestId("rule-entry-1")).toBeInTheDocument();
+    expect(screen.getByTestId("rule-entry-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("rule-entry-3")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("group-chip-1")).not.toBeInTheDocument();
+  });
+
+  it("labels an iplist_group chip from the iplistGroups descriptor", () => {
+    renderCard({
+      action: "proxy",
+      entries: [{ id: "g1", type: "iplist_group", value: "iplist_group:games" }],
+      iplistGroups: [{ id: "games", label: "Игры" }],
+    });
+    expect(screen.getByTestId("group-chip-g1")).toBeInTheDocument();
+    expect(screen.getByText("Игры")).toBeInTheDocument();
+  });
+
+  it("moves a group chip with the correct actions", () => {
+    renderCard({ action: "proxy", entries: [{ id: "g2", type: "geosite", value: "geosite:youtube" }] });
+    fireEvent.click(screen.getByTestId("chip-move-g2"));
+    expect(onMove).toHaveBeenCalledWith("proxy", "direct", "g2");
+  });
+
+  it("removes a group chip with the correct action and id", () => {
+    renderCard({ action: "proxy", entries: [{ id: "g3", type: "geosite", value: "geosite:discord" }] });
+    fireEvent.click(screen.getByTestId("chip-remove-g3"));
+    expect(onRemove).toHaveBeenCalledWith("proxy", "g3");
   });
 
   it("renders empty state when no entries", () => {

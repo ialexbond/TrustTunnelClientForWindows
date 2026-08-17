@@ -93,6 +93,17 @@ function App() {
     return savedConfig ? "connection" : "control";
   });
 
+  // Broadcast a tab change so portaled overlays can close themselves. The routing geo-autocomplete
+  // and the shared OverflowMenu render via createPortal to document.body, and the tab panels are
+  // hidden-not-unmounted (IN-11), so switching tabs does NOT unmount them. A mouse click on the tab
+  // bar happens to fire their outside-mousedown close, but keyboard (Ctrl+1..5), tray and deep-link
+  // navigation go straight through setActiveTab with no such DOM event — the dropdown would then float
+  // over the newly shown tab. Every nav channel funnels through activeTab, so one broadcast here fixes
+  // all of them (and both offenders) at once. Fires once harmlessly on mount when nothing is open.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("app:tabchange"));
+  }, [activeTab]);
+
   // ─── Core VPN state ───
   const [status, setStatus] = useState<VpnStatus>("disconnected");
   const [config, setConfig] = useState<VpnConfig>(() => {

@@ -84,7 +84,7 @@ export function PingChart({ pingHistory, avgPing, isConnected }: PingChartProps)
             {avgPing !== null && avgPing <= Y_MAX && (
               <ReferenceLine
                 y={avgPing}
-                stroke="var(--color-accent-400)"
+                stroke="var(--color-accent-fg)"
                 strokeDasharray="3 3"
                 strokeOpacity={0.5}
               />
@@ -92,10 +92,10 @@ export function PingChart({ pingHistory, avgPing, isConnected }: PingChartProps)
             <Line
               type="monotone"
               dataKey="pingClamped"
-              stroke="var(--color-success-500)"
+              stroke="var(--color-success-fg)"
               strokeWidth={2}
               dot={false}
-              activeDot={{ r: 3, fill: "var(--color-success-500)" }}
+              activeDot={{ r: 3, fill: "var(--color-success-fg)" }}
               isAnimationActive={false}
             />
           </LineChart>

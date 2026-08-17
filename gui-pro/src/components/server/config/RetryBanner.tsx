@@ -12,8 +12,8 @@ import type { ConfigFileName } from "./types";
  *
  * Token map (Phase 15.1 UI-SPEC §Color):
  *   - background  → `--color-status-error-bg`
- *   - border      → `--color-danger-500`
- *   - icon colour → `--color-danger-500`
+ *   - border      → `--color-danger-fg`
+ *   - icon colour → `--color-danger-fg`
  *
  * a11y: `role="alert"` + `aria-live="assertive"` — screen reader announces immediately.
  */
@@ -45,14 +45,14 @@ export function RetryBanner({
       aria-live="assertive"
       className={cn(
         "flex items-center justify-between gap-3 rounded-[var(--radius-md)] p-3",
-        "bg-[var(--color-status-error-bg)] border border-[var(--color-danger-500)]",
+        "bg-[var(--color-status-error-bg)] border border-[var(--color-danger-fg)]",
         className,
       )}
     >
       <div className="flex items-center gap-2 text-body-sm text-[var(--color-text-primary)]">
         <AlertTriangle
           size={16}
-          className="text-[var(--color-danger-500)] shrink-0"
+          className="text-[var(--color-danger-fg)] shrink-0"
           aria-hidden="true"
         />
         <span>

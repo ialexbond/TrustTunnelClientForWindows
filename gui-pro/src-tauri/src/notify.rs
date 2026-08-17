@@ -838,11 +838,14 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
 /// The FE-threaded `is_switch` hint WINS when present: a deliberate SERVER SWITCH — manual
 /// («Переключиться» on another card) or auto (the engine) — is `Some(true)` → the NEUTRAL
 /// `switching` plate («Переключаю сервер…»); a same-server save-and-reconnect is `Some(false)` →
-/// `reconnecting` («Переподключение», owner-accepted in UAT test 12). The hint exists because a
+/// `applyingSettings` («Настройки применены — переподключение»). The hint exists because a
 /// MANUAL switch and a save-and-reconnect both carry origin=Manual — before it, a manual switch
 /// fell into `reconnecting`, whose body «Связь прервалась — восстанавливаю» falsely claimed the
 /// link dropped when the user had just picked another healthy server (review #6, owner decision:
-/// neutral copy for a switch).
+/// neutral copy for a switch). Phase 22 UAT extended the same fix to the save-and-reconnect leg: it
+/// used to reuse `reconnecting` (owner-accepted in UAT test 12) but that link-drop copy read wrong
+/// for a deliberate settings save, so it now has its own voluntary `applyingSettings` plate. The
+/// INVOLUNTARY drop (connectivity supervisor → `decide_notification`) still emits `reconnecting`.
 ///
 /// `None` (no hint — an older FE or a hintless caller) falls back to the original 13-10
 /// origin mapping: AutoSwitch → `switching`, everything else → `reconnecting`. Kept pure so the
@@ -851,7 +854,12 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
 pub fn start_plate_wire_key(origin: ConnectOrigin, is_switch: Option<bool>) -> &'static str {
     match is_switch {
         Some(true) => "switching",
-        Some(false) => "reconnecting",
+        // Phase 22 UAT: a same-server save-and-reconnect now gets the VOLUNTARY `applyingSettings`
+        // plate («Настройки применены — переподключение») instead of `reconnecting`, whose body
+        // «Связь прервалась — идёт восстановление» falsely claimed the link dropped when the user had
+        // just saved routing/config changes. The INVOLUNTARY drop path (connectivity supervisor →
+        // decide_notification) is UNCHANGED and still emits `reconnecting`.
+        Some(false) => "applyingSettings",
         None => match origin {
             ConnectOrigin::AutoSwitch => "switching",
             _ => "reconnecting",
@@ -2095,8 +2103,9 @@ mod tests {
         // alone cannot tell them apart — before the hint, a deliberate manual switch fired the
         // `reconnecting` start plate whose body («Связь прервалась — восстанавливаю») falsely
         // claimed the link dropped. With the hint: a SWITCH (manual or auto, Some(true)) fires the
-        // NEUTRAL `switching` plate; a same-server RECONNECT (Some(false)) keeps `reconnecting`
-        // (owner-accepted in UAT test 12) — regardless of what the origin cell holds.
+        // NEUTRAL `switching` plate; a same-server RECONNECT (Some(false)) now shows the VOLUNTARY
+        // `applyingSettings` plate (Phase 22 UAT — was `reconnecting`, whose link-drop copy read wrong
+        // for a deliberate save) — regardless of what the origin cell holds.
         assert_eq!(
             start_plate_wire_key(ConnectOrigin::Manual, Some(true)),
             "switching",
@@ -2104,8 +2113,8 @@ mod tests {
         );
         assert_eq!(
             start_plate_wire_key(ConnectOrigin::Manual, Some(false)),
-            "reconnecting",
-            "a manual save-and-reconnect keeps the reconnecting plate",
+            "applyingSettings",
+            "a manual save-and-reconnect shows the voluntary applyingSettings plate, not the link-drop reconnecting one",
         );
         assert_eq!(
             start_plate_wire_key(ConnectOrigin::AutoSwitch, Some(true)),
@@ -2115,7 +2124,7 @@ mod tests {
         // Defensive: an explicit reconnect hint beats even a stale AutoSwitch origin.
         assert_eq!(
             start_plate_wire_key(ConnectOrigin::AutoSwitch, Some(false)),
-            "reconnecting",
+            "applyingSettings",
         );
     }
 
@@ -2142,8 +2151,8 @@ mod tests {
     fn start_plate_wire_keys_are_valid_fe_kinds() {
         // Truth (13-10 / §A): every reachable start wire key must be a REAL FE `notificationCopy`
         // key the plate can render. `reconnecting` is one of the 7 outcome kinds (also emitted by
-        // the decider); `switching` is the FE-only start kind added in `notificationCopy.ts`.
-        // Neither is free-form — this guards the seam from drifting to a key the FE cannot render
+        // the decider); `switching` and `applyingSettings` (Phase 22 UAT) are the FE-only start kinds
+        // added in `notificationCopy.ts`. None is free-form — this guards the seam from drifting to a key the FE cannot render
         // (an invisible start plate). Exhaustive over origin × hint. (The FE side asserts the copy
         // map actually contains both keys; here we lock the Rust literals.)
         for origin in [
@@ -2154,7 +2163,7 @@ mod tests {
             for hint in [None, Some(true), Some(false)] {
                 let key = start_plate_wire_key(origin, hint);
                 assert!(
-                    matches!(key, "switching" | "reconnecting"),
+                    matches!(key, "switching" | "reconnecting" | "applyingSettings"),
                     "start wire key must be a known FE kind, got {key}",
                 );
             }

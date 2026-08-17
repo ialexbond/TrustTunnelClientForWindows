@@ -68,26 +68,29 @@ describe("RuleEntryRow", () => {
 
   it("calls onRemove with entry id when delete button clicked", () => {
     renderRow();
-    const deleteBtn = screen.getByTitle("Удалить запись");
+    // R21-03: delete/move migrated to the shared IconButton, which exposes its
+    // label via aria-label (+ Tooltip portal) rather than a raw `title` attr —
+    // query by accessible name; behavioral expectations are unchanged.
+    const deleteBtn = screen.getByLabelText("Удалить запись");
     fireEvent.click(deleteBtn);
     expect(onRemove).toHaveBeenCalledWith("rule_1");
   });
 
   it("shows move button to direct when current action is proxy", () => {
     renderRow({ currentAction: "proxy" });
-    const moveBtn = screen.getByTitle("Переместить в Напрямую");
+    const moveBtn = screen.getByLabelText("Переместить в Напрямую");
     expect(moveBtn).toBeInTheDocument();
   });
 
   it("shows move button to proxy when current action is direct", () => {
     renderRow({ currentAction: "direct" });
-    const moveBtn = screen.getByTitle("Переместить в VPN");
+    const moveBtn = screen.getByLabelText("Переместить в VPN");
     expect(moveBtn).toBeInTheDocument();
   });
 
   it("calls onMove with correct parameters", () => {
     renderRow({ currentAction: "proxy", entry: makeEntry({ id: "rule_42" }) });
-    const moveBtn = screen.getByTitle("Переместить в Напрямую");
+    const moveBtn = screen.getByLabelText("Переместить в Напрямую");
     fireEvent.click(moveBtn);
     expect(onMove).toHaveBeenCalledWith("rule_42", "direct");
   });
@@ -100,7 +103,7 @@ describe("RuleEntryRow", () => {
 
   it("renders with block action (shows both direct and proxy move targets)", () => {
     renderRow({ currentAction: "block" });
-    expect(screen.getByTitle("Переместить в Напрямую")).toBeInTheDocument();
-    expect(screen.getByTitle("Переместить в VPN")).toBeInTheDocument();
+    expect(screen.getByLabelText("Переместить в Напрямую")).toBeInTheDocument();
+    expect(screen.getByLabelText("Переместить в VPN")).toBeInTheDocument();
   });
 });

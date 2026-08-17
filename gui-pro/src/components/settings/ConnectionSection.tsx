@@ -53,7 +53,7 @@ export function ConnectionSection({ state }: Props) {
             style={{
               backgroundColor: "var(--color-danger-tint-08)",
               border: "1px solid var(--color-danger-tint-25)",
-              color: "var(--color-danger-500)",
+              color: "var(--color-danger-fg)",
             }}
           >
             <Trash2 className="w-3.5 h-3.5" />

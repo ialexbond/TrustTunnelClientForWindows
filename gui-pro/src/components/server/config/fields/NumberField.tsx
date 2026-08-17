@@ -82,7 +82,7 @@ export function NumberField({ schema, validator, onChange, disabled }: NumberFie
       {error && (
         <span
           id={`error-${schema.path.join("-")}`}
-          className="text-body-sm text-[var(--color-danger-500)]"
+          className="text-body-sm text-[var(--color-danger-fg)]"
           role="alert"
           aria-live="polite"
         >

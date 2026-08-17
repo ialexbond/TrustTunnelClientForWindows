@@ -182,7 +182,7 @@ export function ServerPanel(props: ServerPanelProps) {
             className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center"
             style={{ backgroundColor: "var(--color-status-connecting-bg)" }}
           >
-            <AlertTriangle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
+            <AlertTriangle className="w-6 h-6" style={{ color: "var(--color-warning-fg)" }} />
           </div>
           <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
             {t("server.status.not_installed")}
@@ -272,7 +272,7 @@ export function ServerPanel(props: ServerPanelProps) {
       <>
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="text-center space-y-4">
-            <Loader2 className="w-10 h-10 animate-spin mx-auto" style={{ color: "var(--color-warning-500)" }} />
+            <Loader2 className="w-10 h-10 animate-spin mx-auto" style={{ color: "var(--color-warning-fg)" }} />
             <div>
               <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
                 {t("server.status.rebooting")}

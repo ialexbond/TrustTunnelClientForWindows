@@ -108,14 +108,14 @@ export function SaveFlowDialog({
         {hasDisruptHighField && (
           <div
             role="status"
-            className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-status-connecting-bg)] border border-[var(--color-warning-500)] px-4 py-2"
+            className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-status-connecting-bg)] border border-[var(--color-warning-fg)] px-4 py-2"
           >
             <AlertTriangle
               size={16}
-              className="text-[var(--color-warning-500)] shrink-0"
+              className="text-[var(--color-warning-fg)] shrink-0"
               aria-hidden="true"
             />
-            <span className="text-body-sm text-[var(--color-warning-500)]">
+            <span className="text-body-sm text-[var(--color-warning-fg)]">
               {t("server.config.disrupt_warning")}
             </span>
           </div>

@@ -93,9 +93,10 @@ describe("ProcessPickerModal", () => {
 
   it("marks already-added processes as disabled", () => {
     renderModal({ alreadyAdded: ["chrome.exe"] });
-    // The button for chrome should be disabled
-    const chromeBtn = screen.getByText("chrome.exe").closest("button");
-    expect(chromeBtn).toBeDisabled();
+    // The row's interactive control is now the shared Checkbox (role=checkbox),
+    // named by the process. Already-added rows render it disabled.
+    const chromeCheckbox = screen.getByRole("checkbox", { name: "chrome.exe" });
+    expect(chromeCheckbox).toBeDisabled();
     // Should show 'already added' label
     expect(screen.getByText("добавлен")).toBeInTheDocument();
   });
@@ -108,8 +109,8 @@ describe("ProcessPickerModal", () => {
 
   it("selects a process and enables confirm", async () => {
     renderModal();
-    const codeBtn = screen.getByText("code.exe").closest("button")!;
-    await userEvent.click(codeBtn);
+    const codeCheckbox = screen.getByRole("checkbox", { name: "code.exe" });
+    await userEvent.click(codeCheckbox);
     // Confirm button should show count and be enabled
     expect(screen.getByText("Добавить выбранные (1)")).toBeInTheDocument();
     const confirmBtn = screen.getByText("Добавить выбранные (1)").closest("button");
@@ -118,8 +119,8 @@ describe("ProcessPickerModal", () => {
 
   it("calls onConfirm with selected processes", async () => {
     renderModal();
-    await userEvent.click(screen.getByText("code.exe").closest("button")!);
-    await userEvent.click(screen.getByText("node.exe").closest("button")!);
+    await userEvent.click(screen.getByRole("checkbox", { name: "code.exe" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "node.exe" }));
     await userEvent.click(screen.getByText("Добавить выбранные (2)"));
     expect(onConfirm).toHaveBeenCalledWith(expect.arrayContaining(["code.exe", "node.exe"]));
   });
@@ -132,10 +133,10 @@ describe("ProcessPickerModal", () => {
 
   it("deselects a process on second click", async () => {
     renderModal();
-    const codeBtn = screen.getByText("code.exe").closest("button")!;
-    await userEvent.click(codeBtn);
+    const codeCheckbox = screen.getByRole("checkbox", { name: "code.exe" });
+    await userEvent.click(codeCheckbox);
     expect(screen.getByText("Добавить выбранные (1)")).toBeInTheDocument();
-    await userEvent.click(codeBtn);
+    await userEvent.click(codeCheckbox);
     // Back to disabled confirm with no count
     expect(screen.getByText("Добавить выбранные")).toBeInTheDocument();
   });

@@ -79,7 +79,7 @@ const bigNum: React.CSSProperties = { fontSize: "var(--font-size-card-value)", f
 // title (applied at the JSX span) so a pathologically long name is ellipsized at
 // FULL size rather than shrunk or wrapped. See 16-UAT-ROUND3 gap CP-2b.
 const countryValue: React.CSSProperties = { fontSize: "var(--font-size-card-value)", fontWeight: "var(--font-weight-semibold)", lineHeight: 1.1, color: "var(--color-text-primary)" };
-const danger: React.CSSProperties = { color: "var(--color-danger-500)" };
+const danger: React.CSSProperties = { color: "var(--color-danger-fg)" };
 
 // D-10 (Plan 07-06, post-UAT scope): perceptible press-state — a native-app
 // push-in feel — applied ONLY to the clickable drill-down cards (Users / Protocol
@@ -686,9 +686,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
 
   const pingColor = (() => {
     if (ping === null || ping <= 0) return "var(--color-text-muted)";
-    if (ping < 100) return "var(--color-success-500)";
-    if (ping < 300) return "var(--color-warning-500)";
-    return "var(--color-danger-500)";
+    if (ping < 100) return "var(--color-success-fg)";
+    if (ping < 300) return "var(--color-warning-fg)";
+    return "var(--color-danger-fg)";
   })();
 
   // TLS expiry calculation (3 states: >14d green, 7-14d warning, ≤7d danger).
@@ -735,8 +735,8 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             — from clipping while still capping the steady ECG state. */}
         {rebooting ? (
           <div className="flex flex-col items-center justify-center gap-1.5" style={{ minHeight: 56 }}>
-            <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-warning-500)" }} />
-            <span className="text-sm" style={{ color: "var(--color-warning-500)" }}>
+            <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-warning-fg)" }} />
+            <span className="text-sm" style={{ color: "var(--color-warning-fg)" }}>
               {t("server.overview.rebootingCountdown")}{rebootCountdown > 0 ? ` ${rebootCountdown}s` : "..."}
             </span>
           </div>
@@ -749,7 +749,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
                 с прежнего timing → bright/dim layers рассогласовываются → tail/head перепутываются. */}
             <EcgSvg
               key={isRunning ? "live" : "dead"}
-              color={isRunning ? "var(--color-success-500)" : "var(--color-danger-500)"}
+              color={isRunning ? "var(--color-success-fg)" : "var(--color-danger-fg)"}
               path={isRunning ? ecgHeartbeat : ecgFlatline}
               anim={isRunning ? "ecg-live" : "ecg-dead"}
             />
@@ -836,7 +836,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         ) : speed ? (
           <div className="flex items-center justify-center gap-4 py-2" style={{ minHeight: 48 }}>
             <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
-              <ArrowDown className="w-6 h-6 shrink-0" style={{ color: "var(--color-success-400)" }} />
+              <ArrowDown className="w-6 h-6 shrink-0" style={{ color: "var(--color-success-fg)" }} />
               <div className="flex items-baseline gap-1">
                 <span className="font-mono" style={bigNum}>{Math.round(speed.download_mbps)}</span>
                 <span className="text-sm whitespace-nowrap font-mono" style={muted}>{t("server.overview.speedUnit")}</span>
@@ -844,7 +844,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             </div>
             <div className="h-7 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
             <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
-              <ArrowUp className="w-6 h-6 shrink-0" style={{ color: "var(--color-warning-500)" }} />
+              <ArrowUp className="w-6 h-6 shrink-0" style={{ color: "var(--color-warning-fg)" }} />
               <div className="flex items-baseline gap-1">
                 <span className="font-mono" style={bigNum}>{Math.round(speed.upload_mbps)}</span>
                 <span className="text-sm whitespace-nowrap font-mono" style={muted}>{t("server.overview.speedUnit")}</span>
@@ -1040,7 +1040,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             // голая `ArrowUp` без круга — мискомпонент vs спека.
             <ArrowUpCircle
               className="w-6 h-6 shrink-0"
-              style={{ color: "var(--color-warning-500)" }}
+              style={{ color: "var(--color-warning-fg)" }}
               aria-label={t("server.service.protocol.update_available_badge")}
               data-testid="overview-protocol-update-arrow"
             />
@@ -1129,10 +1129,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             const color = tone === null
               ? "var(--color-text-muted)"
               : tone === "ok"
-                ? "var(--color-success-500)"
+                ? "var(--color-success-fg)"
                 : tone === "warning"
-                  ? "var(--color-warning-500)"
-                  : "var(--color-danger-500)";
+                  ? "var(--color-warning-fg)"
+                  : "var(--color-danger-fg)";
             return (
               <div
                 key={item.name}

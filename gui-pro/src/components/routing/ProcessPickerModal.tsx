@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, Loader2, Cpu, Check } from "lucide-react";
-import { Modal, Button } from "../../shared/ui";
+import { Search, Loader2, Cpu } from "lucide-react";
+import { Modal, Button, Checkbox } from "../../shared/ui";
 import type { ProcessInfo } from "./useRoutingState";
 
 interface ProcessPickerModalProps {
@@ -117,7 +117,7 @@ export function ProcessPickerModal({
             <div className="flex items-center justify-center py-8">
               <Loader2
                 className="w-5 h-5 animate-spin"
-                style={{ color: "var(--color-accent-400)" }}
+                style={{ color: "var(--color-accent-fg)" }}
               />
             </div>
           ) : filtered.length === 0 ? (
@@ -134,77 +134,87 @@ export function ProcessPickerModal({
                 const checked = isSelected || isAdded;
 
                 return (
-                  <button
+                  // 21-06 (D-01): the row is a <div>, NOT a <button>. The shared
+                  // Checkbox is itself a <button role="checkbox">, so nesting it
+                  // inside a row <button> would be invalid HTML/a11y and break the
+                  // tests' .closest("button") selectors. The Checkbox is the single
+                  // interactive control; a SIBLING clickable region carries the
+                  // whole-row click. Because that region is a sibling (not an
+                  // ancestor) of the Checkbox, each click fires exactly one toggle
+                  // — no double-fire. Selection tint + already-added muting move
+                  // onto this container; behaviour is unchanged.
+                  <div
                     key={proc.name}
-                    type="button"
-                    disabled={isAdded}
-                    onClick={() => toggleProcess(proc.name)}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors disabled:opacity-40"
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors${
+                      isAdded ? " opacity-40" : ""
+                    }`}
                     style={{
                       backgroundColor: isSelected
                         ? "var(--color-accent-tint-08)"
                         : "transparent",
                     }}
                   >
-                    {/* Checkbox */}
+                    {/* Selection indicator — shared Checkbox primitive (D-01).
+                        checked = isSelected || isAdded, disabled when already
+                        added; toggling runs the same toggleProcess. aria-label
+                        names the icon-only control with the process name. */}
+                    <Checkbox
+                      checked={checked}
+                      disabled={isAdded}
+                      onChange={() => toggleProcess(proc.name)}
+                      aria-label={proc.name}
+                      className="shrink-0"
+                    />
+
+                    {/* Sibling clickable info region — preserves whole-row click
+                        without nesting under the Checkbox. Guarded by isAdded so
+                        already-added rows stay inert, mirroring the old disabled
+                        row button. */}
                     <div
-                      className="w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors"
-                      style={{
-                        borderColor: checked
-                          ? "var(--color-accent-500)"
-                          : "var(--color-border)",
-                        backgroundColor: checked
-                          ? "var(--color-accent-500)"
-                          : "var(--color-input-bg)",
+                      onClick={() => {
+                        if (!isAdded) toggleProcess(proc.name);
                       }}
+                      className={`flex-1 min-w-0 flex items-center gap-3${
+                        isAdded ? "" : " cursor-pointer"
+                      }`}
                     >
-                      {/* UAT-F04 / CLAUDE.md: no hardcoded white — the glyph
-                          uses the on-accent token so it stays legible on the
-                          --color-accent-500 fill across themes. */}
-                      {checked && (
-                        <Check
-                          className="w-3 h-3"
-                          style={{ color: "var(--color-on-accent)" }}
-                        />
-                      )}
-                    </div>
-
-                    <div
-                      className="w-6 h-6 rounded flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: "var(--color-bg-hover)" }}
-                    >
-                      <Cpu className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <span
-                        className="text-xs block truncate"
-                        style={{ color: "var(--color-text-primary)" }}
+                      <div
+                        className="w-6 h-6 rounded flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: "var(--color-bg-hover)" }}
                       >
-                        {proc.name}
-                      </span>
-                      {proc.path && (
+                        <Cpu className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
                         <span
                           className="text-xs block truncate"
-                          style={{ color: "var(--color-text-muted)" }}
+                          style={{ color: "var(--color-text-primary)" }}
                         >
-                          {proc.path}
+                          {proc.name}
+                        </span>
+                        {proc.path && (
+                          <span
+                            className="text-xs block truncate"
+                            style={{ color: "var(--color-text-muted)" }}
+                          >
+                            {proc.path}
+                          </span>
+                        )}
+                      </div>
+
+                      {isAdded && (
+                        <span
+                          className="text-xs shrink-0 px-1.5 py-0.5 rounded"
+                          style={{
+                            color: "var(--color-text-muted)",
+                            backgroundColor: "var(--color-bg-hover)",
+                          }}
+                        >
+                          {t("routing.alreadyAdded")}
                         </span>
                       )}
                     </div>
-
-                    {isAdded && (
-                      <span
-                        className="text-xs shrink-0 px-1.5 py-0.5 rounded"
-                        style={{
-                          color: "var(--color-text-muted)",
-                          backgroundColor: "var(--color-bg-hover)",
-                        }}
-                      >
-                        {t("routing.alreadyAdded")}
-                      </span>
-                    )}
-                  </button>
+                  </div>
                 );
               })}
             </div>

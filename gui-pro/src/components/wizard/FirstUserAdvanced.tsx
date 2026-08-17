@@ -94,7 +94,7 @@ export function FirstUserAdvanced({
             role="note"
             className="flex items-start gap-2 p-2 rounded-[var(--radius-lg)] bg-[var(--color-accent-tint-08)] border border-[var(--color-accent-tint-20)]"
           >
-            <Info className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-accent-500)]" />
+            <Info className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-accent-fg)]" />
             <p className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
               {t('wizard.endpoint.first_user_advanced_banner')}
             </p>

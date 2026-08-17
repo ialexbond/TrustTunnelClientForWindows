@@ -108,7 +108,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               // FIX-II: error state = red border only, no tinted background.
               // Red fill felt alarming for routine validation — border speaks
               // just as clearly and keeps the input visually calm.
-              error && "border-[var(--color-danger-500)]",
+              error && "border-[var(--color-danger-fg)]",
               icon && "pl-9",
               showClear && "pr-8",
               // Reserve room on the right for the in-field counter so the typed text never

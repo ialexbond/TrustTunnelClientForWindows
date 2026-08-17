@@ -54,9 +54,33 @@ fn active_groups_path() -> std::path::PathBuf {
     portable_data_dir().join("active_groups.json")
 }
 
+/// Whitelist guard for a manual `iplist_group:<id>` id before it becomes a filesystem cache
+/// path or a fetch URL/filename. Per CLAUDE.md security rule, validators use a WHITELIST of
+/// allowed characters, NOT a blacklist. An id is accepted only when it is non-empty, ≤64 chars,
+/// and every char is ASCII lowercase / ASCII digit / `_` / `-`. This rejects the path-traversal
+/// vector (`../etc`, `a/b`, `a\b`), separators, uppercase, over-length, and any prefixed value
+/// like `iplist_group:games` (the colon is not in the whitelist) — closing threat T-22-01. The
+/// special `ru_whitelist` cache key (see fetch_whitelist_domains) already satisfies this shape
+/// (lowercase + underscore), so it passes without a special case. This is the backend belt to the
+/// frontend `validateEntry` suspenders (defense-in-depth, Security V5/V12).
+fn is_valid_group_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 64 {
+        return false;
+    }
+    id.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
 fn group_cache_path(group_id: &str) -> std::path::PathBuf {
     let cache_dir = portable_data_dir().join("group_cache");
     std::fs::create_dir_all(&cache_dir).ok();
+    // Sanitize before joining: a rejected id (e.g. `../etc`, `a/b`) must NEVER build a path that
+    // traverses out of the cache dir. Return a fixed sentinel INSIDE the cache dir whose name
+    // carries no user bytes — its `.exists()` is always false, so a load reads nothing and a
+    // write (only reached after fetch, which errors first on an invalid id) targets a dead file.
+    if !is_valid_group_id(group_id) {
+        return cache_dir.join("__invalid_group__.nonexistent");
+    }
     cache_dir.join(format!("{group_id}.json"))
 }
 
@@ -200,6 +224,13 @@ pub fn get_iplist_groups() -> Vec<IplistGroup> {
 
 #[tauri::command]
 pub async fn fetch_iplist_group_domains(group_id: String) -> Result<Vec<String>, String> {
+    // Backend belt (T-22-01): reject an invalid id BEFORE it is interpolated into the request URL
+    // or a cache filename. A manual `iplist_group:<id>` entry is user-controlled; without this a
+    // value like `../etc` would traverse the cache dir and taint the fetch URL. Whitelist-only.
+    if !is_valid_group_id(&group_id) {
+        return Err(format!("Invalid group id: {group_id}"));
+    }
+
     let url = format!("{IPLIST_BASE_URL}/?format=json&data=domains&group={group_id}");
     eprintln!("[iplist] Fetching group '{group_id}' from {url}");
 
@@ -328,5 +359,59 @@ pub fn load_group_cache(group_id: String) -> Result<Vec<String>, String> {
         Ok(content) => serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse cache for {group_id}: {e}")),
         Err(_) => Ok(Vec::new()),
+    }
+}
+
+// ─── Tests ──────────────────────────────────────────
+//
+// Wave 0 RED (Plan 22-01): the security whitelist sanitizer `is_valid_group_id` is exercised
+// here BEFORE it exists. A manual `iplist_group:<id>` entry (D-03) is user-controlled input that
+// reaches `group_cache_path(<id>)` → `portable_data_dir().join("group_cache").join("<id>.json")`.
+// Without a whitelist a value like `../etc` or `a/b` would traverse out of the cache dir
+// (threat T-22-01: tampering / info-disclosure). The mitigation is a `[a-z0-9_-]`-only,
+// ≤64-char, non-empty allowlist that also accepts the 17 known iplist group ids + `ru_whitelist`.
+//
+// This whole `mod tests` DOES NOT COMPILE yet: `is_valid_group_id` is not defined. That is the
+// intended RED state — Plan 22-03 ADDS `pub fn is_valid_group_id(&str) -> bool` to this module
+// and turns this test green. Do NOT define the function here.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_valid_group_id_accepts_known_ids_and_rejects_traversal() {
+        // Wave 0 RED: is_valid_group_id added in Plan 03.
+
+        // Accepts every known iplist group id (the 17 in IPLIST_GROUPS)…
+        for (id, _label) in IPLIST_GROUPS {
+            assert!(
+                is_valid_group_id(id),
+                "known iplist group id '{id}' must be accepted"
+            );
+        }
+        // …plus the special ru_whitelist cache key (not in IPLIST_GROUPS, see fetch_whitelist_domains).
+        assert!(is_valid_group_id("ru_whitelist"));
+        // …and shape-valid lowercase ids with digits / hyphen / underscore.
+        assert!(is_valid_group_id("a"));
+        assert!(is_valid_group_id("group-1_x"));
+
+        // Rejects path traversal and separators (the core threat).
+        assert!(!is_valid_group_id("../etc"), "path traversal must be rejected");
+        assert!(!is_valid_group_id("a/b"), "forward slash must be rejected");
+        assert!(!is_valid_group_id("a\\b"), "backslash must be rejected");
+        // Rejects uppercase (ids are lowercase in IPLIST_GROUPS).
+        assert!(!is_valid_group_id("A"), "uppercase must be rejected");
+        assert!(!is_valid_group_id("Games"), "mixed case must be rejected");
+        // Rejects empty and over-length (>64 chars).
+        assert!(!is_valid_group_id(""), "empty must be rejected");
+        assert!(
+            !is_valid_group_id(&"a".repeat(65)),
+            "a 65-char id must be rejected"
+        );
+        // Rejects any other non-[a-z0-9_-] character.
+        assert!(!is_valid_group_id("a.b"), "dot must be rejected");
+        assert!(!is_valid_group_id("a b"), "space must be rejected");
+        assert!(!is_valid_group_id("a;b"), "semicolon must be rejected");
+        assert!(!is_valid_group_id("iplist_group:games"), "prefixed value must be rejected");
     }
 }

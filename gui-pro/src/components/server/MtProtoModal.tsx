@@ -311,7 +311,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             >
               <Square
                 className="w-4 h-4 shrink-0 mt-0.5"
-                style={{ color: "var(--color-warning-500)" }}
+                style={{ color: "var(--color-warning-fg)" }}
                 aria-hidden="true"
               />
               <span>{t("server.service.mtproto.stopped_hint")}</span>

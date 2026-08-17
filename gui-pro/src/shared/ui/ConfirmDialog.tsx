@@ -65,8 +65,8 @@ export function ConfirmDialog({
           style={{
             color:
               variant === "danger"
-                ? "var(--color-danger-500)"
-                : "var(--color-warning-500)",
+                ? "var(--color-danger-fg)"
+                : "var(--color-warning-fg)",
           }}
         >
           {title}

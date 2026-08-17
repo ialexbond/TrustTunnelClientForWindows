@@ -51,6 +51,12 @@ describe("RoutingPanel", () => {
       if (cmd === "get_geodata_categories") {
         return { geoip: [], geosite: [] };
       }
+      // Plan 22-03 added a mount-time get_iplist_groups invoke (useRoutingState.loadIplistGroups);
+      // the real backend returns Vec<IplistGroup> (an array). Mirror that here so the mount-time
+      // load hydrates a real (empty) list rather than falling through to the default null.
+      if (cmd === "get_iplist_groups") {
+        return [];
+      }
       if (cmd === "update_vpn_mode") {
         return null;
       }
@@ -95,8 +101,10 @@ describe("RoutingPanel", () => {
 
   it("renders routing block cards after loading", async () => {
     render(<RoutingPanel {...defaultProps} />);
+    // "Через VPN" is the proxy block title AND (since Plan 22-04) a preset-tile caption, so it now
+    // appears multiple times — assert the label renders at least once rather than exactly once.
     await waitFor(() => {
-      expect(screen.getByText("Через VPN")).toBeInTheDocument();
+      expect(screen.getAllByText("Через VPN").length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -124,8 +132,9 @@ describe("RoutingPanel", () => {
 
   it("renders both direct and proxy routing block cards", async () => {
     render(<RoutingPanel {...defaultProps} />);
+    // See above: "Через VPN" is now shared between the proxy block title and preset-tile captions.
     await waitFor(() => {
-      expect(screen.getByText("Через VPN")).toBeInTheDocument();
+      expect(screen.getAllByText("Через VPN").length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -141,11 +150,12 @@ describe("RoutingPanel", () => {
   it("calls invoke with update_vpn_mode when selective button is clicked", async () => {
     render(<RoutingPanel {...defaultProps} />);
     await waitFor(() => {
-      expect(screen.getAllByText("Напрямую").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText(i18n.t("vpn_modes.selective")).length).toBeGreaterThanOrEqual(1);
     });
 
-    // The VPN mode selector button is the one inside a grid layout
-    const selectiveButtons = screen.getAllByText("Напрямую");
+    // The VPN mode selector button is the one inside a grid layout.
+    // Query by the i18n label (not a literal) so a label rename can't stale this test.
+    const selectiveButtons = screen.getAllByText(i18n.t("vpn_modes.selective"));
     // Click the button element (not the span) — find the one that's a button
     const selectiveBtn = selectiveButtons.find(el => el.closest("button"));
     fireEvent.click(selectiveBtn!.closest("button")!);
@@ -166,7 +176,7 @@ describe("RoutingPanel", () => {
 
     // Find the selective mode button by its role and the Zap icon (it's in a grid)
     const allButtons = screen.getAllByRole("button");
-    const selectiveBtn = allButtons.find(btn => btn.textContent?.trim() === "Напрямую");
+    const selectiveBtn = allButtons.find(btn => btn.textContent?.trim() === i18n.t("vpn_modes.selective"));
     expect(selectiveBtn).toBeTruthy();
     fireEvent.click(selectiveBtn!);
 
@@ -209,7 +219,7 @@ describe("RoutingPanel", () => {
     });
 
     const allButtons = screen.getAllByRole("button");
-    const selectiveBtn = allButtons.find(btn => btn.textContent?.trim() === "Напрямую");
+    const selectiveBtn = allButtons.find(btn => btn.textContent?.trim() === i18n.t("vpn_modes.selective"));
     expect(selectiveBtn).toBeTruthy();
     fireEvent.click(selectiveBtn!);
 
@@ -250,10 +260,12 @@ describe("RoutingPanel", () => {
 
   it("renders export and import buttons", async () => {
     render(<RoutingPanel {...defaultProps} />);
+    // Export/import are now canon icon-only IconButtons (aria-label, not a title attr) living in
+    // the bottom strip — query by their accessible name instead of getByTitle.
     await waitFor(() => {
-      expect(screen.getByTitle(i18n.t("routing.exportRules"))).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: i18n.t("routing.exportRules") })).toBeInTheDocument();
     });
-    expect(screen.getByTitle(i18n.t("routing.importRules"))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: i18n.t("routing.importRules") })).toBeInTheDocument();
   });
 
   // ── Error banner ──

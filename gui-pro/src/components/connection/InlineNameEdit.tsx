@@ -72,7 +72,7 @@ export function InlineNameEdit({
         "pl-[var(--space-3)] pr-[var(--space-2)] transition-colors",
         "focus-within:shadow-[var(--focus-ring)]",
         invalid
-          ? "border-[var(--color-danger-500)]"
+          ? "border-[var(--color-danger-fg)]"
           : "border-[var(--color-input-border)]",
       )}
     >
