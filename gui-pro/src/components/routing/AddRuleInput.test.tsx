@@ -201,7 +201,14 @@ describe("AddRuleInput", () => {
         expect(input).toHaveAttribute("aria-expanded", "true");
       });
       // The dropdown is fed the group-id list passed via the iplistGroups prop.
-      expect(screen.getByText(/games/i)).toBeInTheDocument();
+      //
+      // Must be an AWAITED find, not a one-shot get: `aria-expanded` flips as soon as
+      // `showAutocomplete` is set, but the portal body only renders once the SEPARATE
+      // position effect has produced `dropdownPos`. Between those two effect ticks the flag is
+      // already true while the list is not in the DOM yet — a one-shot `getByText` here raced
+      // that window and failed intermittently on loaded machines (it took down the release CI
+      // for phases 20-22 while passing locally). `findByText` retries until the list is painted.
+      expect(await screen.findByText(/games/i)).toBeInTheDocument();
     });
 
     it("adds a KNOWN group id with its iplist_group: prefix", () => {
