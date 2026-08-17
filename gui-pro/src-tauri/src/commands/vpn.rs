@@ -858,41 +858,35 @@ fn filter_out_own_adapter(names: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// Detect conflicting VPN/TUN adapters that may block WinTUN creation.
-/// Returns a list of adapter names that look like they belong to other VPN software.
+/// Foreign VPN adapters that can actually get in our way — the list behind the second-VPN banner.
 ///
-/// T-21: the app's OWN WinTUN adapter is excluded via `filter_out_own_adapter` AFTER
-/// enumeration. We filter by NAME in Rust (not only the PowerShell description match)
-/// because the own adapter carries the "TrustTunnel" identity in its `Name`, not its
-/// `InterfaceDescription` — so the previous description-only `-notmatch` let it through.
-#[cfg(windows)]
+/// Delegates to `net_egress::foreign_adapters_on_default_route`, the SAME definition the
+/// connect-time egress guard uses, so the banner and the fix cannot disagree about what "another
+/// VPN" means.
+///
+/// This replaced a PowerShell scan that matched
+/// `InterfaceDescription -match 'WireGuard|Wintun|TAP-Windows|tun|Amnezia|OpenVPN'`. That scan was
+/// wrong in three independent ways, all of which the owner hit on one screenshot:
+/// * **Garbled names.** Its stdout was decoded as UTF-8, but PowerShell writes in the console
+///   codepage, so any non-ASCII adapter name (Russian, Chinese) rendered as mojibake in the banner.
+///   `GetAdaptersAddresses` returns UTF-16 and has no such problem.
+/// * **False alarms.** The bare `tun` alternative matched Windows' own hidden
+///   `… Tunneling Adapter` pseudo-devices and anything else merely containing those letters, and the
+///   whole scan fired on adapters that were only INSTALLED — an `OpenVPN Data Channel Offload`
+///   driver is not a running VPN. The shared definition additionally requires the adapter to be Up
+///   and to hold a default route, i.e. to be genuinely able to steal our egress.
+/// * **Missed the real one.** Radmin VPN — the product empirically proven to break connects — has
+///   none of those words in its description, so the old scan stayed silent on the one case that
+///   mattered.
+///
+/// T-21 (own adapter) is still honoured, now inside the shared helper: our tunnel is excluded by its
+/// connection NAME (`TrustTunnel (<host>)`), never by description — WireGuard ships the same
+/// `wintun` driver and therefore the same description we have.
 fn detect_conflicting_adapters() -> Vec<String> {
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-NetAdapter -IncludeHidden | Where-Object { \
-                $_.InterfaceDescription -match 'WireGuard|Wintun|TAP-Windows|tun|Amnezia|OpenVPN' -and \
-                $_.InterfaceDescription -notmatch 'TrustTunnel' \
-            } | Select-Object -ExpandProperty Name"
-        ])
-        .creation_flags(crate::sidecar::CREATE_NO_WINDOW)
-        .output();
-    match output {
-        Ok(out) => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            let names = text
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect();
-            // T-21: drop our own "TrustTunnel (<host>)" adapter (matched by Name).
-            filter_out_own_adapter(names)
-        }
-        Err(_) => vec![],
-    }
+    // Defence in depth: the shared helper already drops our own tunnel, but keep the name filter so
+    // a future change there cannot make the app nag about itself.
+    filter_out_own_adapter(crate::net_egress::foreign_adapters_on_default_route())
 }
-
-#[cfg(not(windows))]
-fn detect_conflicting_adapters() -> Vec<String> { vec![] }
 
 /// 16-08 (gap 6): pure "should we raise the second-VPN banner?" decision. We emit
 /// ONLY when the post-`filter_out_own_adapter` conflict list is non-empty — so our
