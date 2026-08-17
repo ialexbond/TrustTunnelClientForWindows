@@ -48,6 +48,30 @@ fn get_start_minimized() -> bool {
         .unwrap_or(false)
 }
 
+/// Marker for the one-time "the app keeps running in the tray" hint.
+///
+/// Lives in the portable DATA dir (next to the configs / logs / dns snapshot), not next to the exe:
+/// that directory is the app's real state, survives an in-place reinstall, and needs no admin rights
+/// to write. The `.start_minimized` / `.enable_logs` flags sit next to the exe only because they are
+/// read before the data dir is known.
+fn tray_hint_marker() -> std::path::PathBuf {
+    ssh::portable_data_dir().join("tray_hint_shown")
+}
+
+/// Has the tray hint already been shown to this user, ever?
+fn tray_hint_already_shown() -> bool {
+    tray_hint_marker().exists()
+}
+
+/// Record that the tray hint was shown, so it never appears again on a later launch.
+fn mark_tray_hint_shown() {
+    let path = tray_hint_marker();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, "1");
+}
+
 /// Phase 13 (D-04) — restore the main window from the tray and hide the notification plate.
 ///
 /// Invoked by the plate's BODY click: show + focus the main window (reusing the EXACT tray "show"
@@ -541,18 +565,35 @@ pub fn run() {
                 window.hide().ok();
                 api.prevent_close();
 
-                // Show notification once that app is still running in tray
+                // One-time hint that closing the window does NOT quit the app.
+                //
+                // It used to be gated on `tray_notified` alone — an in-memory flag that resets on
+                // every launch, so the toast reappeared after each restart. A user who has seen it
+                // once already knows; repeating it forever is nagging. The memory flag is kept as a
+                // cheap short-circuit (no filesystem hit on subsequent closes in the same run), and
+                // a marker file makes the "already told them" fact survive restarts.
                 if let Some(state) = window.app_handle().try_state::<AppState>() {
                     let mut notified = state.tray_notified.lock().unwrap_or_else(|e| e.into_inner());
                     if !*notified {
                         *notified = true;
-                        use tauri_plugin_notification::NotificationExt;
-                        window.app_handle().notification()
-                            .builder()
-                            .title("TrustTunnel Pro")
-                            .body("Приложение свёрнуто в трей. Нажмите на иконку, чтобы открыть.")
-                            .show()
-                            .ok();
+                        if !tray_hint_already_shown() {
+                            mark_tray_hint_shown();
+                            // Localized, not hardcoded Russian: an English user was shown Russian
+                            // here. Same bilingual pattern the tray menu uses (tray::get_locale).
+                            let app = window.app_handle();
+                            let is_ru = tray::get_locale(app) == "ru";
+                            use tauri_plugin_notification::NotificationExt;
+                            app.notification()
+                                .builder()
+                                .title("TrustTunnel Pro")
+                                .body(if is_ru {
+                                    "Приложение свёрнуто в трей. Нажмите на иконку, чтобы открыть."
+                                } else {
+                                    "The app is minimized to the tray. Click the icon to reopen."
+                                })
+                                .show()
+                                .ok();
+                        }
                     }
                 }
             }
