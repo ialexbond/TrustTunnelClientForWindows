@@ -32,8 +32,8 @@ function tsForFile(): string {
  * colorizeLogLine — автоматическая подсветка строк лога.
  *
  * Поддерживаемые уровни:
- *   — error / err] / fatal / panic → --color-danger-500 (красный)
- *   — warn / warning             → --color-warning-500 (жёлтый)
+ *   — error / err] / fatal / panic → --color-danger-fg (красный)
+ *   — warn / warning             → --color-warning-fg (жёлтый)
  *   — всё остальное              → --color-text-muted
  *
  * Перенесено из LogsSection.tsx verbatim (D-2.2 — colorizeLogLine preserved).
@@ -47,9 +47,9 @@ export function colorizeLogLine(line: string): { color: string } {
     lower.includes("fatal") ||
     lower.includes("panic")
   )
-    return { color: "var(--color-danger-500)" };
+    return { color: "var(--color-danger-fg)" };
   if (lower.includes("warn") || lower.includes("warning"))
-    return { color: "var(--color-warning-500)" };
+    return { color: "var(--color-warning-fg)" };
   return { color: "var(--color-text-muted)" };
 }
 
@@ -82,8 +82,8 @@ function classifyLogSeverity(line: string): LogSeverity {
  * lines get a transparent bar so only error/warn draw attention (calmer default).
  */
 function severityBarColor(severity: LogSeverity): string {
-  if (severity === "error") return "var(--color-danger-500)";
-  if (severity === "warn") return "var(--color-warning-500)";
+  if (severity === "error") return "var(--color-danger-fg)";
+  if (severity === "warn") return "var(--color-warning-fg)";
   return "transparent";
 }
 

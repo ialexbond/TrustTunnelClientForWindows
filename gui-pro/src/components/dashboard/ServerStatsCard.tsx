@@ -63,9 +63,9 @@ function formatServerUptime(seconds: number): string {
 }
 
 function usageColor(percent: number): string {
-  if (percent > 90) return "var(--color-danger-500)";
-  if (percent > 50) return "var(--color-warning-500)";
-  return "var(--color-success-500)";
+  if (percent > 90) return "var(--color-danger-fg)";
+  if (percent > 50) return "var(--color-warning-fg)";
+  return "var(--color-success-fg)";
 }
 
 function UsageBar({ percent }: { percent: number }) {

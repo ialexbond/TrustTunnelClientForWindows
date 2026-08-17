@@ -8,8 +8,8 @@ import { cn } from "../../shared/lib/cn";
  * CVA variants for the badge.
  *
  * Token map (Phase 15 UI-SPEC §Color):
- *   - `disrupt-high` → `--color-status-error-bg` + `--color-danger-500` (red, AlertTriangle)
- *   - `disrupt-low`  → `--color-warning-tint-08` + `--color-warning-500` (yellow, RefreshCw)
+ *   - `disrupt-high` → `--color-status-error-bg` + `--color-danger-fg` (red, AlertTriangle)
+ *   - `disrupt-low`  → `--color-warning-tint-08` + `--color-warning-fg` (yellow, RefreshCw)
  *
  * NOTE: tokens.css does not expose `--color-status-warning-bg` (only
  * `--color-status-connecting-bg` and the warning-tint scale). We use
@@ -24,9 +24,9 @@ export const restartBadgeVariants = cva(
     variants: {
       level: {
         "disrupt-high":
-          "bg-[var(--color-status-error-bg)] text-[var(--color-danger-500)]",
+          "bg-[var(--color-status-error-bg)] text-[var(--color-danger-fg)]",
         "disrupt-low":
-          "bg-[var(--color-warning-tint-08)] text-[var(--color-warning-500)]",
+          "bg-[var(--color-warning-tint-08)] text-[var(--color-warning-fg)]",
       },
     },
     defaultVariants: { level: "disrupt-low" },

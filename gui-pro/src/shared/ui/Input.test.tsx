@@ -25,7 +25,7 @@ describe("Input", () => {
   it("applies error styling when error prop is set", () => {
     render(<Input error="Required field" placeholder="err" />);
     const input = screen.getByPlaceholderText("err");
-    expect(input.className).toContain("border-[var(--color-danger-500)]");
+    expect(input.className).toContain("border-[var(--color-danger-fg)]");
     expect(screen.getByText("Required field")).toBeInTheDocument();
   });
 

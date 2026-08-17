@@ -18,10 +18,10 @@ interface LogPanelProps {
 const LOG_LEVELS = ["all", "error", "warn", "info", "debug", "trace"] as const;
 
 const LEVEL_COLOR: Record<string, string> = {
-  error: "var(--color-danger-500)",
-  warn: "var(--color-warning-500)",
-  info: "var(--color-success-500)",
-  debug: "var(--color-accent-400)",
+  error: "var(--color-danger-fg)",
+  warn: "var(--color-warning-fg)",
+  info: "var(--color-success-fg)",
+  debug: "var(--color-accent-fg)",
   trace: "var(--color-text-muted)",
 };
 

@@ -127,7 +127,7 @@ export function ErrorStep(w: WizardState) {
             byte-for-byte. */}
         {hints.length > 0 && (
           <div className="text-left space-y-1.5 p-3 rounded-[var(--radius-xl)] bg-[var(--color-warning-tint-08)] border border-[var(--color-warning-tint-20)]">
-            <p className="text-body-sm font-medium flex items-center gap-1.5 text-[var(--color-warning-500)]">
+            <p className="text-body-sm font-medium flex items-center gap-1.5 text-[var(--color-warning-fg)]">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               {t('wizard.error.possible_cause')}
             </p>
@@ -164,7 +164,7 @@ export function ErrorStep(w: WizardState) {
                 tooltip={t('wizard.error.copy_logs_tooltip')}
                 onClick={w.copyLogsToClipboard}
                 icon={w.copied
-                  ? <ClipboardCheck className="w-4 h-4 text-[var(--color-success-500)]" />
+                  ? <ClipboardCheck className="w-4 h-4 text-[var(--color-success-fg)]" />
                   : <Copy className="w-4 h-4" />}
               />
             </div>
@@ -178,7 +178,7 @@ export function ErrorStep(w: WizardState) {
                 {w.deployLogs.map((log, i) => (
                   <div
                     key={i}
-                    className={log.level === "error" ? "text-[var(--color-danger-500)]" : "text-[var(--color-text-muted)]"}
+                    className={log.level === "error" ? "text-[var(--color-danger-fg)]" : "text-[var(--color-text-muted)]"}
                   >
                     {log.message}
                   </div>

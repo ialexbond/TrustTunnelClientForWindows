@@ -31,13 +31,13 @@ export function SessionStats({ connectedSince, recoveryCount, errorCount, isConn
       icon: <RefreshCw className="w-3.5 h-3.5" />,
       label: "Recovery",
       value: isConnected ? String(recoveryCount) : "—",
-      color: recoveryCount > 0 ? "var(--color-warning-400)" : undefined,
+      color: recoveryCount > 0 ? "var(--color-warning-fg)" : undefined,
     },
     {
       icon: <AlertTriangle className="w-3.5 h-3.5" />,
       label: t("dashboard.errors", "Errors"),
       value: isConnected ? String(errorCount) : "—",
-      color: errorCount > 0 ? "var(--color-danger-400)" : undefined,
+      color: errorCount > 0 ? "var(--color-danger-fg)" : undefined,
     },
   ];
 

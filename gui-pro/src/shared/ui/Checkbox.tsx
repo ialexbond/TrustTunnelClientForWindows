@@ -62,8 +62,8 @@ export const Checkbox = forwardRef<HTMLButtonElement, CheckboxProps>(
         <span
           className="w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors"
           style={{
-            borderColor: checked ? "var(--color-accent-500)" : "var(--color-border)",
-            backgroundColor: checked ? "var(--color-accent-500)" : "var(--color-input-bg)",
+            borderColor: checked ? "var(--color-accent-fg)" : "var(--color-border)",
+            backgroundColor: checked ? "var(--color-accent-fg)" : "var(--color-input-bg)",
           }}
         >
           {/* on-accent token keeps the glyph legible on the accent fill in both themes

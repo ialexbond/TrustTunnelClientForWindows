@@ -91,7 +91,7 @@ export function StringField({ schema, validator, onChange, disabled }: StringFie
       {error && (
         <span
           id={`error-${schema.path.join("-")}`}
-          className="text-body-sm text-[var(--color-danger-500)]"
+          className="text-body-sm text-[var(--color-danger-fg)]"
           role="alert"
         >
           {error}

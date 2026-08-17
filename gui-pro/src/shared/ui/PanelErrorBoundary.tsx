@@ -53,7 +53,7 @@ class PanelErrorBoundaryInner extends React.Component<
           )}
           style={{ color: "var(--color-text-secondary)" }}
         >
-          <AlertTriangle className="w-10 h-10 text-[var(--color-danger-400)]" />
+          <AlertTriangle className="w-10 h-10 text-[var(--color-danger-fg)]" />
           <p className="text-sm text-center">
             {t("errors.panelCrash", { panel: panelName || "?" })}
           </p>

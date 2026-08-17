@@ -326,10 +326,10 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
                       ? "var(--color-danger-tint-15)"
                       : "var(--color-warning-tint-15)",
                   color: r.action.startsWith("ALLOW")
-                    ? "var(--color-success-500)"
+                    ? "var(--color-success-fg)"
                     : r.action.startsWith("DENY") || r.action.startsWith("REJECT")
-                      ? "var(--color-danger-500)"
-                      : "var(--color-warning-500)",
+                      ? "var(--color-danger-fg)"
+                      : "var(--color-warning-fg)",
                 }}
               >
                 {r.action.startsWith("ALLOW")
@@ -362,9 +362,9 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
                 data-testid={`delete-rule-${r.number}`}
               >
                 {state.isBusy(`del-${r.number}`) ? (
-                  <Loader2 className="w-3 h-3 animate-spin" style={{ color: "var(--color-danger-500)" }} />
+                  <Loader2 className="w-3 h-3 animate-spin" style={{ color: "var(--color-danger-fg)" }} />
                 ) : (
-                  <Trash2 className="w-3 h-3" style={{ color: "var(--color-danger-500)" }} />
+                  <Trash2 className="w-3 h-3" style={{ color: "var(--color-danger-fg)" }} />
                 )}
               </button>
             </div>

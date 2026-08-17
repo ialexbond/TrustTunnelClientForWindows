@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Globe, FileText, Server, Monitor, Folder, Trash2, ArrowRight } from "lucide-react";
 import { Badge, type BadgeProps } from "../../shared/ui/Badge";
+import { IconButton } from "../../shared/ui/IconButton";
 import type { RuleEntry, RouteAction } from "./useRoutingState";
 
 interface RuleEntryRowProps {
@@ -53,10 +54,12 @@ const moveTargets: Record<RouteAction, RouteAction[]> = {
   block: ["direct", "proxy"], // block card hidden, but keep for data integrity
 };
 
+// Per-target arrow colour = the destination block's colour, THEME-AWARE (-fg), matching GroupChip's
+// arrows (one move control across plain rules AND group chips). Was raw -400 (too light on light theme).
 const actionColors: Record<RouteAction, string> = {
-  direct: "var(--color-success-400)",
-  proxy: "var(--color-accent-400)",
-  block: "var(--color-danger-400)",
+  direct: "var(--color-success-fg)",
+  proxy: "var(--color-accent-fg)",
+  block: "var(--color-danger-fg)",
 };
 
 export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEntryRowProps) {
@@ -81,28 +84,34 @@ export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEnt
         {entry.value}
       </span>
 
-      {/* Move buttons */}
+      {/* Move buttons — migrated from raw <button> to the shared IconButton
+          (R21-03 DEBT-RAWPRIM). These stay the existing accessible move fallback
+          (D-02: NO drag-to-move, no drag handle) and keep the hover-reveal wrapper;
+          onMove(entry.id, target) wiring is unchanged. The per-target arrow colour
+          rides on the ArrowRight's own inline style. */}
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         {targets.map((target) => (
-          <button
+          <IconButton
             key={target}
+            aria-label={t(`routing.moveTo_${target}`, { defaultValue: target })}
+            tooltip={t(`routing.moveTo_${target}`, { defaultValue: target })}
+            icon={<ArrowRight className="w-3 h-3" style={{ color: actionColors[target] }} />}
             onClick={() => onMove(entry.id, target)}
-            className="p-1 rounded hover:bg-[var(--color-bg-active)] transition-colors"
-            title={t(`routing.moveTo_${target}`, { defaultValue: target })}
-          >
-            <ArrowRight className="w-3 h-3" style={{ color: actionColors[target] }} />
-          </button>
+          />
         ))}
       </div>
 
-      {/* Delete */}
-      <button
+      {/* Delete — shared IconButton, ALWAYS visible (canon «Удаление всегда видно»):
+          no opacity-0/hover-reveal gate so the control shows at rest. Danger tint
+          rides on the Trash2 glyph + a danger hover background className. onRemove
+          signature unchanged (D-01: zero behavior change). */}
+      <IconButton
+        aria-label={t("routing.removeEntry")}
+        tooltip={t("routing.removeEntry")}
+        icon={<Trash2 className="w-3.5 h-3.5" style={{ color: "var(--color-danger-fg)" }} />}
         onClick={() => onRemove(entry.id)}
-        className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--color-danger-tint-10)] transition-all"
-        title={t("routing.removeEntry")}
-      >
-        <Trash2 className="w-3.5 h-3.5" style={{ color: "var(--color-danger-400)" }} />
-      </button>
+        className="hover:bg-[var(--color-danger-tint-10)]"
+      />
     </div>
   );
 }

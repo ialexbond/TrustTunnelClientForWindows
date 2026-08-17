@@ -152,7 +152,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
                 <a
                   href={href}
                   className="underline underline-offset-2 opacity-80 hover:opacity-100 cursor-pointer"
-                  style={{ color: "var(--color-accent-500)" }}
+                  style={{ color: "var(--color-accent-fg)" }}
                   onClick={(e) => {
                     e.preventDefault();
                     if (href) open(href);

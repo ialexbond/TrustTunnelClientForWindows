@@ -252,6 +252,17 @@
   --color-accent-hover: var(--color-accent-300);
   --color-accent-active: var(--color-accent-500);
 
+  /* Foreground (text/icon) status colours — THEME-AWARE. Use these whenever a status
+     colour paints TEXT or an ICON on a surface. The raw -500 primitive is tuned for the
+     dark theme and is too light as light-theme foreground (success-500 on the light
+     elevated surface ≈ 2.07:1 — fails WCAG). Dark → the lighter -400 (reads on #1c/#22);
+     light → the darker -600 (reads on the pale #f0/#e8). -500 stays a FILL-only colour
+     (tints, badges, check dots), never a foreground. See 22-DESIGN-AUDIT §1. */
+  --color-success-fg: var(--color-success-400);
+  --color-accent-fg: var(--color-accent-400);
+  --color-warning-fg: var(--color-warning-400);
+  --color-danger-fg: var(--color-danger-400);
+
   /* Text rendered ON an accent fill (primary button / chip / segmented control).
      THEME-SCOPED on purpose: no single value clears WCAG 4.5:1 on BOTH themed
      accent fills. On the dark-theme teal (#4d9490 = accent-400) dark text wins —
@@ -392,6 +403,14 @@
   --color-accent-interactive: var(--color-accent-500);
   --color-accent-hover: var(--color-accent-600);
   --color-accent-active: var(--color-accent-700);
+
+  /* Foreground (text/icon) status colours — THEME-AWARE (see the dark block for the
+     rationale). Light theme picks the DARKER -600 so coloured text/icons clear WCAG on
+     the pale surfaces (accent-600 ≈ 5.73:1, success-600 ≈ 3.07:1 for icons). */
+  --color-success-fg: var(--color-success-600);
+  --color-accent-fg: var(--color-accent-600);
+  --color-warning-fg: var(--color-warning-600);
+  --color-danger-fg: var(--color-danger-600);
 
   /* Text rendered ON an accent fill — THEME-SCOPED (see the dark block for the
      rationale). The light-theme teal (#2d7a76 = accent-500) is dark enough that

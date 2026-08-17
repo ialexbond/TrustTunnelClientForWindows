@@ -40,7 +40,7 @@ const layers = [
 ];
 
 interface EcgSvgProps {
-  /** CSS color — var(--color-success-500) или var(--color-danger-500) */
+  /** CSS color — var(--color-success-fg) или var(--color-danger-fg) */
   color: string;
   /** SVG path data — ecgHeartbeat или ecgFlatline */
   path: string;

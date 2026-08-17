@@ -88,7 +88,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
 
       {!status.installed && (
         <div className="rounded-[var(--radius-md)] p-2 text-xs" style={{ backgroundColor: "var(--color-bg-hover)" }}>
-          <div className="flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
+          <div className="flex items-center gap-1.5" style={{ color: "var(--color-warning-fg)" }}>
             <AlertTriangle className="w-3 h-3" />
             <span>{t("server.security.firewall.warn_lockout", { port: status.current_ssh_port })}</span>
           </div>
@@ -160,9 +160,9 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
                         backgroundColor: r.action.startsWith("ALLOW") ? "var(--color-success-tint-15)"
                           : r.action.startsWith("DENY") || r.action.startsWith("REJECT") ? "var(--color-danger-tint-15)"
                           : "var(--color-warning-tint-15)",
-                        color: r.action.startsWith("ALLOW") ? "var(--color-success-500)"
-                          : r.action.startsWith("DENY") || r.action.startsWith("REJECT") ? "var(--color-danger-500)"
-                          : "var(--color-warning-500)",
+                        color: r.action.startsWith("ALLOW") ? "var(--color-success-fg)"
+                          : r.action.startsWith("DENY") || r.action.startsWith("REJECT") ? "var(--color-danger-fg)"
+                          : "var(--color-warning-fg)",
                       }}
                     >
                       {r.action}
@@ -183,8 +183,8 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
                       title={isSshRule(r.to) ? t("server.security.firewall.delete_ssh_protected") : t("server.security.firewall.delete")}
                     >
                       {state.isBusy(`del-${r.number}`)
-                        ? <Loader2 className="w-3 h-3 animate-spin" style={{ color: "var(--color-danger-500)" }} />
-                        : <Trash2 className="w-3 h-3" style={{ color: "var(--color-danger-500)" }} />}
+                        ? <Loader2 className="w-3 h-3 animate-spin" style={{ color: "var(--color-danger-fg)" }} />
+                        : <Trash2 className="w-3 h-3" style={{ color: "var(--color-danger-fg)" }} />}
                     </button>
                   </div>
                 ))}

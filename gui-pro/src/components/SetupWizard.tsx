@@ -55,9 +55,9 @@ function SetupWizard({ onSetupComplete, onClose, onBusyChange }: SetupWizardProp
           <div className="flex-1 flex items-center justify-center p-6">
             <div className="max-w-sm w-full text-center space-y-5">
               {step?.status === "ok" ? (
-                <CheckCircle2 className="w-8 h-8 mx-auto text-[var(--color-success-500)]" />
+                <CheckCircle2 className="w-8 h-8 mx-auto text-[var(--color-success-fg)]" />
               ) : (
-                <Loader2 className="w-8 h-8 animate-spin mx-auto text-[var(--color-danger-500)]" />
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-[var(--color-danger-fg)]" />
               )}
               <div className="space-y-1">
                 <h2 id="wizard-heading" className="text-display-sm text-[var(--color-text-primary)]">

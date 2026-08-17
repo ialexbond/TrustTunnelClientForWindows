@@ -432,11 +432,17 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         crate::dns_guard::snapshot_system_dns();
         crate::dns_guard::flush_dns_cache();
 
+        // Egress guard — MUST mirror vpn_connect (a tray-started session is a full connect, so
+        // without this a tray user on a machine with a foreign virtual adapter would still fail).
+        let egress_override = crate::net_egress::override_for_connect(&config_path)
+            .map(|p| p.to_string_lossy().into_owned());
+
         // F-6: map the non-Send `Box<dyn StdError>` spawn error to a Send `String` BEFORE the match.
         // The Ok arm's new cancel-re-check kill (`kill_sidecar(child).await`) is an await point, and a
         // `match` keeps the scrutinee temporary (the whole Result, incl. its non-Send Err) alive
         // across the arm body — so without this the spawned task's future is no longer `Send`.
-        let spawn_result = sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
+        let spawn_config_path = egress_override.as_deref().unwrap_or(config_path.as_str());
+        let spawn_result = sidecar::spawn_trusttunnel(&app, spawn_config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
             .await
             .map_err(|e| e.to_string());
         match spawn_result {

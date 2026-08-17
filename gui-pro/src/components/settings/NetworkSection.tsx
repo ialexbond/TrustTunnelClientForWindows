@@ -78,7 +78,7 @@ export function NetworkSection({ state }: Props) {
                 arr.splice(idx, 1);
                 updateField("endpoint.dns_upstreams", arr);
               }}
-              className="shrink-0 self-stretch text-[var(--color-danger-400)] hover:text-[var(--color-danger-500)]"
+              className="shrink-0 self-stretch text-[var(--color-danger-fg)] hover:text-[var(--color-danger-fg)]"
             />
           </div>
         ))}

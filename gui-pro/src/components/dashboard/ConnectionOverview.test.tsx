@@ -67,7 +67,10 @@ describe("ConnectionOverview", () => {
 
   it("shows selective mode label", () => {
     render(<ConnectionOverview {...defaultProps} vpnMode="selective" />);
-    expect(screen.getByText("Напрямую")).toBeInTheDocument();
+    // Phase 21 (plan 21-01) renamed the shared vpn_modes.selective label
+    // «Напрямую» → «Всё напрямую» to pair with «Всё через VPN» consistently
+    // across the routing tab AND this dashboard overview.
+    expect(screen.getByText("Всё напрямую")).toBeInTheDocument();
   });
 
   it("shows ping when connected", () => {

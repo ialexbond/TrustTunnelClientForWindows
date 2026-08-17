@@ -493,16 +493,24 @@ fn resolve_entries(
                 }
             }
             "iplist_group" => {
+                // value = "iplist_group:games" → group = "games"
+                // Mirror the geoip/geosite arms: the persisted value carries the
+                // `iplist_group:` prefix (re-added by the FE serializeEntry, see T-26/D-04),
+                // but the group cache is keyed by the BARE id. `unwrap_or(&entry.value)`
+                // keeps this arm tolerant of legacy bare values too.
+                let group = entry.value
+                    .strip_prefix("iplist_group:")
+                    .unwrap_or(&entry.value);
                 // Load from cached group data
-                let cache_path = group_cache_path_pub(&entry.value);
+                let cache_path = group_cache_path_pub(group);
                 if cache_path.exists() {
                     let content = std::fs::read_to_string(&cache_path)
-                        .map_err(|e| format!("Failed to read group cache '{}': {e}", entry.value))?;
+                        .map_err(|e| format!("Failed to read group cache '{}': {e}", group))?;
                     let domains: Vec<String> = serde_json::from_str(&content)
-                        .map_err(|e| format!("Failed to parse group cache '{}': {e}", entry.value))?;
+                        .map_err(|e| format!("Failed to parse group cache '{}': {e}", group))?;
                     domains
                 } else {
-                    eprintln!("[routing] Warning: no cache for iplist group '{}', skipping", entry.value);
+                    eprintln!("[routing] Warning: no cache for iplist group '{}', skipping", group);
                     Vec::new()
                 }
             }
@@ -974,6 +982,61 @@ mod tests {
         let result = build_general_exclusions(&direct, &[]);
         assert!(!result.iter().any(|e| e.is_empty()));
         assert!(result.contains(&"1.1.1.1/32".to_string()));
+    }
+
+    // ── T-26 / D-04 (Wave 0 RED → green in Plan 02): iplist_group resolve strips prefix ──
+    //
+    // Context: the T-26 fix makes the FRONTEND persist an iplist_group entry WITH its
+    // `iplist_group:` prefix in `value` (so it round-trips through save→reload without being
+    // mis-detected as a plain domain — see useRoutingState.test.ts). For that prefixed value to
+    // still resolve in the core, the backend `resolve_entries` iplist_group arm must STRIP the
+    // `iplist_group:` prefix before using the id as the group_cache key. Today the arm keys the
+    // cache off the BARE `entry.value` (i.e. the whole "iplist_group:<id>" string, L495-508), so
+    // the cache file — written under the bare id `<id>.json` — is never found and the entry
+    // resolves to nothing.
+    //
+    // This test is RED now: we write the fixture under the bare id, hand resolve_entries the
+    // PREFIXED value, and assert the cached domains come back. It goes GREEN in Plan 02 when the
+    // arm gains `.strip_prefix("iplist_group:")` (mirroring how geoip:/geosite: already work).
+    //
+    // Note on isolation: `group_cache_path_pub` is rooted at `portable_data_dir()` (the test
+    // binary's dir under cargo test), which cannot be redirected in-process; we therefore use a
+    // unique, phase-scoped bare id so the fixture never clobbers a real user cache, and remove it
+    // after the assertion.
+    #[test]
+    fn resolve_entries_iplist_group_strips_prefix_before_cache_lookup() {
+        let bare_id = format!("phase22_red_fixture_{}", std::process::id());
+        let cache_path = group_cache_path_pub(&bare_id);
+        let cached = vec![
+            "games.example.com".to_string(),
+            "play.example.org".to_string(),
+        ];
+        std::fs::write(&cache_path, serde_json::to_string(&cached).unwrap())
+            .expect("must be able to write the group_cache fixture");
+
+        let state = geodata_v2ray::GeoDataState::new();
+        let entries = vec![RuleEntry {
+            id: "g1".to_string(),
+            // The PREFIXED value the T-26 FE fix now persists on disk/wire.
+            entry_type: "iplist_group".to_string(),
+            value: format!("iplist_group:{bare_id}"),
+            label: None,
+        }];
+
+        let resolved = resolve_entries(&entries, &state)
+            .expect("resolve_entries must not error for a cached iplist_group");
+
+        // Clean up the fixture regardless of the assertion outcome below.
+        let _ = std::fs::remove_file(&cache_path);
+
+        // RED today: the arm keys off the full "iplist_group:<id>" string, finds no cache file,
+        // and returns an empty list → this assertion fails. Plan 02 strips the prefix → GREEN.
+        assert!(
+            resolved.contains(&"games.example.com".to_string())
+                && resolved.contains(&"play.example.org".to_string()),
+            "resolve_entries should strip the `iplist_group:` prefix and load the cached \
+             bare-id domains; got {resolved:?}"
+        );
     }
 }
 

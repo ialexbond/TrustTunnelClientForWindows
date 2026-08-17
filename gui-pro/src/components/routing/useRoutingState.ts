@@ -48,6 +48,18 @@ export interface GeoDataIndex {
   geosite: string[];
 }
 
+// iplist.opencck.org group descriptor (backend get_iplist_groups). `label` is the English
+// display name; the frontend localizes the visible name via i18n, `id` is the wire/cache key.
+export interface IplistGroup {
+  id: string;
+  label: string;
+}
+
+// The special RU-whitelist cache key. It is NOT one of the get_iplist_groups ids, but it IS a
+// valid group-cache key (fetch_whitelist_domains writes group_cache/ru_whitelist.json). Both the
+// FE whitelist here and the backend is_valid_group_id accept it.
+const RU_WHITELIST_ID = "ru_whitelist";
+
 // ═══════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════
@@ -105,6 +117,7 @@ export interface UseRoutingStateReturn {
   rules: RoutingRules;
   geodataStatus: GeoDataStatus;
   geodataCategories: GeoDataIndex;
+  iplistGroups: IplistGroup[];
   processList: ProcessInfo[];
   processListLoading: boolean;
 
@@ -135,6 +148,10 @@ export interface UseRoutingStateReturn {
   // GeoData
   downloadGeoData: () => Promise<void>;
   geodataDownloading: boolean;
+
+  // iplist groups (D-03 / T-25): the available group list + a whitelisted fetch-on-add dispatcher
+  ensureGroupCache: (groupId: string) => Promise<void>;
+  groupFetching: boolean;
 
   // Save & Apply
   handleSave: (reconnect?: boolean) => Promise<void>;
@@ -171,6 +188,8 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
   const [rules, setRules] = useState<RoutingRules>(emptyRules);
   const [geodataStatus, setGeodataStatus] = useState<GeoDataStatus>(emptyGeoStatus);
   const [geodataCategories, setGeodataCategories] = useState<GeoDataIndex>(emptyGeoIndex);
+  const [iplistGroups, setIplistGroups] = useState<IplistGroup[]>([]);
+  const [groupFetching, setGroupFetching] = useState(false);
   const [processList, setProcessList] = useState<ProcessInfo[]>([]);
   const [processListLoading, setProcessListLoading] = useState(false);
 
@@ -254,10 +273,54 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     }
   }, []);
 
+  // ─── Load iplist groups (D-03) ─────────────────────
+  // Mirror loadGeoStatus: invoke the backend list once on mount and hold it in state. This list
+  // is the source of truth the manual-entry whitelist (AddRuleInput) and the preset grid (Plan 04)
+  // check an id against before it becomes a rule. On failure we keep the empty list (an unknown id
+  // then fails the whitelist — safe by default) and surface nothing (non-critical read).
+  const loadIplistGroups = useCallback(async () => {
+    try {
+      const groups = await invoke<IplistGroup[]>("get_iplist_groups");
+      // Guard a non-array response (the real backend returns Vec<IplistGroup>, but a null/undefined
+      // from a stub or a future contract change must NOT poison state — a null would flow to
+      // AddRuleInput.groupIds (iplistGroups.map) and the preset grid, crashing the whole Routing tab.
+      setIplistGroups(Array.isArray(groups) ? groups : []);
+    } catch {
+      // get_iplist_groups unavailable — keep empty list (whitelist rejects everything, safe).
+    }
+  }, []);
+
+  // ensureGroupCache: fetch-on-add dispatcher (Pitfall #2 — a group must resolve to real domains,
+  // never silently route zero traffic). Frontend-guards the id against the loaded group set PLUS
+  // the literal ru_whitelist (belt to the backend is_valid_group_id): an unknown / traversal id is
+  // a silent no-op that invokes NO fetch. For a known id it dispatches ru_whitelist →
+  // fetch_whitelist_domains, else → fetch_iplist_group_domains, surfacing failures via the error
+  // snackbar. Reused by manual entry (Task 3) and the preset grid (Plan 04).
+  const ensureGroupCache = useCallback(
+    async (groupId: string) => {
+      const known = groupId === RU_WHITELIST_ID || iplistGroups.some((g) => g.id === groupId);
+      if (!known) return; // unknown / traversal id → no fetch (backend guard is the second belt)
+      setGroupFetching(true);
+      try {
+        if (groupId === RU_WHITELIST_ID) {
+          await invoke<string[]>("fetch_whitelist_domains");
+        } else {
+          await invoke<string[]>("fetch_iplist_group_domains", { groupId });
+        }
+      } catch (e) {
+        pushSuccess(formatError(e), "error");
+      } finally {
+        setGroupFetching(false);
+      }
+    },
+    [iplistGroups, pushSuccess]
+  );
+
   useEffect(() => {
     load();
     loadGeoStatus();
-  }, [load, loadGeoStatus]);
+    loadIplistGroups();
+  }, [load, loadGeoStatus, loadIplistGroups]);
 
   // Listen for geodata file changes (fs watcher from Rust)
   useEffect(() => {
@@ -318,11 +381,38 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
 
       const { type, value } = parseEntryValue(trimmed);
 
-      // Check duplicates across all blocks
-      for (const block of ["direct", "proxy", "block"] as RouteAction[]) {
-        if (rules[block].some((e) => e.type === type && e.value === value)) {
-          return "duplicate";
-        }
+      // Same token already in the TARGET block → a genuine no-op duplicate (unchanged: AddRuleInput
+      // maps this "duplicate" sentinel to the routing.duplicateEntry message).
+      if (rules[action].some((e) => e.type === type && e.value === value)) {
+        return "duplicate";
+      }
+
+      // Same token in a DIFFERENT block → MOVE it here instead of rejecting (Phase 22 owner UAT
+      // decision: a category lives in exactly one block; re-adding it elsewhere relocates it and
+      // tells the user where it came from — instead of the old "already exists" dead-end, which was
+      // confusing when the existing entry sat in a collapsed/hidden block the user couldn't see).
+      // addEntry's own guard keeps a token out of two blocks at once, so the source block is unique.
+      const fromBlock = (["direct", "proxy", "block"] as RouteAction[]).find(
+        (block) => block !== action && rules[block].some((e) => e.type === type && e.value === value)
+      );
+      if (fromBlock) {
+        // Inline the move (mirrors moveEntry's remove-from-A + append-to-B + dedup) rather than
+        // calling moveEntry: moveEntry is a const declared LATER, so referencing it in addEntry's
+        // dep array would hit the temporal-dead-zone at render time.
+        setRules((prev) => {
+          const existing = prev[fromBlock].find((e) => e.type === type && e.value === value);
+          if (!existing) return prev;
+          if (prev[action].some((e) => e.type === type && e.value === value)) return prev; // target dedup
+          const updated = {
+            ...prev,
+            [fromBlock]: prev[fromBlock].filter((e) => e.id !== existing.id),
+            [action]: [...prev[action], existing],
+          };
+          markDirty(updated);
+          return updated;
+        });
+        pushSuccess(t("routing.movedFromBlock", { block: t(`routing.${fromBlock}Title`) }));
+        return null;
       }
 
       const entry: RuleEntry = { id: nextId(), type, value };
@@ -333,7 +423,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       });
       return null;
     },
-    [rules, markDirty]
+    [rules, markDirty, pushSuccess, t]
   );
 
   const removeEntry = useCallback(
@@ -421,26 +511,26 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
 
   // ─── Save ──────────────────────────────────────────
 
-  // Convert frontend rules to backend format (RuleEntry[] with serialized values)
-  const toBackendPayload = useCallback((r: RoutingRules) => ({
-    direct: r.direct.map((e) => ({
+  // Convert frontend rules to backend format (RuleEntry[] with serialized values).
+  // T-26/D-04: all three group types (geoip/geosite/iplist_group) go through the
+  // shared serializeEntry — the single source of truth for the wire prefix. The old
+  // inline ternary only prefixed geoip/geosite, so an iplist_group was persisted with
+  // a bare value, re-detected as a plain domain on reload, and misrouted. The load-path
+  // parseEntryValue strips the prefix back, closing the round-trip.
+  const toBackendPayload = useCallback((r: RoutingRules) => {
+    const mapEntry = (e: RuleEntry) => ({
       ...e,
-      value: e.type === "geoip" ? `geoip:${e.value}` : e.type === "geosite" ? `geosite:${e.value}` : e.value,
+      value: serializeEntry(e),
       entry_type: e.type,
-    })),
-    proxy: r.proxy.map((e) => ({
-      ...e,
-      value: e.type === "geoip" ? `geoip:${e.value}` : e.type === "geosite" ? `geosite:${e.value}` : e.value,
-      entry_type: e.type,
-    })),
-    block: r.block.map((e) => ({
-      ...e,
-      value: e.type === "geoip" ? `geoip:${e.value}` : e.type === "geosite" ? `geosite:${e.value}` : e.value,
-      entry_type: e.type,
-    })),
-    process_mode: r.process_mode,
-    processes: r.processes,
-  }), []);
+    });
+    return {
+      direct: r.direct.map(mapEntry),
+      proxy: r.proxy.map(mapEntry),
+      block: r.block.map(mapEntry),
+      process_mode: r.process_mode,
+      processes: r.processes,
+    };
+  }, []);
 
   const save = useCallback(async () => {
     if (!configPath) return;
@@ -585,6 +675,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     rules,
     geodataStatus,
     geodataCategories,
+    iplistGroups,
     processList,
     processListLoading,
     loading,
@@ -605,6 +696,8 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     importRules,
     downloadGeoData,
     geodataDownloading,
+    ensureGroupCache,
+    groupFetching,
     handleSave,
     isVpnActive,
     markDirty: useCallback(() => markDirty(), [markDirty]),

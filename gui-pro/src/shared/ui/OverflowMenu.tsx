@@ -120,14 +120,20 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
 
   // Close menu on scroll/resize (simpler than recompute; matches Select
   // primitive behaviour — menu is transient). D-12 decision.
+  // Also close on `app:tabchange`: this menu is a fixed createPortal on document.body, and the tab
+  // panels are hidden-not-unmounted (App IN-11), so a keyboard/tray/deep-link tab switch (which emits
+  // no mousedown/scroll/resize) would otherwise leave the menu floating over the new tab. App
+  // broadcasts app:tabchange on every activeTab change.
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
     window.addEventListener("scroll", close, { capture: true, passive: true });
     window.addEventListener("resize", close);
+    window.addEventListener("app:tabchange", close);
     return () => {
       window.removeEventListener("scroll", close, { capture: true });
       window.removeEventListener("resize", close);
+      window.removeEventListener("app:tabchange", close);
     };
   }, [open]);
 

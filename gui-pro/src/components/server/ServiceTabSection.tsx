@@ -223,7 +223,7 @@ export function ServiceTabSection({
             title: (
               <span
                 className="flex items-center gap-2 text-sm font-semibold"
-                style={{ color: "var(--color-danger-500)" }}
+                style={{ color: "var(--color-danger-fg)" }}
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
                 {t("server.danger.title")}

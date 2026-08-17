@@ -205,29 +205,29 @@ export function DeployingStep(w: WizardState) {
               // active deploy step → warning, done → success, error → danger). 16px icons.
               const labelColor =
                 step.status === "progress"
-                  ? "text-[var(--color-warning-500)]"
+                  ? "text-[var(--color-warning-fg)]"
                   : step.status === "ok"
-                  ? "text-[var(--color-success-500)]"
+                  ? "text-[var(--color-success-fg)]"
                   : step.status === "warn"
-                  ? "text-[var(--color-warning-500)]"
-                  : "text-[var(--color-danger-500)]";
+                  ? "text-[var(--color-warning-fg)]"
+                  : "text-[var(--color-danger-fg)]";
               return (
                 <div key={stepId} className="space-y-1">
                   <div className="flex items-center gap-2">
                     {step.status === "progress" && (
-                      <Loader2 className="w-4 h-4 animate-spin shrink-0 text-[var(--color-warning-500)]" />
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0 text-[var(--color-warning-fg)]" />
                     )}
                     {step.status === "ok" && (
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-[var(--color-success-500)]" />
+                      <CheckCircle2 className="w-4 h-4 shrink-0 text-[var(--color-success-fg)]" />
                     )}
                     {step.status === "error" && (
-                      <XCircle className="w-4 h-4 shrink-0 text-[var(--color-danger-500)]" />
+                      <XCircle className="w-4 h-4 shrink-0 text-[var(--color-danger-fg)]" />
                     )}
                     {/* "warn" — a non-blocking step (only "security": firewall/Fail2ban
                         provision hiccup, D-04). Yellow triangle, NOT a fatal red X; the
                         install succeeded and the wizard continues to "done". */}
                     {step.status === "warn" && (
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-[var(--color-warning-500)]" />
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-[var(--color-warning-fg)]" />
                     )}
                     <span className={`text-xs flex-1 ${labelColor}`}>
                       {step.status === "error" ? step.message : stepLabels[stepId]}

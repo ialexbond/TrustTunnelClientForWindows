@@ -57,19 +57,19 @@ export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }:
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--color-text-muted)" }}>
-              <ArrowDown className="w-3.5 h-3.5" style={{ color: "var(--color-success-500)" }} />
+              <ArrowDown className="w-3.5 h-3.5" style={{ color: "var(--color-success-fg)" }} />
               <span>Download</span>
             </div>
-            <span className="text-sm font-semibold font-mono tabular-nums" style={{ color: "var(--color-success-500)" }}>
+            <span className="text-sm font-semibold font-mono tabular-nums" style={{ color: "var(--color-success-fg)" }}>
               {speed.download_mbps.toFixed(1)} {unit}
             </span>
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--color-text-muted)" }}>
-              <ArrowUp className="w-3.5 h-3.5" style={{ color: "var(--color-accent-400)" }} />
+              <ArrowUp className="w-3.5 h-3.5" style={{ color: "var(--color-accent-fg)" }} />
               <span>Upload</span>
             </div>
-            <span className="text-sm font-semibold font-mono tabular-nums" style={{ color: "var(--color-accent-400)" }}>
+            <span className="text-sm font-semibold font-mono tabular-nums" style={{ color: "var(--color-accent-fg)" }}>
               {speed.upload_mbps.toFixed(1)} {unit}
             </span>
           </div>

@@ -9,6 +9,16 @@ import {
   type RoutingRules,
 } from "./useRoutingState";
 
+// Spy the snackbar so the cross-block MOVE inform notification (Phase 22 UAT) is assertable without
+// depending on the transient DOM toast. SnackBarProvider stays real (the wrapper still mounts it);
+// only useSnackBar is overridden to hand useRoutingState this spy. vi.hoisted keeps the spy defined
+// before the hoisted vi.mock factory runs.
+const { pushSpy } = vi.hoisted(() => ({ pushSpy: vi.fn() }));
+vi.mock("../../shared/ui/SnackBarContext", async (importActual) => {
+  const actual = await importActual<typeof import("../../shared/ui/SnackBarContext")>();
+  return { ...actual, useSnackBar: () => pushSpy };
+});
+
 // ─── Helpers ─────────────────────────────────────────
 
 const mockInvoke = vi.mocked(invoke) as unknown as Mock;
@@ -61,6 +71,7 @@ function setupInvokeForLoad(rules?: RoutingRules) {
 describe("useRoutingState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pushSpy.mockClear();
     mockInvoke.mockResolvedValue(null);
   });
 
@@ -163,7 +174,8 @@ describe("useRoutingState", () => {
     expect(err).toBe("empty");
   });
 
-  it("addEntry returns 'duplicate' when value exists in any block", async () => {
+  it("addEntry returns 'duplicate' when the value is already in the TARGET block", async () => {
+    // Same-block re-add is a genuine no-op duplicate: the entry does not move and no inform fires.
     setupInvokeForLoad();
 
     const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
@@ -174,11 +186,40 @@ describe("useRoutingState", () => {
 
     let err: string | null = null;
     act(() => {
-      // example.com already exists in proxy from makeRules()
-      err = result.current.addEntry("direct", "example.com");
+      // example.com already exists in proxy from makeRules() — re-adding to proxy is a duplicate.
+      err = result.current.addEntry("proxy", "example.com");
     });
 
     expect(err).toBe("duplicate");
+    expect(result.current.rules.proxy).toHaveLength(1);
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+
+  it("addEntry MOVES the entry (returns null + informs) when it exists in a DIFFERENT block", async () => {
+    // Phase 22 UAT: adding a token to block B while it already lives in block A relocates it (a
+    // category lives in exactly one block) and tells the user where it came from — instead of the old
+    // hard "already exists" rejection, which was confusing when the existing entry sat in a hidden block.
+    setupInvokeForLoad();
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    let err: string | null = null;
+    act(() => {
+      // example.com is in proxy (makeRules); adding it to direct must MOVE it, not reject.
+      err = result.current.addEntry("direct", "example.com");
+    });
+
+    expect(err).toBeNull();
+    // Relocated: gone from proxy, now in direct.
+    expect(result.current.rules.proxy.some((e) => e.value === "example.com")).toBe(false);
+    expect(result.current.rules.direct.some((e) => e.value === "example.com")).toBe(true);
+    expect(result.current.rules.direct).toHaveLength(1);
+    // The inform notification fired exactly once (the «Перенесено из …» success toast).
+    expect(pushSpy).toHaveBeenCalledTimes(1);
   });
 
   it("addEntry detects geoip prefix and sets correct type", async () => {
@@ -787,5 +828,258 @@ describe("useRoutingState", () => {
     // parseEntryValue strips the prefix
     expect(result.current.rules.proxy[0].type).toBe("geosite");
     expect(result.current.rules.proxy[0].value).toBe("google");
+  });
+
+  // ── iplist_group: T-26 (D-04) round-trip/serialize + D-05 storage (Wave 0 RED) ──
+  //
+  // These four cases encode the phase-22 hook contract. Case (1) is the RED gate for T-26
+  // (Plan 02 turns it green); cases (2)(3)(4) lock invariants that mostly hold today so a
+  // future refactor cannot silently break them.
+
+  /** The `rules` arg of the most recent invoke("save_routing_rules", { rules }) call. */
+  function lastSavePayload() {
+    const calls = mockInvoke.mock.calls.filter(
+      (c: unknown[]) => c[0] === "save_routing_rules",
+    );
+    expect(calls.length).toBeGreaterThan(0);
+    return (calls[calls.length - 1][1] as { rules: RoutingRules }).rules;
+  }
+
+  it("save() serializes an iplist_group entry WITH its prefix (D-04 / T-26 — RED until Plan 02)", async () => {
+    // T-26: toBackendPayload must re-add the `iplist_group:` prefix (via serializeEntry) so the
+    // group survives save→reload AND still resolves in the core. RED today: the inline value
+    // ternary only handles geoip:/geosite:, so an iplist_group is persisted as the BARE value
+    // "games" and is mis-detected as a plain domain on the next load (misroute).
+    setupInvokeForLoad(
+      makeRules({
+        proxy: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
+        direct: [],
+        block: [],
+      }),
+    );
+
+    const { result } = renderHook(
+      () => useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.save();
+    });
+
+    const payload = lastSavePayload();
+    const entry = payload.proxy.find(
+      (e) =>
+        e.type === "iplist_group" ||
+        (e as unknown as { entry_type?: string }).entry_type === "iplist_group",
+    );
+    expect(entry).toBeDefined();
+    // Prefix present on the persisted value — RED now (bare "games"), green in Plan 02.
+    expect(entry!.value).toBe("iplist_group:games");
+    expect((entry as unknown as { entry_type?: string }).entry_type).toBe("iplist_group");
+  });
+
+  it("load keeps an iplist_group entry as iplist_group, not domain (T-26 round-trip)", async () => {
+    // Locks the load-side round-trip: a persisted `iplist_group:games` must re-detect as an
+    // iplist_group (value "games"), never as a plain domain. Passes today (load path already
+    // strips the prefix) — asserted so a regression to bare-value storage is caught.
+    setupInvokeForLoad(
+      makeRules({
+        proxy: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
+        direct: [],
+        block: [],
+      }),
+    );
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.rules.proxy[0].type).toBe("iplist_group");
+    expect(result.current.rules.proxy[0].value).toBe("games");
+  });
+
+  it("addEntry stores an iplist_group as ONE chip, never exploded to domains (D-05)", async () => {
+    // D-05: a group is persisted as a single reference chip inside a block, expanded to domains
+    // only at resolve-time. Adding a group must create exactly one RuleEntry, and saving must
+    // write exactly one row for it — never a domain list.
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+
+    const { result } = renderHook(
+      () => useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.addEntry("proxy", "iplist_group:games");
+    });
+
+    expect(result.current.rules.proxy).toHaveLength(1);
+    expect(result.current.rules.proxy[0].type).toBe("iplist_group");
+    expect(result.current.rules.proxy[0].value).toBe("games");
+
+    await act(async () => {
+      await result.current.save();
+    });
+
+    const payload = lastSavePayload();
+    expect(payload.proxy).toHaveLength(1);
+    expect((payload.proxy[0] as unknown as { entry_type?: string }).entry_type).toBe(
+      "iplist_group",
+    );
+  });
+
+  it("moveEntry relocates an iplist_group chip and dedups on the target (D-05 / T-25)", async () => {
+    const rules = makeRules({
+      direct: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
+      proxy: [],
+      block: [],
+    });
+    setupInvokeForLoad(rules);
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.moveEntry("direct", "proxy", "ig1");
+    });
+
+    expect(result.current.rules.direct).toHaveLength(0);
+    expect(result.current.rules.proxy).toHaveLength(1);
+    expect(result.current.rules.proxy[0].type).toBe("iplist_group");
+    expect(result.current.rules.proxy[0].value).toBe("games");
+  });
+
+  it("moveEntry into a block already holding the same group is a no-op (D-05 dedup)", async () => {
+    const rules = makeRules({
+      direct: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
+      proxy: [{ id: "ig2", type: "iplist_group", value: "iplist_group:games" }],
+      block: [],
+    });
+    setupInvokeForLoad(rules);
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.moveEntry("direct", "proxy", "ig1");
+    });
+
+    // Target already has the group → move skipped, both blocks unchanged (single chip each).
+    expect(result.current.rules.direct).toHaveLength(1);
+    expect(result.current.rules.proxy).toHaveLength(1);
+  });
+
+  // ── iplist groups: list load + ensureGroupCache dispatcher (D-03 / Pitfall #2 — Plan 22-03) ──
+  //
+  // The hook exposes the available group list (whitelist source) and a fetch-on-add dispatcher.
+  // ensureGroupCache routes a KNOWN id to the right backend fetch (ru_whitelist is special-cased)
+  // and is a NO-OP for an unknown / traversal id — the FE belt to the backend is_valid_group_id.
+
+  function setupInvokeWithGroups() {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_routing_rules") return makeRules({ proxy: [], direct: [], block: [] });
+      if (cmd === "get_geodata_status")
+        return { downloaded: false, geoip_exists: false, geosite_exists: false, geoip_categories_count: 0, geosite_categories_count: 0 };
+      if (cmd === "get_iplist_groups")
+        return [
+          { id: "games", label: "Games" },
+          { id: "youtube", label: "YouTube" },
+          { id: "messengers", label: "Messengers" },
+        ];
+      if (cmd === "fetch_iplist_group_domains") return ["a.com", "b.com"];
+      if (cmd === "fetch_whitelist_domains") return ["ru1.com", "ru2.com"];
+      return null;
+    });
+  }
+
+  it("loads the iplist group list on mount (get_iplist_groups)", async () => {
+    setupInvokeWithGroups();
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("get_iplist_groups");
+    expect(result.current.iplistGroups.map((g) => g.id)).toEqual([
+      "games",
+      "youtube",
+      "messengers",
+    ]);
+  });
+
+  it("ensureGroupCache('games') invokes fetch_iplist_group_domains", async () => {
+    setupInvokeWithGroups();
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.ensureGroupCache("games");
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("fetch_iplist_group_domains", { groupId: "games" });
+    expect(mockInvoke).not.toHaveBeenCalledWith("fetch_whitelist_domains");
+  });
+
+  it("ensureGroupCache('ru_whitelist') invokes fetch_whitelist_domains (special case)", async () => {
+    setupInvokeWithGroups();
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.ensureGroupCache("ru_whitelist");
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("fetch_whitelist_domains");
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "fetch_iplist_group_domains",
+      expect.anything(),
+    );
+  });
+
+  it("ensureGroupCache('../x') is a no-op — invokes NEITHER fetch (FE belt to backend guard)", async () => {
+    setupInvokeWithGroups();
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.ensureGroupCache("../x");
+    });
+
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "fetch_iplist_group_domains",
+      expect.anything(),
+    );
+    expect(mockInvoke).not.toHaveBeenCalledWith("fetch_whitelist_domains");
   });
 });

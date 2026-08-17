@@ -15,7 +15,7 @@ export function DoneStep(w: WizardState) {
   // session-only and never logged (D-29) — it is simply no longer surfaced here.
 
   // DoneStep — success hero on the v3.0 onboarding language (D-05; UI-SPEC "Done"
-  // row). The 64px success square keeps `--color-success-500` + `--shadow-lg` (the
+  // row). The 64px success square keeps `--color-success-fg` + `--shadow-lg` (the
   // onboarding shadow rule); heading moves to `.text-display-sm`, body to `.text-body`,
   // and the config-path card to `--text-mono-sm` token classes. The completion behavior
   // — `onSetupComplete` + the `tt_navigate_after_setup` intent — is UNCHANGED (the dead
@@ -31,7 +31,7 @@ export function DoneStep(w: WizardState) {
         </div>
 
         <div className="space-y-1.5">
-          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-success-500)]">{t('wizard.done.title')}</h2>
+          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-success-fg)]">{t('wizard.done.title')}</h2>
           <p className="text-body text-[var(--color-text-secondary)]">
             {/* 06-uat: deploy-only wizard — the fetch-completion copy was removed. */}
             {t('wizard.done.deploy_description')}
@@ -57,7 +57,7 @@ export function DoneStep(w: WizardState) {
         {w.reachabilityWarning && (
           <div className="text-left p-3 rounded-[var(--radius-xl)] bg-[var(--color-warning-tint-08)] border border-[var(--color-warning-tint-20)]">
             <p className="text-body-sm leading-relaxed flex items-start gap-1.5 text-[var(--color-text-secondary)]">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning-500)]" />
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning-fg)]" />
               <span>{t('wizard.done.reachability_warning')}</span>
             </p>
           </div>

@@ -71,7 +71,7 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono font-medium" style={{ color: "var(--color-text-primary)" }}>{jail.name}</span>
                     <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                      {t("server.security.fail2ban.currently_banned")}: <b style={{ color: jail.currently_banned > 0 ? "var(--color-warning-500)" : "var(--color-text-primary)" }}>{jail.currently_banned}</b>
+                      {t("server.security.fail2ban.currently_banned")}: <b style={{ color: jail.currently_banned > 0 ? "var(--color-warning-fg)" : "var(--color-text-primary)" }}>{jail.currently_banned}</b>
                       {" · "}
                       {t("server.security.fail2ban.total_banned")}: {jail.total_banned}
                     </span>

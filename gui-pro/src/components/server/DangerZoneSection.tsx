@@ -90,7 +90,7 @@ export function DangerZoneSection({ state }: Props) {
           icon={
             <AlertTriangle
               className="w-3.5 h-3.5"
-              style={{ color: "var(--color-danger-400)" }}
+              style={{ color: "var(--color-danger-fg)" }}
             />
           }
         />

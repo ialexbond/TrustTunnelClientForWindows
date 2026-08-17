@@ -149,7 +149,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
             className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors hover:bg-[var(--color-bg-hover)] border border-[var(--color-border)]"
           >
             <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[var(--color-accent-tint-10)]">
-              <FileText className="w-4 h-4 text-[var(--color-accent-500)]" />
+              <FileText className="w-4 h-4 text-[var(--color-accent-fg)]" />
             </div>
             <div>
               <p className="text-sm font-medium text-[var(--color-text-primary)]">{t("wizard.import.from_file")}</p>
@@ -164,7 +164,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
               className="w-full flex items-center gap-3 p-3 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
             >
               <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[var(--color-accent-tint-10)]">
-                <Link2 className="w-4 h-4 text-[var(--color-accent-500)]" />
+                <Link2 className="w-4 h-4 text-[var(--color-accent-fg)]" />
               </div>
               <div>
                 <p className="text-sm font-medium text-[var(--color-text-primary)]">{t("wizard.import.from_link")}</p>

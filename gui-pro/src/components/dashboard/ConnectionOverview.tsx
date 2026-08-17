@@ -54,10 +54,10 @@ export function ConnectionOverview({
     : currentPing < 0
       ? "var(--color-text-muted)"
       : currentPing < 90
-        ? "var(--color-success-500)"
+        ? "var(--color-success-fg)"
         : currentPing <= 200
-          ? "var(--color-warning-500)"
-          : "var(--color-danger-500)";
+          ? "var(--color-warning-fg)"
+          : "var(--color-danger-fg)";
 
   return (
     <Card padding="md">

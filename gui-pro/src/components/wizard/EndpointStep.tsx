@@ -58,7 +58,7 @@ export function EndpointStep(w: WizardState) {
                 VERBATIM (defense-in-depth; backend re-validates regardless). */}
             <div className="grid grid-cols-2 gap-2 items-start">
               <ActionInput
-                label={<>{t('wizard.endpoint.login_label')} <span className="text-[var(--color-danger-500)]" aria-hidden="true">*</span></>}
+                label={<>{t('wizard.endpoint.login_label')} <span className="text-[var(--color-danger-fg)]" aria-hidden="true">*</span></>}
                 value={w.vpnUsername}
                 // ASVS V5 (T-06-05): input-layer whitelist-strip mirrors the backend
                 // validate_vpn_username whitelist (sanitize.rs) EXACTLY — keep only
@@ -83,7 +83,7 @@ export function EndpointStep(w: WizardState) {
                 ]}
               />
               <ActionPasswordInput
-                label={<>{t('wizard.endpoint.password_label')} <span className="text-[var(--color-danger-500)]" aria-hidden="true">*</span></>}
+                label={<>{t('wizard.endpoint.password_label')} <span className="text-[var(--color-danger-fg)]" aria-hidden="true">*</span></>}
                 showLockIcon={false}
                 value={w.vpnPassword}
                 // ASVS V5 (T-06-05): mirror the backend validate_vpn_password whitelist
@@ -169,7 +169,7 @@ export function EndpointStep(w: WizardState) {
                     : "p-2 rounded-[var(--radius-xl)] text-xs text-left transition-all flex flex-col items-start border border-[var(--color-border)] bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] hover:border-[var(--color-success-tint-40)] hover:bg-[var(--color-success-tint-08)]"
                 }
               >
-                <CertLetsEncryptIcon className="w-6 h-6 shrink-0 mb-1 text-[var(--color-success-500)]" />
+                <CertLetsEncryptIcon className="w-6 h-6 shrink-0 mb-1 text-[var(--color-success-fg)]" />
                 <div className="font-medium">Let's Encrypt</div>
                 <div className="text-xs mt-0.5 text-[var(--color-text-muted)]">{t('wizard.endpoint.le_recommended')}</div>
               </button>
@@ -184,7 +184,7 @@ export function EndpointStep(w: WizardState) {
                     : "p-2 rounded-[var(--radius-xl)] text-xs text-left transition-all flex flex-col items-start border border-[var(--color-border)] bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] hover:border-[var(--color-warning-tint-40)] hover:bg-[var(--color-warning-tint-08)]"
                 }
               >
-                <CertSelfSignedIcon className="w-6 h-6 shrink-0 mb-1 text-[var(--color-warning-500)]" />
+                <CertSelfSignedIcon className="w-6 h-6 shrink-0 mb-1 text-[var(--color-warning-fg)]" />
                 <div className="font-medium">{t('wizard.endpoint.self_signed')}</div>
                 <div className="text-xs mt-0.5 text-[var(--color-text-muted)]">{t('wizard.endpoint.self_signed_quick')}</div>
               </button>
@@ -213,8 +213,8 @@ export function EndpointStep(w: WizardState) {
             {/* Self-signed warning */}
             {w.certType === "selfsigned" && (
               <div className="flex items-start gap-2 p-2 rounded-[var(--radius-lg)] bg-[var(--color-status-connecting-bg)] border border-[var(--color-status-connecting-border)]">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning-500)]" />
-                <p className="text-xs leading-relaxed text-[var(--color-warning-500)]">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning-fg)]" />
+                <p className="text-xs leading-relaxed text-[var(--color-warning-fg)]">
                   {t('wizard.endpoint.self_signed_warning')}
                 </p>
               </div>
@@ -228,7 +228,7 @@ export function EndpointStep(w: WizardState) {
                   // gates non-empty + valid LE target), so it carries the same «*» marker
                   // as the username/password fields above. aria-hidden because the
                   // requirement is enforced by canDeploy, not announced per-field.
-                  label={<>{t('labels.domain_name')} <span className="text-[var(--color-danger-500)]" aria-hidden="true">*</span></>}
+                  label={<>{t('labels.domain_name')} <span className="text-[var(--color-danger-fg)]" aria-hidden="true">*</span></>}
                   icon={<Globe className="w-4 h-4" />}
                   value={w.domain}
                   onChange={(e) => w.setDomain(e.target.value)}
@@ -248,7 +248,7 @@ export function EndpointStep(w: WizardState) {
                   // requirement (canDeploy gates email.trim().length > 0), so the field
                   // carries the «*». NOTE the backend still treats email as optional
                   // (--register-unsafely-without-email) — this requirement is UX-only.
-                  label={<>{t('wizard.endpoint.email_label')} <span className="text-[var(--color-danger-500)]" aria-hidden="true">*</span></>}
+                  label={<>{t('wizard.endpoint.email_label')} <span className="text-[var(--color-danger-fg)]" aria-hidden="true">*</span></>}
                   icon={<Mail className="w-4 h-4" />}
                   value={w.email}
                   onChange={(e) => w.setEmail(e.target.value)}
@@ -381,9 +381,9 @@ export function EndpointStep(w: WizardState) {
           {/* DNS warning */}
           {w.certType === "letsencrypt" && w.domain.trim() && (
             <div className="flex items-start gap-2 p-3 rounded-[var(--radius-xl)] bg-[var(--color-warning-tint-08)] border border-[var(--color-warning-tint-20)]">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning-500)]" />
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning-fg)]" />
               <div className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
-                <span className="font-semibold text-[var(--color-warning-500)]">{t('wizard.endpoint.dns_warning_important')}</span>{' '}
+                <span className="font-semibold text-[var(--color-warning-fg)]">{t('wizard.endpoint.dns_warning_important')}</span>{' '}
                 {w.host
                   ? t('wizard.endpoint.dns_warning_text', { domain: w.domain, host: w.host })
                   : t('wizard.endpoint.dns_warning_text_no_host', { domain: w.domain })}

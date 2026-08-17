@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 /**
  * Phase 18 — Welcome Screen 2 («Как это работает»).
  *
- * Hero icon: Globe внутри `--color-accent-500` 64×64 rounded-2xl
+ * Hero icon: Globe внутри `--color-accent-fg` 64×64 rounded-2xl
  * `--shadow-lg`. Heading `text-display-sm`, description `text-body`
  * secondary.
  *

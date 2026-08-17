@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Loader2, GitBranch, Save, Download, Upload,
+  Loader2, GitBranch, Save,
   Zap, Shield, Route,
 } from "lucide-react";
 import type { VpnStatus } from "../shared/types";
@@ -11,8 +11,10 @@ import { Button } from "../shared/ui/Button";
 import StatusPanel from "./StatusPanel";
 import { useRoutingState } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
+import { PresetGrid } from "./routing/PresetGrid";
 import { RoutingBlockCard } from "./routing/RoutingBlockCard";
 import { ProcessFilterSection } from "./routing/ProcessFilterSection";
+import { ExportImportButtons } from "./routing/ExportImportButtons";
 import { useFeatureToggles } from "../shared/hooks/useFeatureToggles";
 
 interface RoutingPanelProps {
@@ -80,7 +82,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
       <div className="flex-1 flex items-center justify-center">
         <Loader2
           className="w-6 h-6 animate-spin"
-          style={{ color: "var(--color-accent-400)" }}
+          style={{ color: "var(--color-accent-fg)" }}
         />
       </div>
     );
@@ -102,18 +104,11 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
       />
 
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-        {/* GeoData Status */}
-        <GeoDataStatusCard
-          status={state.geodataStatus}
-          downloading={state.geodataDownloading}
-          onDownload={state.downloadGeoData}
-        />
-
-        {/* VPN Mode selector */}
+        {/* VPN Mode selector — canon: FIRST section (Phase-20 flagship order) */}
         <Card padding="md">
           <div className="flex items-center gap-2 mb-1.5">
-            <Route className="w-4 h-4" style={{ color: "var(--color-accent-400)" }} />
-            <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>
+            <Route className="w-4 h-4" style={{ color: "var(--color-accent-fg)" }} />
+            <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
               {t("labels.vpn_mode")}
             </span>
           </div>
@@ -138,51 +133,26 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
             {vpnMode === "general" ? t("help_text.vpn_mode_general") : t("help_text.vpn_mode_selective")}
           </p>
-
-          {/* Save & Reconnect + Export/Import — inside mode card */}
-          <div className="flex gap-2 mt-2">
-            <Button
-              variant="primary"
-              size="sm"
-              className="flex-1"
-              icon={<Save className="w-3.5 h-3.5" />}
-              loading={state.applying}
-              disabled={!state.isVpnActive || !state.dirty}
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent("tt-peer-save"));
-                state.handleSave(true);
-              }}
-            >
-              {saveLabel}
-            </Button>
-            <button
-              onClick={state.exportRules}
-              disabled={state.saving || state.applying}
-              className="px-3 py-2 rounded-[var(--radius-lg)] transition-colors disabled:opacity-40"
-              style={{
-                backgroundColor: "var(--color-bg-card)",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-text-secondary)",
-              }}
-              title={t("routing.exportRules")}
-            >
-              <Upload className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={state.importRules}
-              disabled={state.saving || state.applying}
-              className="px-3 py-2 rounded-[var(--radius-lg)] transition-colors disabled:opacity-40"
-              style={{
-                backgroundColor: "var(--color-bg-card)",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-text-secondary)",
-              }}
-              title={t("routing.importRules")}
-            >
-              <Download className="w-3.5 h-3.5" />
-            </button>
-          </div>
         </Card>
+
+        {/* GeoData Status */}
+        <GeoDataStatusCard
+          status={state.geodataStatus}
+          downloading={state.geodataDownloading}
+          onDownload={state.downloadGeoData}
+        />
+
+        {/* Быстрые пресеты — one-click named groups (T-25 / D-01). Canon section order: sits between
+            the geodata card and the routing blocks. Each tile lands its group at a smart-default block
+            via addEntry; iplist backings fetch their cache on add; block-target tiles gate on the
+            blockRouting toggle and geosite tiles on geodata-downloaded (Pitfalls #1/#3). */}
+        <PresetGrid
+          rules={state.rules}
+          onAdd={state.addEntry}
+          ensureGroupCache={state.ensureGroupCache}
+          geodataDownloaded={state.geodataStatus.downloaded}
+          blockRoutingEnabled={toggles.blockRouting}
+        />
 
         {/* Routing Blocks */}
         <RoutingBlockCard
@@ -191,9 +161,11 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           entries={state.rules.direct}
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}
+          iplistGroups={state.iplistGroups}
           onAdd={state.addEntry}
           onRemove={state.removeEntry}
           onMove={state.moveEntry}
+          onEnsureGroupCache={state.ensureGroupCache}
         />
 
         <RoutingBlockCard
@@ -202,9 +174,11 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           entries={state.rules.proxy}
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}
+          iplistGroups={state.iplistGroups}
           onAdd={state.addEntry}
           onRemove={state.removeEntry}
           onMove={state.moveEntry}
+          onEnsureGroupCache={state.ensureGroupCache}
         />
 
         {/* Блокировка сайтов — экспериментальная функция, включается в Настройках */}
@@ -215,9 +189,11 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           entries={state.rules.block}
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}
+          iplistGroups={state.iplistGroups}
           onAdd={state.addEntry}
           onRemove={state.removeEntry}
           onMove={state.moveEntry}
+          onEnsureGroupCache={state.ensureGroupCache}
         />
         )}
 
@@ -232,6 +208,34 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           onRemove={state.removeProcess}
           onLoadProcesses={state.loadProcessList}
         />
+
+        {/* Save & Reconnect + Export/Import — standalone bottom strip (canon, Phase-20 flagship).
+            Moved out of the VPN-mode Card; the Save two-liner (tt-peer-save → handleSave(true)),
+            its disabled gate, and loading state are preserved VERBATIM. Export/import wire the
+            reshaped ExportImportButtons to the existing FUNCTIONAL state.exportRules/importRules
+            (real file I/O — the D-03 "inert" premise was wrong; Phase 21 reshaped the look only,
+            it did not add or remove behavior). */}
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            className="flex-1"
+            icon={<Save className="w-3.5 h-3.5" />}
+            loading={state.applying}
+            disabled={!state.isVpnActive || !state.dirty}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("tt-peer-save"));
+              state.handleSave(true);
+            }}
+          >
+            {saveLabel}
+          </Button>
+          <ExportImportButtons
+            onExport={state.exportRules}
+            onImport={state.importRules}
+            disabled={state.saving || state.applying}
+          />
+        </div>
       </div>
 
     </div>

@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { Database, Download, RefreshCw, Check } from "lucide-react";
-import { Card, CardHeader, Badge, Button } from "../../shared/ui";
+import { Globe, Download, RefreshCw, Check } from "lucide-react";
+import { Card, CardHeader, Badge, Button, ProgressBar } from "../../shared/ui";
+import { Toggle } from "../../shared/ui/Toggle";
 import type { GeoDataStatus as GeoDataStatusType } from "./useRoutingState";
 
 interface GeoDataProgressPayload {
@@ -31,6 +32,10 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
   const [progress, setProgress] = useState<GeoDataProgressPayload | null>(null);
   const [updateCheck, setUpdateCheck] = useState<GeoUpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
+  // Background auto-update on/off (canon parity, audit P-1). Gates the 30-min auto-check below; the
+  // manual "Проверить обновления" button always works regardless. Session-local (matches the design
+  // canon, which keeps it as local state) — persistence can follow later.
+  const [autoUpdate, setAutoUpdate] = useState(true);
 
   // Listen for progress events
   useEffect(() => {
@@ -83,14 +88,14 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status.downloaded]);
 
-  // Auto-check for updates every 30 minutes
+  // Auto-check for updates every 30 minutes — ONLY while auto-update is on (P-1 toggle).
   useEffect(() => {
-    if (!status.downloaded) return;
+    if (!status.downloaded || !autoUpdate) return;
     const interval = setInterval(() => {
       checkUpdates();
     }, 30 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [status.downloaded, checkUpdates]);
+  }, [status.downloaded, checkUpdates, autoUpdate]);
 
   // Translate progress step strings from Rust to i18n
   const translateStep = (step: string): string => {
@@ -131,7 +136,7 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
       <CardHeader
         title={t("routing.geodataTitle")}
         description={t("routing.geodataDescription")}
-        icon={<Database className="w-4 h-4" />}
+        icon={<Globe className="w-4 h-4" />}
         action={
           <Badge variant={badgeVariant} size="sm">
             {badgeLabel}
@@ -147,8 +152,8 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
               className="w-2 h-2 rounded-full"
               style={{
                 backgroundColor: status.geoip_exists
-                  ? "var(--color-success-500)"
-                  : "var(--color-danger-500)",
+                  ? "var(--color-success-fg)"
+                  : "var(--color-danger-fg)",
               }}
             />
             <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
@@ -165,8 +170,8 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
               className="w-2 h-2 rounded-full"
               style={{
                 backgroundColor: status.geosite_exists
-                  ? "var(--color-success-500)"
-                  : "var(--color-danger-500)",
+                  ? "var(--color-success-fg)"
+                  : "var(--color-danger-fg)",
               }}
             />
             <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
@@ -191,21 +196,35 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
       {/* Progress during download */}
       {downloading && progress && (
         <div className="mb-3">
-          <div
-            className="w-full h-1 rounded-full overflow-hidden"
-            style={{ backgroundColor: "var(--color-bg-hover)" }}
-          >
-            <div
-              className="h-full rounded-full transition-all duration-300"
-              style={{
-                width: `${progress.percent}%`,
-                backgroundColor: "var(--color-accent-500)",
-              }}
-            />
-          </div>
+          {/* R21-03 (DEBT-RAWPRIM): the hand-rolled track+fill <div> pair (inline
+              width math on a bare div) is replaced by the shared ProgressBar so the
+              download progress gets role=progressbar + aria-value* for free and the
+              track/fill styling flows from the design system (D-01: visual/structural
+              port, zero behavior change — same downloading && progress gate, same
+              percent value, same translated step caption below). */}
+          <ProgressBar
+            value={progress.percent}
+            max={100}
+            size="sm"
+            color="accent"
+            label={translateStep(progress.step)}
+          />
           <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
             {translateStep(progress.step)}
           </p>
+        </div>
+      )}
+
+      {/* Auto-update toggle (canon parity, audit P-1) — only meaningful once geodata exists. Turning it
+          off stops the 30-min background auto-check above; the manual button below still works. */}
+      {status.downloaded && (
+        <div className="mb-3 pb-3 border-b" style={{ borderColor: "var(--color-border)" }}>
+          <Toggle
+            checked={autoUpdate}
+            onChange={setAutoUpdate}
+            label={t("routing.geodataAutoUpdate")}
+            description={autoUpdate ? t("routing.geodataAutoUpdateOn") : t("routing.geodataAutoUpdateOff")}
+          />
         </div>
       )}
 

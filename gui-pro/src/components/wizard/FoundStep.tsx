@@ -109,10 +109,10 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     return (
       <>
         <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-status-connecting-bg)]">
-          <PackageCheck className="w-8 h-8 text-[var(--color-warning-500)]" />
+          <PackageCheck className="w-8 h-8 text-[var(--color-warning-fg)]" />
         </div>
         <div className="space-y-1.5">
-          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-warning-500)]">
+          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-warning-fg)]">
             {t('wizard.found.already_installed')}
           </h2>
           {w.serverInfo?.version && (
@@ -122,7 +122,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
           )}
           <p className="text-body-sm text-[var(--color-text-secondary)]">
             {t('wizard.found.service_label')} {w.serverInfo?.serviceActive ? (
-              <span className="text-[var(--color-success-500)]">{t('wizard.found.service_running')}</span>
+              <span className="text-[var(--color-success-fg)]">{t('wizard.found.service_running')}</span>
             ) : (
               <span className="text-[var(--color-text-muted)]">{t('wizard.found.service_stopped')}</span>
             )}
@@ -147,7 +147,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                       className={`flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-colors duration-200 cursor-pointer ${isSelected ? "bg-[var(--color-accent-tint-08)]" : "hover:bg-[var(--color-bg-hover)]"}`}
                     >
                       <div className="flex items-center gap-2">
-                        <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border-2 ${isSelected ? "border-[var(--color-accent-500)]" : "border-[var(--color-border)]"}`}>
+                        <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border-2 ${isSelected ? "border-[var(--color-accent-fg)]" : "border-[var(--color-border)]"}`}>
                           {isSelected && <div className="w-2 h-2 rounded-full bg-[var(--color-accent-500)]" />}
                         </div>
                         <span className="text-body-sm font-medium font-mono text-[var(--color-text-primary)]">{u}</span>
@@ -216,7 +216,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     return (
       <>
         <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-accent-tint-10)]">
-          <Server className="w-8 h-8 text-[var(--color-accent-500)]" />
+          <Server className="w-8 h-8 text-[var(--color-accent-fg)]" />
         </div>
         <div className="space-y-1.5">
           <h2 id="wizard-heading" className="text-display-sm text-[var(--color-text-primary)]">{t('sshErrors.hostKeyReset', 'Host key was reset. Press Connect again.')}</h2>
@@ -236,15 +236,15 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     return (
       <>
         <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-status-error-bg)]">
-          <XCircle className="w-8 h-8 text-[var(--color-danger-500)]" />
+          <XCircle className="w-8 h-8 text-[var(--color-danger-fg)]" />
         </div>
         <div className="space-y-1.5">
-          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-danger-500)]">{t('wizard.found.server_unreachable')}</h2>
+          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-danger-fg)]">{t('wizard.found.server_unreachable')}</h2>
           <p className="text-body text-[var(--color-text-secondary)]">
             {t('wizard.found.connection_error_help')}
           </p>
           <div className="max-h-20 overflow-y-auto rounded-[var(--radius-lg)] p-2 mt-2 bg-[var(--color-bg-elevated)]">
-            <p className="text-mono-sm leading-relaxed select-text cursor-text break-words text-[var(--color-danger-500)]">
+            <p className="text-mono-sm leading-relaxed select-text cursor-text break-words text-[var(--color-danger-fg)]">
               {translateSshError(w.checkError, t)}
             </p>
           </div>
@@ -260,7 +260,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   return (
     <>
       <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-accent-tint-10)]">
-        <Server className="w-8 h-8 text-[var(--color-accent-500)]" />
+        <Server className="w-8 h-8 text-[var(--color-accent-fg)]" />
       </div>
       <div className="space-y-1.5">
         <h2 id="wizard-heading" className="text-display-sm text-[var(--color-text-primary)]">{t('wizard.found.server_ready')}</h2>

@@ -13,8 +13,8 @@ import { Input } from "../../shared/ui/Input";
 
 export function StatusBadge({ state, label }: { state: "on" | "off" | "warn"; label: string }) {
   const map = {
-    on: { color: "var(--color-success-500)", bg: "var(--color-success-tint-12)", icon: <CheckCircle2 className="w-3 h-3" /> },
-    warn: { color: "var(--color-warning-500)", bg: "var(--color-warning-tint-12)", icon: <AlertTriangle className="w-3 h-3" /> },
+    on: { color: "var(--color-success-fg)", bg: "var(--color-success-tint-12)", icon: <CheckCircle2 className="w-3 h-3" /> },
+    warn: { color: "var(--color-warning-fg)", bg: "var(--color-warning-tint-12)", icon: <AlertTriangle className="w-3 h-3" /> },
     off: { color: "var(--color-text-muted)", bg: "var(--color-bg-hover)", icon: <XCircle className="w-3 h-3" /> },
   }[state];
   return (
@@ -67,7 +67,7 @@ export function LogArea({ content, loading: isLoading, pushSuccess }: {
               title={t("server.logs.copy")}
             >
               {copied
-                ? <CheckCircle2 className="w-3 h-3" style={{ color: "var(--color-success-500)" }} />
+                ? <CheckCircle2 className="w-3 h-3" style={{ color: "var(--color-success-fg)" }} />
                 : <Copy className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />}
             </button>
           )}
@@ -99,7 +99,7 @@ export function LabeledInput({ label, value, onChange, placeholder, inputMode, m
         {maxLength != null && (
           <span
             className="text-xs tabular-nums"
-            style={{ color: charCount! > maxLength ? "var(--color-danger-500)" : "var(--color-text-muted)" }}
+            style={{ color: charCount! > maxLength ? "var(--color-danger-fg)" : "var(--color-text-muted)" }}
           >
             {charCount}/{maxLength}
           </span>

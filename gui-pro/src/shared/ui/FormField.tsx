@@ -48,7 +48,7 @@ export function FormField({
         {required && (
           <span
             className="ml-0.5"
-            style={{ color: "var(--color-danger-500)" }}
+            style={{ color: "var(--color-danger-fg)" }}
             aria-hidden="true"
           >
             *

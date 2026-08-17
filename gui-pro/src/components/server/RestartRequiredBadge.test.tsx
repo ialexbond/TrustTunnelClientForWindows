@@ -26,13 +26,13 @@ describe("RestartRequiredBadge", () => {
   it("applies disrupt-high token classes", () => {
     const { container } = render(<RestartRequiredBadge level="disrupt-high" />);
     const badge = container.querySelector('[role="status"]');
-    expect(badge?.className).toContain("color-danger-500");
+    expect(badge?.className).toContain("color-danger-fg");
   });
 
   it("applies disrupt-low token classes", () => {
     const { container } = render(<RestartRequiredBadge level="disrupt-low" />);
     const badge = container.querySelector('[role="status"]');
-    expect(badge?.className).toContain("color-warning-500");
+    expect(badge?.className).toContain("color-warning-fg");
   });
 
   it("renders an AlertTriangle icon for disrupt-high", () => {

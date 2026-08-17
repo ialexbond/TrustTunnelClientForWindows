@@ -107,7 +107,7 @@ export function ProcessFilterSection({
                 <button
                   onClick={() => onRemove(proc)}
                   className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                  style={{ color: "var(--color-danger-400)" }}
+                  style={{ color: "var(--color-danger-fg)" }}
                   title={t("routing.removeProcess")}
                 >
                   <X className="w-3.5 h-3.5" />

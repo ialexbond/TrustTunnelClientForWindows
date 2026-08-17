@@ -488,10 +488,11 @@ describe("useVpnActions.handleReconnect (Plan 02-12 — no dwell on «Отклю
     });
   });
 
-  it("Fable-A #6: raises the pending intent with the RECONNECT hint (isSwitch: false → «Переподключение» start plate)", async () => {
+  it("Fable-A #6: raises the pending intent with the RECONNECT hint (isSwitch: false → «Настройки применены» start plate)", async () => {
     // A save-and-reconnect and a manual switch BOTH carry origin=Manual, so the Rust seam needs
-    // the explicit hint to keep this flow on the `reconnecting` start plate (owner-accepted in
-    // UAT test 12) while the manual switch moves to the neutral `switching` one.
+    // the explicit hint. The FE call is unchanged (isSwitch:false); the Rust picker now maps that hint
+    // to the voluntary `applyingSettings` start plate (Phase 22 UAT — was `reconnecting`, whose
+    // link-drop copy read wrong for a deliberate save), while the manual switch stays on `switching`.
     const { hook } = renderReconnectHarness("connected");
 
     let reconnectPromise: Promise<void>;
