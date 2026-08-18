@@ -10,13 +10,27 @@ describe("credentialGenerator", () => {
       }
     });
 
-    it("produces unique results across 100 calls (collision < 5%)", () => {
+    /**
+     * Guards against a DEGENERATE generator (a stuck index, a collapsed charset), not against
+     * ordinary birthday collisions.
+     *
+     * The old bound was ≥95 unique out of 100 and flaked in CI. The maths says why. Half the draws
+     * get no numeric suffix, so ~50 of them land in a space of 30 adjectives × 30 nouns = 900:
+     * expected collisions there are C(50,2)/900 ≈ 1.4, and the suffixed half (900 × 90 = 81 000)
+     * contributes almost nothing. So the honest expectation is ~98.6 unique with a standard
+     * deviation near 1.2 — and 95 sits barely 3σ out, which a suite that runs many times a day WILL
+     * hit.
+     *
+     * 90 is ~7σ from the mean: unreachable by chance, while any real degeneracy (a generator stuck
+     * on one adjective collapses the space to 30 × 91) lands far below it. Do not "tighten" this
+     * back to 95 — that number was never a property of the generator, only of a lucky run.
+     */
+    it("produces near-unique results across 100 calls (catches a degenerate generator)", () => {
       const results = new Set<string>();
       for (let i = 0; i < 100; i++) {
         results.add(generateUsername());
       }
-      // At least 95 unique out of 100
-      expect(results.size).toBeGreaterThanOrEqual(95);
+      expect(results.size).toBeGreaterThanOrEqual(90);
     });
 
     it("does NOT use Math.random", () => {

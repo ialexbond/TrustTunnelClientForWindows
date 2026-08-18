@@ -188,7 +188,9 @@
       "language": "Language",
       "logging": "Collect logs",
       "logging_desc": "Save application events and VPN engine output to files",
-      "logging_show_folder": "Show in folder"
+      "logging_show_folder": "Show in folder",
+      "geodata_auto_update": "Update the routing database automatically",
+      "geodata_auto_update_desc": "GeoIP/GeoSite databases and group lists are refreshed in the background once a day"
     },
     "autoMode": {
       "title": "Auto mode",
@@ -669,9 +671,14 @@
     "geodataMissing": "Not downloaded",
     "geodataUpdateAvailable": "Update available",
     "geodataUpToDate": "Up to date",
-    "geodataAutoUpdate": "Update automatically",
-    "geodataAutoUpdateOn": "Databases update in the background",
-    "geodataAutoUpdateOff": "Manual updates only",
+    "rulesSaved": "Rules saved",
+    "rulesExported": "Rules exported",
+    "rulesImported": "Rules imported",
+    "settingsSaved": "Settings saved",
+    "geodataUpToDateShort": "Up to date",
+    "geodataAutoOff": "Auto-update is off",
+    "geodataDownloaded": "Geodata downloaded",
+    "geodataAlreadyUpdating": "The databases are already updating in the background — try again shortly",
     "checkUpdates": "Check for updates",
     "checkingUpdates": "Checking...",
     "downloading": "Downloading...",

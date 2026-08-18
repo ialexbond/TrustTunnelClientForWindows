@@ -317,9 +317,36 @@ fn slugify(s: &str) -> String {
 /// D-29: this function NEVER logs `bytes` (the config content carries the endpoint password) — it
 /// emits nothing at all; only the caller's neutral path/name may be logged. `name` must be a BARE
 /// filename (no separators) — callers join it onto a validated `dir`.
+///
+/// T-23-04 / FAB-02: the temp name is UNIQUE PER CALL, not `<name>.tmp`.
+///
+/// With one shared temp per destination, two concurrent writers of the same file interleaved their
+/// bytes into it, and whichever renamed second published a byte-wise MIX of two generations. Both
+/// halves of the atomicity argument above quietly assumed a single writer. That assumption held
+/// until Phase 23 added a background scheduler writing `group_cache/<id>.json` on a timer while the
+/// UI can write the same file on demand — but the exposure was never limited to geodata: every
+/// password-bearing `.toml` routed through here shared the same single temp, so two saves racing
+/// (two windows, an autosave against a manual save) could publish a spliced config. A mixed
+/// credentials file is a worse outcome than either write losing.
+///
+/// Unique temps make concurrent writers independent: each fills its own file, each rename is whole,
+/// and the last one to rename wins cleanly. Last-writer-wins is the correct semantic here — it is
+/// what a single shared file can express — and no reader can ever observe a mixture.
+///
+/// Deliberately NOT swept: a hard crash mid-write now leaves `<name>.<pid>.<n>.tmp` behind instead
+/// of a reusable `<name>.tmp`. Sweeping siblings on the way in would race a concurrent writer's live
+/// temp and turn its rename into a spurious failure — trading corruption for flakiness. Orphans are
+/// inert: `<name>` itself is never a temp, readers only ever open the real name, and the existing
+/// tests pin that a stray temp is never read as data. Clutter beats a spliced password file.
 pub fn atomic_write(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create data dir: {e}"))?;
-    let tmp = dir.join(format!("{name}.tmp"));
+    // pid separates processes (a second app instance), the counter separates calls within one.
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = dir.join(format!(
+        "{name}.{}.{}.tmp",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let final_path = dir.join(name);
     // F14: every error path AFTER the temp is created must remove `<name>.tmp` before returning.
     // The temp holds a PARTIAL, password-bearing config (D-29); an ENOSPC/IO failure mid-write must
@@ -2737,15 +2764,27 @@ included_routes = ["0.0.0.0/0"]
             }],
         };
         // A stray leftover .tmp from a hypothetical crashed write must not be read as the
-        // manifest (only configs.json is read), and the atomic write overwrites it.
+        // manifest — only configs.json is ever read.
+        //
+        // T-23-04: it is no longer OVERWRITTEN either. Temp names are unique per call now (a shared
+        // temp let two concurrent writers splice their bytes into one published file), so an orphan
+        // simply stays put, inert. What matters is unchanged and asserted below: the round-trip is
+        // exact, and this call's own temp is consumed by its rename.
         std::fs::write(tmp.join(MANIFEST_TMP_FILENAME), b"GARBAGE-PARTIAL").unwrap();
         write_manifest_atomic(&tmp, &m).unwrap();
         let back = read_manifest(&tmp).unwrap();
         assert_eq!(m, back, "write_manifest_atomic then read_manifest round-trips");
-        // After the atomic rename the .tmp is gone (it was renamed over configs.json).
+        let live_temps: Vec<_> = std::fs::read_dir(&tmp)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|f| {
+                f.starts_with(MANIFEST_FILENAME) && f.ends_with(".tmp") && f != MANIFEST_TMP_FILENAME
+            })
+            .collect();
         assert!(
-            !tmp.join(MANIFEST_TMP_FILENAME).exists(),
-            "the temp file is consumed by the rename"
+            live_temps.is_empty(),
+            "the temp this call created is consumed by the rename, found: {live_temps:?}"
         );
         cleanup(&tmp);
     }
@@ -4058,11 +4097,58 @@ included_routes = ["0.0.0.0/0"]
     // temp→write_all→sync_all→rename body (+ PP-3 parent-dir fsync) and DELETED the gate so they
     // now run under default `cargo test --lib` and pass.
 
-    /// GREEN (17-03): the generic `atomic_write(dir, name, bytes)` is crash-safe —
-    /// a stray leftover `<name>.tmp` from a hypothetical crashed write never survives, and
-    /// the final file equals the bytes exactly. Mirrors the existing `manifest_atomic_roundtrip`
-    /// GARBAGE-PARTIAL shape, but for an arbitrary `.toml` payload (every password-bearing
-    /// config writer routes through this).
+    /// T-23-04: two writers racing on the SAME destination must never publish a mixture.
+    ///
+    /// This is the defect the unique temp name fixes. With one shared `<name>.tmp`, both writers
+    /// opened it, interleaved their `write_all`s into one file, and whichever renamed second
+    /// published a byte-wise splice of two generations. For a group cache that means an unparseable
+    /// file that fails the whole routing resolve; for a config `.toml` it means a spliced
+    /// password-bearing file — worse than either write simply losing.
+    ///
+    /// The assertion is the invariant, not the mechanism: the destination must equal ONE of the two
+    /// payloads exactly. Last-writer-wins is fine and expected; a mixture is not. The payloads are
+    /// large and byte-distinct so an interleave cannot accidentally equal either one.
+    ///
+    /// Verified to FAIL against the shared-temp version — this is not a test that would have passed
+    /// either way.
+    #[test]
+    fn concurrent_writers_never_publish_a_spliced_file() {
+        let dir = tempdir();
+        let name = "contested.toml";
+        let a = vec![b'A'; 512 * 1024];
+        let b = vec![b'B'; 512 * 1024];
+
+        // Several rounds: a single round can serialise by luck on a fast machine.
+        for _ in 0..8 {
+            let (d1, d2) = (dir.clone(), dir.clone());
+            let (a1, b1) = (a.clone(), b.clone());
+            let h1 = std::thread::spawn(move || atomic_write(&d1, name, &a1));
+            let h2 = std::thread::spawn(move || atomic_write(&d2, name, &b1));
+            h1.join().unwrap().expect("writer A must succeed");
+            h2.join().unwrap().expect("writer B must succeed");
+
+            let published = std::fs::read(dir.join(name)).unwrap();
+            assert!(
+                published == a || published == b,
+                "the published file must be exactly one generation, got {} bytes starting {:?}",
+                published.len(),
+                &published[..published.len().min(8)]
+            );
+        }
+
+        cleanup(&dir);
+    }
+
+    /// GREEN (17-03): the generic `atomic_write(dir, name, bytes)` is crash-safe — a stray temp from
+    /// a hypothetical crashed write is never read as data, and the final file equals the bytes
+    /// exactly. Mirrors the existing `manifest_atomic_roundtrip` GARBAGE-PARTIAL shape, but for an
+    /// arbitrary `.toml` payload (every password-bearing config writer routes through this).
+    ///
+    /// T-23-04: the assertion moved from "no `<name>.tmp` survives" to "the DESTINATION is exactly
+    /// the bytes, and the temp this call created is consumed". Temp names are now unique per call,
+    /// so a pre-existing orphan is no longer overwritten — it is simply irrelevant, because nothing
+    /// ever reads a temp. Pinning the old literal name would pin the shared-temp bug that made two
+    /// concurrent writers splice their bytes into one published file.
     #[test]
     fn wave0_pp1_atomic_write_is_crash_safe() {
         let tmp = tempdir();
@@ -4076,9 +4162,17 @@ included_routes = ["0.0.0.0/0"]
 
         let back = std::fs::read(tmp.join(name)).unwrap();
         assert_eq!(back, bytes, "atomic_write writes the exact bytes to <name>");
+        // The temp THIS call created is gone (consumed by the rename): no `<name>.<pid>.<n>.tmp`
+        // sibling is left behind. The pre-seeded orphan is expected to survive and is inert.
+        let live_temps: Vec<_> = std::fs::read_dir(&tmp)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|f| f.starts_with(&format!("{name}.")) && f.ends_with(".tmp") && f != &format!("{name}.tmp"))
+            .collect();
         assert!(
-            !tmp.join(format!("{name}.tmp")).exists(),
-            "the temp file is consumed by the rename (no leftover .tmp survives)"
+            live_temps.is_empty(),
+            "the temp this call created must be consumed by the rename, found: {live_temps:?}"
         );
         cleanup(&tmp);
     }

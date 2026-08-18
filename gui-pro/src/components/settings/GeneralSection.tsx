@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { Settings, Power, EyeOff, FileText, FolderOpen } from "lucide-react";
+import { Settings, Power, EyeOff, FileText, FolderOpen, RefreshCw } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Toggle } from "../../shared/ui/Toggle";
+import { emitGeodataAutoUpdateChanged } from "../../shared/utils/geodataAutoUpdateSignal";
 
 // Phase 12 (12-07): the «Автоподключение при запуске» toggle MOVED out of «Основные» into
 // «Авто-режим» (AutoModeSettings). It reads/writes the SAME `tt_auto_connect` localStorage key
@@ -76,6 +77,40 @@ export function GeneralSection({ onSaved }: Props) {
     }
   };
 
+  // ─── Geodata auto-update (persisted Rust-side in app_settings.json) ───
+  // Phase 23 (D-12/D-13): this setting used to be a session-local switch on the Routing card that
+  // only drove a 30-min timer while that tab was mounted — so the databases never actually updated
+  // by themselves. The cadence now lives in a Rust background scheduler, which cannot read
+  // localStorage; hence the two Tauri commands instead of the usual useFeatureToggles pattern.
+  // Initialised `true`, not `false`: the read is async and the setting defaults ON, so a `false`
+  // seed would flash a wrong OFF state on every mount.
+  const [geodataAutoUpdate, setGeodataAutoUpdate] = useState(true);
+
+  useEffect(() => {
+    invoke<boolean>("get_geodata_auto_update").then(setGeodataAutoUpdate).catch(() => {});
+  }, []);
+
+  const handleGeodataAutoUpdate = async (value: boolean) => {
+    try {
+      await invoke("set_geodata_auto_update", { enabled: value });
+      setGeodataAutoUpdate(value);
+      // CR-03: announce the change so the Routing card re-reads it. That card is never unmounted
+      // (App.tsx hides inactive panels instead of unmounting them), so without this its own copy of
+      // the setting stays at whatever it was at app launch and the D-05 badge silently stops
+      // working. Emitted only AFTER the backend write succeeded — a failed write must not make
+      // other components believe the setting changed.
+      emitGeodataAutoUpdateChanged();
+      onSaved?.();
+    } catch {
+      // FAB-05: a failed write used to be swallowed. The switch then simply did not move, with no
+      // explanation — indistinguishable from an unresponsive control, and the user's next move is to
+      // click it again. Re-reading the persisted value puts the switch back where the BACKEND says it
+      // is, so the UI stops claiming a change that did not happen. The three toggles above still
+      // swallow their errors; they are pre-existing and out of this phase's scope.
+      invoke<boolean>("get_geodata_auto_update").then(setGeodataAutoUpdate).catch(() => {});
+    }
+  };
+
   const handleOpenLogs = async () => {
     try {
       await invoke("open_logs_folder");
@@ -124,6 +159,17 @@ export function GeneralSection({ onSaved }: Props) {
             {t("settings.app.logging_show_folder")}
           </button>
         )}
+        {/* Phase 23 (D-12/D-13): appended LAST on purpose — the existing tests address switches
+            positionally (getAllByRole("switch")[1]), so inserting this row higher up would silently
+            shift every one of those indices. Uses the current `checked` prop; the three rows above
+            still use the deprecated `value` and are left alone (unrelated churn). */}
+        <Toggle
+          checked={geodataAutoUpdate}
+          onChange={handleGeodataAutoUpdate}
+          label={t("settings.app.geodata_auto_update")}
+          description={t("settings.app.geodata_auto_update_desc")}
+          icon={<RefreshCw className="w-3.5 h-3.5" />}
+        />
       </div>
     </Card>
   );

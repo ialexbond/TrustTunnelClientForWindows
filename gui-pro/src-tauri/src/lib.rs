@@ -1,8 +1,10 @@
+mod app_settings;
 mod commands;
 mod connectivity;
 mod diagnostics;
 mod dns_guard;
 mod geodata;
+mod geodata_scheduler;
 mod geodata_v2ray;
 mod job_object;
 mod lifecycle;
@@ -50,10 +52,14 @@ fn get_start_minimized() -> bool {
 
 /// Marker for the one-time "the app keeps running in the tray" hint.
 ///
-/// Lives in the portable DATA dir (next to the configs / logs / dns snapshot), not next to the exe:
-/// that directory is the app's real state, survives an in-place reinstall, and needs no admin rights
-/// to write. The `.start_minimized` / `.enable_logs` flags sit next to the exe only because they are
-/// read before the data dir is known.
+/// Sits in `portable_data_dir()` — which IS the exe's own directory, the same place the configs,
+/// logs and dns snapshot live (the NSIS installer is per-user, into LocalAppData, so this is
+/// writable without admin). An earlier version of this comment claimed the data dir was separate
+/// from the exe dir; it is not.
+///
+/// Scope of the guarantee: the hint is shown once and never again for as long as this directory
+/// survives. An installer that wipes the install directory would let it appear one more time —
+/// acceptable, since the point is to stop nagging on every LAUNCH, which is what actually happened.
 fn tray_hint_marker() -> std::path::PathBuf {
     ssh::portable_data_dir().join("tray_hint_shown")
 }
@@ -436,6 +442,62 @@ pub fn run() {
             let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
             geodata_v2ray::start_geodata_watcher(app.handle().clone(), geodata_state);
 
+            // Phase 23 (D-10/D-11) — start the window-independent geodata update loop. It replaces
+            // the 30-minute `setInterval` that lived inside a React component and therefore only
+            // ran while the Routing tab was mounted. A SECOND clone of the managed Arc is taken
+            // here because the first one was moved into the watcher above.
+            let geodata_state_for_scheduler =
+                app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
+            let vpn_status_for_geodata = Arc::clone(&app.state::<AppState>().vpn_status);
+            let config_path_for_geodata = Arc::clone(&app.state::<AppState>().config_path);
+            // CR-01: the scheduler's re-resolve writes the SAME five resolved rule files the C++
+            // core opens at spawn, so it must hold the same serializer the three lifecycle callers
+            // (vpn_connect, the supervised respawn, the tray connect) already hold. Passing the
+            // shared `lifecycle_flow` Arc is what makes the D-01 gate enforceable rather than
+            // merely checked — see `geodata_scheduler::apply_if_safe`.
+            let lifecycle_flow_for_geodata = Arc::clone(&app.state::<AppState>().lifecycle_flow);
+            geodata_scheduler::start_geodata_scheduler(
+                app.handle().clone(),
+                geodata_state_for_scheduler,
+                vpn_status_for_geodata,
+                config_path_for_geodata,
+                lifecycle_flow_for_geodata,
+            );
+
+            // Busy-flag relay. The scheduler holds no `AppHandle` on purpose (D-04 — with no handle
+            // in scope it cannot grow a progress bar nobody asked for), so it cannot tell the UI
+            // that a write is in flight. It only flips a process-wide flag; THIS task owns the
+            // handle and turns each flip into one `geodata-busy` event.
+            //
+            // What it buys: the card's download button is disabled while any geodata write runs,
+            // including a background one. Previously the button stayed enabled through the whole
+            // background download and answered a click with GEODATA_ALREADY_UPDATING — an
+            // explanation after the fact instead of a control that cannot be pressed.
+            //
+            // Not a D-04 breach: no notification, snackbar, badge or progress is produced. The one
+            // event carries a bool and only ever disables an existing control.
+            let busy_relay_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    // FAB-01: register the waiter BEFORE reading the flag. `notify_waiters()` stores
+                    // no permit, so a flip that lands between the read and the next park vanishes —
+                    // and if the lost flip is the `false` one, the card's button stays disabled with
+                    // nothing the user can click to fix it, until the next flip up to a day later.
+                    // The offline case makes this easy to hit: the cycle can fail in single-digit
+                    // milliseconds, so `true` and `false` arrive almost together.
+                    //
+                    // Same idiom as the scheduler's wake future (`geodata_scheduler.rs`), for the
+                    // same reason. Pinned + enabled so the registration happens now, not at the
+                    // first poll of the await below.
+                    let mut flipped = std::pin::pin!(geodata_v2ray::update_busy_notified());
+                    flipped.as_mut().enable();
+                    busy_relay_handle
+                        .emit("geodata-busy", geodata_v2ray::is_update_in_flight())
+                        .ok();
+                    flipped.await;
+                }
+            });
+
             // SOCKS5 client mode was removed — the app is TUN-only. Convert any legacy on-disk
             // config that still declares `[listener.socks]` to a full-tunnel `[listener.tun]`
             // now, at startup: BEFORE the fs-watcher below (so the list loads normalized) and
@@ -776,7 +838,13 @@ pub fn run() {
             geodata_v2ray::download_geodata,
             geodata_v2ray::get_geodata_status,
             geodata_v2ray::check_geodata_updates,
+            geodata_v2ray::geodata_update_in_flight,
             geodata_v2ray::load_geodata_categories,
+            // Phase 23 (D-12) — the persisted, Rust-side geodata auto-update toggle. It lives in
+            // the backend rather than localStorage because the scheduler must read it with no
+            // window open.
+            app_settings::get_geodata_auto_update,
+            app_settings::set_geodata_auto_update,
             routing_rules::load_routing_rules,
             routing_rules::save_routing_rules,
             routing_rules::export_routing_rules,
