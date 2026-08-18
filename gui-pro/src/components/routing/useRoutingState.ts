@@ -148,6 +148,13 @@ export interface UseRoutingStateReturn {
   // GeoData
   downloadGeoData: () => Promise<void>;
   geodataDownloading: boolean;
+  /**
+   * A geodata write is in flight ANYWHERE — this window's own download, another window's, or the
+   * background scheduler's. `geodataDownloading` only ever knew about the first, which is why the
+   * card's button stayed pressable during a background cycle and answered a click with
+   * GEODATA_ALREADY_UPDATING instead of simply being disabled.
+   */
+  geodataBusy: boolean;
 
   // iplist groups (D-03 / T-25): the available group list + a whitelisted fetch-on-add dispatcher
   ensureGroupCache: (groupId: string) => Promise<void>;
@@ -199,6 +206,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
   const [dirty, setDirty] = useState(false);
   const [applying, setApplying] = useState(false);
   const [geodataDownloading, setGeodataDownloading] = useState(false);
+  const [geodataBusy, setGeodataBusy] = useState(false);
 
   const pushSuccess = useSnackBar();
   const { t } = useTranslation();
@@ -334,6 +342,21 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, [loadGeoStatus]);
+
+  // Track whether ANY geodata write is in flight — this window's, another's, or the background
+  // scheduler's — so the card can disable its button instead of letting a click fail.
+  //
+  // Both halves are needed. The event covers a cycle that STARTS while we are mounted; the one-off
+  // read covers a cycle already running when we mount, which is the common case: the first
+  // background cycle fires 8s after launch, and that is exactly when a user opens Маршрутизация.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    invoke<boolean>("geodata_update_in_flight").then(setGeodataBusy).catch(() => {});
+    listen<boolean>("geodata-busy", (event) => {
+      setGeodataBusy(event.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
 
   // ─── Dirty tracking ────────────────────────────────
 
@@ -541,7 +564,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       baselineRef.current = computeSnapshot(rules);
       baselineVpnModeRef.current = vpnMode;
       setDirty(false);
-      pushSuccess("Правила сохранены");
+      pushSuccess(t("routing.rulesSaved"));
     } catch (e) {
       console.error("Failed to save routing rules:", e);
       pushSuccess(formatError(e), "error");
@@ -549,7 +572,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       setSaving(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload]);
+  }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload, t]);
 
   // ─── Export / Import ────────────────────────────────
 
@@ -559,12 +582,12 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       await invoke("save_routing_rules", { rules: toBackendPayload(rules) });
       const result = await invoke<string | null>("export_routing_rules");
       if (result) {
-        pushSuccess("Правила экспортированы");
+        pushSuccess(t("routing.rulesExported"));
       }
     } catch (e) {
       pushSuccess(formatError(e), "error");
     }
-  }, [rules, pushSuccess, toBackendPayload]);
+  }, [rules, pushSuccess, toBackendPayload, t]);
 
   const importRules = useCallback(async () => {
     try {
@@ -587,7 +610,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
 
       setRules(imported);
       markDirty(imported);
-      pushSuccess("Правила импортированы");
+      pushSuccess(t("routing.rulesImported"));
     } catch (e) {
       // IN-57: the «Импорт» button now shares the drag door's 64 KiB cap; the backend returns
       // i18n key codes (routing.import_too_large / routing.import_invalid) so the error shows
@@ -605,13 +628,23 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     try {
       await invoke("download_geodata");
       await loadGeoStatus();
-      pushSuccess("Гео-данные загружены");
+      // Phase 23: this was a hardcoded Russian literal — an i18n-rule violation that predates this
+      // phase and is fixed here rather than left to drift, since the same call site changed anyway.
+      pushSuccess(t("routing.geodataDownloaded"));
     } catch (e) {
-      pushSuccess(formatError(e), "error");
+      // D-17: the backend serialises the manual button and the background scheduler through one
+      // in-flight guard and refuses the loser with the opaque code GEODATA_ALREADY_UPDATING. That
+      // code must never reach the screen — a collision with a background cycle is a "try again in a
+      // moment", not an error the user can act on.
+      const msg = e instanceof Error ? e.message : String(e);
+      pushSuccess(
+        msg.includes("GEODATA_ALREADY_UPDATING") ? t("routing.geodataAlreadyUpdating") : formatError(e),
+        "error",
+      );
     } finally {
       setGeodataDownloading(false);
     }
-  }, [loadGeoStatus, pushSuccess]);
+  }, [loadGeoStatus, pushSuccess, t]);
 
   // ─── Silent save (auto-save when VPN inactive) ─────
 
@@ -624,11 +657,11 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       baselineRef.current = computeSnapshot(rules);
       baselineVpnModeRef.current = vpnMode;
       setDirty(false);
-      pushSuccess("Настройки сохранены");
+      pushSuccess(t("routing.settingsSaved"));
     } catch (e) {
       pushSuccess(formatError(e), "error");
     }
-  }, [configPath, rules, vpnMode, computeSnapshot, pushSuccess, toBackendPayload]);
+  }, [configPath, rules, vpnMode, computeSnapshot, pushSuccess, toBackendPayload, t]);
 
   // ─── Manual save (with reconnect) ─────────────────
 
@@ -644,7 +677,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       baselineVpnModeRef.current = vpnMode;
       setDirty(false);
 
-      pushSuccess("Настройки сохранены");
+      pushSuccess(t("routing.settingsSaved"));
       if (reconnect && isVpnActive) {
         await onReconnect();
       }
@@ -653,7 +686,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     } finally {
       setApplying(false);
     }
-  }, [configPath, rules, vpnMode, computeSnapshot, pushSuccess, toBackendPayload, isVpnActive, onReconnect]);
+  }, [configPath, rules, vpnMode, computeSnapshot, pushSuccess, toBackendPayload, isVpnActive, onReconnect, t]);
 
   // ─── Peer-save: when Settings panel saves, save our rules too ───
   useEffect(() => {
@@ -696,6 +729,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     importRules,
     downloadGeoData,
     geodataDownloading,
+    geodataBusy,
     ensureGroupCache,
     groupFetching,
     handleSave,

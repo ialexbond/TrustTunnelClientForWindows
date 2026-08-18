@@ -441,12 +441,29 @@ pub fn resolve_and_apply_inner(
 }
 
 /// Resolve all rules and generate config files for sidecar (Tauri command wrapper)
+///
+/// FAB-02: this command is the FIFTH writer of the five resolved rule files the C++ sidecar opens at
+/// spawn, and it was the unserialized one. CR-01 fixed the background scheduler by giving it the
+/// `lifecycle_flow` serializer the three lifecycle callers hold, on the premise that those three were
+/// the only other writers — they were not. This command runs whenever the user edits routing rules
+/// (including the silent autosave), and the scheduler's first cycle fires eight seconds after launch,
+/// which is exactly when a user is likely to be editing. Two concurrent writers of the same files
+/// mean the sidecar can be handed a mixed generation.
+///
+/// `lock().await`, not `try_lock`: this one is user-initiated and must not be silently dropped. The
+/// scheduler uses `try_lock` because a background refresh may skip a cycle; a click may not. No
+/// deadlock is possible — every other holder takes this lock alone or (in the scheduler's case) after
+/// `update_in_flight`, and this path takes no other lock, so no cycle can form.
 #[tauri::command]
 pub async fn resolve_and_apply(
     config_path: String,
     rules: RoutingRules,
     state: tauri::State<'_, Arc<GeoDataState>>,
+    app_state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
+    let lifecycle_flow = Arc::clone(&app_state.lifecycle_flow);
+    let _flow_guard = lifecycle_flow.lock().await;
+
     // Save rules first
     save_routing_rules(rules.clone())?;
 
@@ -832,13 +849,22 @@ mod tests {
         // (b) the endpoint credentials were preserved (the data-loss surface F4 guards),
         assert!(written.contains("password = \"SUPER-SECRET-XYZ\""));
         assert!(written.contains("username = \"swift-fox\""));
-        // (c) the atomic writer renamed its temp away — no `<name>.tmp` sibling is left behind,
-        //     which a plain std::fs::write could never have created in the first place. This is
-        //     the positive proof the write went through `write_bytes_atomic`.
-        let tmp = dir.join("TrustTunnel_swift-fox.toml.tmp");
+        // (c) the writer renamed its temp away — no `.tmp` sibling of any shape is left behind.
+        //     T-23-04 note: this was written as "positive proof the write went through
+        //     write_bytes_atomic", on the reasoning that a plain `fs::write` never creates a
+        //     `<name>.tmp` at all. That reasoning no longer holds — temp names are unique per call
+        //     now, so the literal `<name>.tmp` is never created by anyone and asserting its absence
+        //     proved nothing. Kept as a hygiene check (no temp survives a successful write); the
+        //     atomicity itself is pinned where it belongs, in `atomic_write`'s own tests.
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|f| f.ends_with(".tmp"))
+            .collect();
         assert!(
-            !tmp.exists(),
-            "atomic writer must leave no leftover .tmp after a successful rename"
+            leftovers.is_empty(),
+            "atomic writer must leave no leftover temp after a successful rename, found: {leftovers:?}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -864,10 +890,15 @@ mod tests {
         // Credentials preserved through the exclusions rewrite (data-loss surface).
         assert!(written.contains("password = \"SUPER-SECRET-XYZ\""));
         // No leftover temp → the write went through the atomic writer, not a plain truncate.
-        let tmp = dir.join("TrustTunnel_swift-fox.toml.tmp");
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|f| f.ends_with(".tmp"))
+            .collect();
         assert!(
-            !tmp.exists(),
-            "atomic writer must leave no leftover .tmp after a successful rename"
+            leftovers.is_empty(),
+            "atomic writer must leave no leftover temp after a successful rename, found: {leftovers:?}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

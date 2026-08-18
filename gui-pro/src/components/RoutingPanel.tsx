@@ -139,6 +139,9 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
         <GeoDataStatusCard
           status={state.geodataStatus}
           downloading={state.geodataDownloading}
+          // Any write in flight — including the background scheduler's — disables the card's
+          // button. Without this it stayed pressable and the click came back refused.
+          busy={state.geodataBusy}
           onDownload={state.downloadGeoData}
         />
 
