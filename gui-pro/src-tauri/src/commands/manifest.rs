@@ -1269,22 +1269,6 @@ fn prune_missing(manifest: &mut Manifest) -> bool {
     true
 }
 
-/// Lock + read + prune + write-if-changed. 17-03/PP-2: the import flow now prunes INLINE under its
-/// own single held lock (`import_config_under_lock` calls `prune_missing` directly — re-locking here
-/// would deadlock), so production no longer calls this wrapper; it is retained as the funnel's
-/// standalone prune entry point (and exercised by tests). Callers already holding the lock with a
-/// manifest in hand (add/duplicate) use `prune_missing` directly instead.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn prune_manifest_in_dir(dir: &Path) -> Result<bool, String> {
-    let _guard = lock_manifest();
-    let mut manifest = read_manifest(dir)?;
-    let changed = prune_missing(&mut manifest);
-    if changed {
-        write_manifest_atomic(dir, &manifest)?;
-    }
-    Ok(changed)
-}
-
 // ─── Copy naming (IN-26) ─────────────────────────────────────────────────────
 //
 // A deliberately-created copy (card «Дублировать» or import «Добавить копию») is labelled
@@ -2019,26 +2003,12 @@ pub fn append_config_to_manifest(dir: &Path, path: &str) -> Result<(), String> {
     write_manifest_atomic(dir, &manifest)
 }
 
-/// Like `append_config_to_manifest` but with an explicit display name — the import AddCopy path
-/// (deeplink.rs) labels the new entry «<base> (копия N)» (IN-26). This is a same-server
-/// «Добавить копию», so it is a DELIBERATE copy: mark it durably (`copy = true`, B6 fix #5) so the
-/// delete identity-sweep spares it even though its imported filename may carry no `-copy`/`-<n>`
-/// suffix (the import keeps the original filename) and its «(копия N)» label could later be
-/// renamed away.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn append_config_to_manifest_named(dir: &Path, path: &str, name: &str) -> Result<(), String> {
-    let _guard = lock_manifest();
-    let mut manifest = read_manifest(dir)?;
-    add_entry_named(&mut manifest, path, Some(name), true)?;
-    write_manifest_atomic(dir, &manifest)
-}
-
 /// PP-2 (16-PERF-AUDIT §m-2): perform an entire config import — prune ghosts → decide
 /// duplicate-vs-original → allocate a unique filename → write the `.toml` atomically → append the
 /// manifest entry — under ONE continuous hold of `MANIFEST_LOCK`.
 ///
-/// The pre-PP-2 import path took the lock THREE separate times (`prune_manifest_in_dir`,
-/// `find_duplicate_by_host_user`, then `append_config_to_manifest*`) with the duplicate DECISION
+/// The pre-PP-2 import path took the lock THREE separate times (a standalone prune wrapper,
+/// `find_duplicate_by_host_user`, then an append wrapper) with the duplicate DECISION
 /// made OUTSIDE any lock. Two near-simultaneous imports of the same (host, user) could therefore
 /// both observe «no duplicate» in the gap and each write an ORIGINAL — two non-copy twins instead
 /// of one original + one «(копия)». Holding the lock across the whole check→write→append closes
@@ -2049,8 +2019,8 @@ pub fn append_config_to_manifest_named(dir: &Path, path: &str, name: &str) -> Re
 /// existed (D-13 «add as copy»). D-29: never logs the content/password. All the sub-helpers used
 /// here (`prune_missing`, `find_duplicate_by_host_user`, `unique_import_path`, `next_copy_name_for`,
 /// `read_manifest`, `write_manifest_atomic`) are lock-FREE, so calling them under the held guard
-/// cannot re-enter the std `Mutex` and deadlock; the `append_config_to_manifest*` wrappers (which
-/// DO take the lock) are deliberately NOT used here.
+/// cannot re-enter the std `Mutex` and deadlock; the `append_config_to_manifest` wrapper (which
+/// DOES take the lock) is deliberately NOT used here.
 pub fn import_config_under_lock(
     dir: &Path,
     content: &str,
@@ -3618,9 +3588,9 @@ included_routes = ["0.0.0.0/0"]
         cleanup(&tmp);
     }
 
-    /// fix #5(c): an import same-server auto-copy (`append_config_to_manifest_named`, durable
-    /// `copy: true`) that kept the ORIGINAL filename (no `-copy`/`-<n>` suffix) must be spared by
-    /// the sweep — the durable flag covers the filename-heuristic hole.
+    /// fix #5(c): an import same-server auto-copy (`import_config_under_lock` → `add_entry_named`,
+    /// durable `copy: true`) that kept the ORIGINAL filename (no `-copy`/`-<n>` suffix) must be
+    /// spared by the sweep — the durable flag covers the filename-heuristic hole.
     #[test]
     fn delete_sweep_preserves_import_autocopy_with_original_filename() {
         let tmp = tempdir();

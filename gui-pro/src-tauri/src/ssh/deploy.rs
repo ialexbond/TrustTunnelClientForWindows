@@ -2414,7 +2414,10 @@ mod tests {
         let after_sha = &cmd[cmd.find("sha256sum -c -").expect("sha check present")..];
         let break_idx = after_sha.find("break").expect("sha failure must break");
         assert!(
-            after_sha.find("continue").map_or(true, |ci| break_idx < ci),
+            // `is_none_or`: no `continue` after the sha check at all is a pass, and if there
+            // is one the `break` must come first. Same truth table as the old
+            // `map_or(true, …)`; the closure is a pure comparison, so the swap is exact.
+            after_sha.find("continue").is_none_or(|ci| break_idx < ci),
             "integrity mismatch must break (fail closed), not continue: {cmd}"
         );
         // The failure marker + fail-closed exit code are preserved.

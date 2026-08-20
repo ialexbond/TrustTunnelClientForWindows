@@ -225,6 +225,38 @@ pub async fn import_config_from_string(
     Ok(dest_str)
 }
 
+/// Percent-decode `input` into a raw byte buffer (CR-01).
+///
+/// Operates entirely on bytes: a valid `%XX` escape pushes the decoded byte
+/// verbatim (including high bytes >= 0x80, which the old String-based decoder
+/// corrupted via `byte as char`). An invalid/short `%` escape is preserved
+/// literally. This is the correct primitive for a base64 payload, which is
+/// binary text — not a Unicode string.
+///
+/// Lives here, above the `#[cfg(test)]` seam and `mod tests`, rather than at the
+/// bottom of the file: production items after the test module are invisible in the
+/// module outline and easy to mistake for test scaffolding.
+fn urlencoding_decode_bytes(input: &str) -> Vec<u8> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
+                16,
+            ) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    out
+}
+
 /// PP-2 test seam: the single-lock import helper the `wave0_pp2` RED test drives. Delegates to
 /// `manifest::import_config_under_lock` (the whole check→write→append under one MANIFEST_LOCK hold)
 /// with no source filename, so two racing imports of the same (host, user) yield one original + one
@@ -568,32 +600,4 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-/// Percent-decode `input` into a raw byte buffer (CR-01).
-///
-/// Operates entirely on bytes: a valid `%XX` escape pushes the decoded byte
-/// verbatim (including high bytes >= 0x80, which the old String-based decoder
-/// corrupted via `byte as char`). An invalid/short `%` escape is preserved
-/// literally. This is the correct primitive for a base64 payload, which is
-/// binary text — not a Unicode string.
-fn urlencoding_decode_bytes(input: &str) -> Vec<u8> {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
-                out.push(b);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    out
 }

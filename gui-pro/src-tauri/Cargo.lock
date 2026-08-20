@@ -6647,6 +6647,7 @@ dependencies = [
  "ipconfig",
  "keyring",
  "notify",
+ "png 0.17.16",
  "rand 0.8.5",
  "regex",
  "reqwest",

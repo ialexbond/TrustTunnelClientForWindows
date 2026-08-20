@@ -1015,28 +1015,28 @@ mod tests {
         assert!(result.contains(&"1.1.1.1/32".to_string()));
     }
 
-    // ── T-26 / D-04 (Wave 0 RED → green in Plan 02): iplist_group resolve strips prefix ──
+    // ── T-26 / D-04: an iplist_group value resolves with its prefix stripped ──
     //
-    // Context: the T-26 fix makes the FRONTEND persist an iplist_group entry WITH its
-    // `iplist_group:` prefix in `value` (so it round-trips through save→reload without being
-    // mis-detected as a plain domain — see useRoutingState.test.ts). For that prefixed value to
-    // still resolve in the core, the backend `resolve_entries` iplist_group arm must STRIP the
-    // `iplist_group:` prefix before using the id as the group_cache key. Today the arm keys the
-    // cache off the BARE `entry.value` (i.e. the whole "iplist_group:<id>" string, L495-508), so
-    // the cache file — written under the bare id `<id>.json` — is never found and the entry
-    // resolves to nothing.
+    // The frontend persists an iplist_group entry WITH its `iplist_group:` prefix in `value`, so
+    // the entry round-trips through save→reload without being mis-detected as a plain domain (see
+    // useRoutingState.test.ts). The group cache, meanwhile, is keyed by the BARE id: its files are
+    // written as `<id>.json`. `resolve_entries` is therefore the place the two spellings must meet,
+    // and it strips the prefix before the cache lookup — exactly as the geoip:/geosite: arms do.
+    // Without that strip the arm looks for a file named after the whole "iplist_group:<id>" string,
+    // never finds it, and the entry silently resolves to nothing: a preset group that routes no
+    // traffic while the UI shows it as active.
     //
-    // This test is RED now: we write the fixture under the bare id, hand resolve_entries the
-    // PREFIXED value, and assert the cached domains come back. It goes GREEN in Plan 02 when the
-    // arm gains `.strip_prefix("iplist_group:")` (mirroring how geoip:/geosite: already work).
+    // This test writes a fixture under the bare id, hands `resolve_entries` the PREFIXED value and
+    // asserts the cached domains come back — so a regression that drops the strip fails here rather
+    // than in a user's routing table.
     //
     // Note on isolation: `group_cache_path_pub` is rooted at `portable_data_dir()` (the test
     // binary's dir under cargo test), which cannot be redirected in-process; we therefore use a
-    // unique, phase-scoped bare id so the fixture never clobbers a real user cache, and remove it
+    // unique, test-scoped bare id so the fixture never clobbers a real user cache, and remove it
     // after the assertion.
     #[test]
     fn resolve_entries_iplist_group_strips_prefix_before_cache_lookup() {
-        let bare_id = format!("phase22_red_fixture_{}", std::process::id());
+        let bare_id = format!("iplist_group_prefix_fixture_{}", std::process::id());
         let cache_path = group_cache_path_pub(&bare_id);
         let cached = vec![
             "games.example.com".to_string(),
@@ -1060,8 +1060,8 @@ mod tests {
         // Clean up the fixture regardless of the assertion outcome below.
         let _ = std::fs::remove_file(&cache_path);
 
-        // RED today: the arm keys off the full "iplist_group:<id>" string, finds no cache file,
-        // and returns an empty list → this assertion fails. Plan 02 strips the prefix → GREEN.
+        // An arm that keyed off the full "iplist_group:<id>" string would find no cache file and
+        // return an empty list, so this assertion is what holds the strip in place.
         assert!(
             resolved.contains(&"games.example.com".to_string())
                 && resolved.contains(&"play.example.org".to_string()),

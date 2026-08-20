@@ -43,6 +43,17 @@ describe("i18n key parity", () => {
     expect(ru.messages.connect_cancelled).toBe("Подключение отменено");
     expect(en.messages.connect_cancelled).toBe("Connection cancelled");
   });
+
+  it("routing.processListError and its hint exist in BOTH ru and en", () => {
+    // The process picker renders these when the running-process enumeration fails. It must render
+    // the translated text and never the raw backend error, so a missing key here would put a bare
+    // key string in front of the user at precisely the moment something already went wrong.
+    expect(ru.routing.processListError).toBeTruthy();
+    expect(en.routing.processListError).toBeTruthy();
+    expect(ru.routing.processListErrorHint).toBeTruthy();
+    expect(en.routing.processListErrorHint).toBeTruthy();
+    expect(ru.routing.processListError).not.toBe(en.routing.processListError);
+  });
 });
 
 describe("Phase 19 — JSON structural integrity", () => {

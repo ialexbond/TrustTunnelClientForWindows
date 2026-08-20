@@ -2,8 +2,8 @@ import { useState } from "react";
 
 /**
  * Domain hook for server logs UI state (read-only).
- * Section calls invoke("server_read_logs", ...) via its own handler and
- * pushes the result into setServerLogs.
+ * Section calls invoke("server_get_logs", ...) via its own handler
+ * (LogsViewerModal) and pushes the result into setServerLogs.
  */
 export function useLogsState() {
   const [serverLogs, setServerLogs] = useState("");

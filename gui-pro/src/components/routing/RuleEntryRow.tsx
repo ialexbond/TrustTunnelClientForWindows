@@ -86,10 +86,21 @@ export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEnt
 
       {/* Move buttons — migrated from raw <button> to the shared IconButton
           (R21-03 DEBT-RAWPRIM). These stay the existing accessible move fallback
-          (D-02: NO drag-to-move, no drag handle) and keep the hover-reveal wrapper;
-          onMove(entry.id, target) wiring is unchanged. The per-target arrow colour
-          rides on the ArrowRight's own inline style. */}
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          (D-02: NO drag-to-move, no drag handle); onMove(entry.id, target) wiring is
+          unchanged and the per-target arrow colour rides on the ArrowRight's own
+          inline style.
+          D-06: the arrows now REST VISIBLE. They used to sit inside a zero-opacity
+          hover-reveal wrapper, which left an arrow invisible at the exact moment a
+          keyboard user focused it — operable but not usable. That was written up as a
+          warning in 22-VERIFICATION.md:172 and widened by D-06 to every occurrence on
+          the tab. Deleting the wrapper IS the fix: IconButton already renders muted at
+          rest, strengthens its background on hover and draws the focus ring, so nothing
+          was added to replace it. Same shape as the delete button below, which never
+          carried the wrapper.
+          Note for the next author: do not quote the two Tailwind class names of that
+          wrapper here — hover-reveal-guard.sh cannot tell a JSX block comment from code,
+          so writing them out would keep the gate red forever. */}
+      <div className="flex items-center gap-0.5 transition-opacity">
         {targets.map((target) => (
           <IconButton
             key={target}

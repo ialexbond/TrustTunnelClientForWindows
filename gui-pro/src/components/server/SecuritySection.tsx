@@ -77,7 +77,7 @@ interface Props {
  */
 export function SecuritySection({ state }: Props) {
   const { t, i18n } = useTranslation();
-  const security = useSecurityState(state.sshParams, state.pushSuccess, state.onPortChanged);
+  const security = useSecurityState(state.sshParams, state.pushSuccess);
 
   const [firewallOpen, setFirewallOpen] = useState(false);
   const [fail2banOpen, setFail2banOpen] = useState(false);

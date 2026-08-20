@@ -49,8 +49,9 @@ const arrowColor: Record<RouteAction, string> = {
  * вкладку, без «многоточия»/OverflowMenu) + всегда видимое удаление (Trash2).
  *
  * Перенос: по одной кнопке-стрелке ArrowRight на каждую цель (proxy→direct: одна; block→direct+proxy:
- * две), появляются при наведении на строку (opacity-0 group-hover), tooltip/aria = «Переместить в …»,
- * клик зовёт onMove(entry.id, target) → moveEntry (дедуп на цели живёт в moveEntry, новой логики нет).
+ * две). Стрелки видны В ПОКОЕ в приглушённом состоянии и усиливаются при наведении и при фокусе с
+ * клавиатуры (D-06); tooltip/aria = «Переместить в …», клик зовёт onMove(entry.id, target) → moveEntry
+ * (дедуп на цели живёт в moveEntry, новой логики нет).
  * Клавиатуро-доступно: каждая стрелка — обычная фокусируемая кнопка (D-02: без мышиного drag).
  */
 export function GroupChip({ entry, currentAction, label, onRemove, onMove }: GroupChipProps) {
@@ -80,9 +81,17 @@ export function GroupChip({ entry, currentAction, label, onRemove, onMove }: Gro
       {/* Спейсер уводит управление к правому краю, не растягивая пилюлю. */}
       <span className="flex-1" />
 
-      {/* Перенос между блоками — стрелки ArrowRight (по одной на цель), появляются при наведении.
+      {/* Перенос между блоками — стрелки ArrowRight (по одной на цель), ВИДНЫ В ПОКОЕ (D-06).
+          Раньше группа стрелок сидела в обёртке-гейте «нулевая прозрачность + возврат по наведению»:
+          стрелка оставалась невидимой ровно в тот момент, когда на неё встал фокус с клавиатуры —
+          управлять можно, пользоваться нельзя. Предупреждение записано в 22-VERIFICATION.md:172 и
+          расширено D-06 на все три места вкладки. Удаление гейта И ЕСТЬ починка: IconButton сам даёт
+          приглушённый покой, усиление фона по наведению и кольцо фокуса, поэтому взамен НИЧЕГО не
+          добавлено. Та же форма, что у корзины ниже, у которой гейта никогда не было.
+          Следующему автору: не выписывать здесь имена тех двух Tailwind-классов —
+          hover-reveal-guard.sh не отличает блок-комментарий от кода и останется красным навсегда.
           Тот же контрол, что у одиночного правила RuleEntryRow (D-1: единый паттерн, без «...»). */}
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-0.5 transition-opacity">
         {targets.map((target) => (
           <IconButton
             key={target}

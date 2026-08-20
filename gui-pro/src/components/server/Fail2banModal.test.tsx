@@ -91,8 +91,6 @@ function buildState(overrides: {
     deleteRule: vi.fn().mockResolvedValue(undefined),
     addRule: vi.fn().mockResolvedValue(undefined),
     loadFwLog: vi.fn().mockResolvedValue(undefined),
-    changeSshPort: vi.fn().mockResolvedValue(undefined),
-    portBusy: false,
     applyFail2banPreset: vi.fn().mockResolvedValue(undefined),
     applyFail2banCustom: vi.fn().mockResolvedValue(undefined),
     run: vi.fn().mockResolvedValue(undefined),

@@ -151,7 +151,7 @@ type PushSuccess = (msg: string, type?: "success" | "error") => void;
 // Hook
 // ═══════════════════════════════════════════════════════
 
-export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess, onPortChanged?: (newPort: number) => void) {
+export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess) {
   const { t } = useTranslation();
 
   const showError = useCallback((msg: string) => {
@@ -216,14 +216,6 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     if (raw.includes("SECURITY_UFW_INVALID_RULE")) return t("server.security.errors.generic_rule_rejected");
     if (raw.includes("SECURITY_F2B_INVALID_IP"))   return t("server.security.errors.ip_invalid");
     if (raw.includes("SECURITY_F2B_INVALID_JAIL")) return t("server.security.errors.generic_rule_rejected");
-    if (raw.includes("SSH_PORT_CHANGE_FAILED")) {
-      const msg = raw.split("|").slice(1).join("|") || "";
-      return t("server.security.errors.port_change_failed", { msg });
-    }
-    if (raw.includes("SSH_PORT_VALIDATION_FAILED")) {
-      const msg = raw.split("|").slice(1).join("|") || "";
-      return t("server.security.errors.port_validation_failed", { msg });
-    }
     if (raw.includes("SSH_UNSUPPORTED_OS")) {
       return t("server.security.errors.unsupported_os");
     }
@@ -413,36 +405,11 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
       setFwLog(log);
     });
 
-  // ── SSH Port actions ──
-  const changeSshPort = async (newPort: number) => {
-    setBusySet(prev => { const n = new Set(prev); n.add("change-ssh-port"); return n; });
-    try {
-      const result = await invoke<{ newPort: number }>("security_change_ssh_port", { ...sshParams, newPort });
-      const actualPort = result.newPort;
-
-      // Notify parent to update creds.port (triggers sshParams recalculation)
-      onPortChanged?.(actualPort);
-
-      // Optimistically update displayed SSH port so UI reflects change immediately
-      // (full reload will happen via useEffect when sshParams.port updates after re-render)
-      setStatus(prev => prev ? {
-        ...prev,
-        firewall: { ...prev.firewall, current_ssh_port: actualPort }
-      } : prev);
-
-      // Show success message
-      if (actualPort === 22) {
-        pushSuccess(t("server.security.snack.port_reset"));
-      } else {
-        pushSuccess(t("server.security.snack.port_changed", { port: actualPort }));
-      }
-    } catch (e) {
-      showError(formatBackendError(e));
-    } finally {
-      setBusySet(prev => { const n = new Set(prev); n.delete("change-ssh-port"); return n; });
-    }
-  };
-  const portBusy = isBusy("change-ssh-port");
+  // Phase 26 — смена SSH-порта удалена целиком: экшен хука, его busy-флаг, компонент,
+  // Tauri-команда и backend-функция. Владелец выпилил контроль осознанно — менять порт
+  // SSH из приложения нормально не получалось. Живой backend с живыми тестами, но без
+  // единой точки рендера, читался как случайная поломка и уже стоил одного код-ревью и
+  // мис-скоупленной фазы; см. .planning/phases/26-control-panel-restore-ssh-port-change/26-CONTEXT.md.
 
   // P UAT 2026-05-04 — SSH-key actions УДАЛЕНЫ из hook surface вместе с UI
   // (generateSshKey/exportSshKeyBackup/disablePasswordAuth/enablePasswordAuth/
@@ -550,7 +517,6 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     banIp, unbanIp, saveJail, loadF2bLog,
     installFirewall, uninstallFirewall, startFirewall, stopFirewall,
     deleteRule, addRule, loadFwLog,
-    changeSshPort, portBusy,
 
     // P UAT 2026-05-04 — SSH key actions removed (feature deleted from UI).
 

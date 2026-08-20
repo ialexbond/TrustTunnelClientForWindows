@@ -742,10 +742,15 @@ mod adapter_event_tests {
         // a sustained probe-failure streak to cross MAX_FAILURES (~12-15s of clean
         // cadence in connectivity.rs). A window at or below the detection cadence
         // would reintroduce the starvation this fix removes.
-        assert!(
-            FIXB_RESET_MIN_INTERVAL_SECS >= 60,
-            "rate-limit window must comfortably exceed the ~12-15s detection window",
-        );
+        // Const block: `FIXB_RESET_MIN_INTERVAL_SECS` is a compile-time constant, so shrinking
+        // it back under the detection cadence fails while the test binary compiles rather than
+        // on one test run. See connectivity.rs `offline_floor_is_snappy` for the enforcement point.
+        const {
+            assert!(
+                FIXB_RESET_MIN_INTERVAL_SECS >= 60,
+                "rate-limit window must comfortably exceed the ~12-15s detection window",
+            )
+        };
     }
 }
 

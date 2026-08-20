@@ -31,7 +31,6 @@ export function ControlPanelView({
   sidecarUpdateVisible,
   handleConnect,
   handleDisconnect,
-  handlePortChanged,
   handleSidecarUpdateApplied,
   handleSidecarUpdateSeen,
   onConfigExported,
@@ -65,7 +64,6 @@ export function ControlPanelView({
               onSwitchToSetup={onSwitchToSetup}
               onClearConfig={() => {}}
               onDisconnect={handleDisconnect}
-              onPortChanged={handlePortChanged}
               onPanelReady={() => setIsFirstConnect(false)}
               // H-05: on retry, re-arm the first-connect skeleton so it RE-SHOWS
               // during the reload instead of the display:none guard latching off

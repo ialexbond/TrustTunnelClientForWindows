@@ -375,6 +375,437 @@ describe("UserConfigModal", () => {
     );
   });
 
+  // Phase 25 (FLOW-01 / D-05): plan 25-01 replaced the English «Access denied…»
+  // prose with stable machine codes. Without translation the user would now see a
+  // bare code — worse than the English sentence. The snackbar must show Russian
+  // while the activity log keeps the raw code for diagnosis.
+  it("Download failure shows the localized path error while the activity log keeps the RAW code", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/test.toml";
+      // Tauri rejects a command with the Err string itself, not an Error object.
+      if (cmd === "copy_file") throw "COPY_SOURCE_OUTSIDE_ROOTS";
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce("/home/user/config.toml");
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    // role="alert" is the error-variant snackbar (SnackBar.tsx:214) — asserting the
+    // a11y contract, not a CSS class. The expected copy is resolved through the real
+    // i18n instance so this can never drift from ru.json.
+    const snack = await screen.findByRole("alert");
+    expect(snack).toHaveTextContent(i18n.t("pathErrors.sourceOutsideRoots"));
+    // …and it is NOT the raw code the backend sent.
+    expect(snack).not.toHaveTextContent("COPY_SOURCE_OUTSIDE_ROOTS");
+
+    // The diagnostic record keeps the machine code — a translated sentence there
+    // would destroy the ability to grep the log for the failing branch.
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "ERROR",
+      "user.config.download_failed err=COPY_SOURCE_OUTSIDE_ROOTS",
+    );
+  });
+
+  it("Download failure with an UNMAPPED backend error still shows it verbatim", async () => {
+    // Fallthrough guarantee: an error the translator does not know keeps today's
+    // behaviour instead of degrading to a blank snackbar or a rendered i18n key.
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/test.toml";
+      if (cmd === "copy_file") throw "some unmapped backend failure";
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce("/home/user/config.toml");
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    const snack = await screen.findByRole("alert");
+    expect(snack).toHaveTextContent("some unmapped backend failure");
+  });
+
+  // ─── T-41(a): the save dialog itself refusing to open ─────────────────────────────
+  //
+  // `save()` can reject (plugin missing, OS refusing to show the picker). That rejection
+  // carries no code, so it used to slip past BOTH translators and reach the snackbar as
+  // the plugin's own English sentence on an otherwise Russian screen.
+  it("Download failure from the save DIALOG is localized, not shown as the plugin's English", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/test.toml";
+      return null;
+    });
+    vi.mocked(save).mockRejectedValueOnce(new Error("dialog plugin unavailable"));
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    const snack = await screen.findByRole("alert");
+    expect(snack).toHaveTextContent(i18n.t("pathErrors.saveDialogFailed"));
+    expect(snack).toHaveTextContent(/[А-Яа-я]/);
+    expect(snack).not.toHaveTextContent("dialog plugin unavailable");
+    expect(snack).not.toHaveTextContent("SAVE_DIALOG_FAILED");
+
+    // Same log/display divergence as the other families: the code AND the plugin's own
+    // wording stay in the diagnostic record, so a broken dialog is still greppable.
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "ERROR",
+      "user.config.download_failed err=SAVE_DIALOG_FAILED|dialog plugin unavailable",
+    );
+  });
+
+  // ─── T-41(b): a throw that carries no message at all ──────────────────────────────
+  //
+  // `formatError` turns a non-Error, non-string throw into the English literal
+  // "Unknown error". It has to STAY English in the log (greppable) and become Russian
+  // in the snackbar — this test pins both halves at once.
+  it("Download failure with no message at all is localized, while the log keeps the English fallback", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/test.toml";
+      if (cmd === "copy_file") throw { unexpected: true };
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce("/home/user/config.toml");
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    const snack = await screen.findByRole("alert");
+    expect(snack).toHaveTextContent(i18n.t("commonErrors.unknown"));
+    expect(snack).toHaveTextContent(/[А-Яа-я]/);
+    expect(snack).not.toHaveTextContent("Unknown error");
+
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "ERROR",
+      "user.config.download_failed err=Unknown error",
+    );
+  });
+
+  // ─── WR-01: the download's catch sees TWO code vocabularies ───────────────────────
+  //
+  // `fetch_server_config` is an SSH call and fails with SSH_* codes; only `copy_file` speaks
+  // the COPY_* family. Translating by the path vocabulary alone left the MOST LIKELY failure
+  // of this flow — the server-side export — rendering as raw English.
+  it("Download failure from the SSH export is localized too, not just the copy failure", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      // Tauri rejects with the Err string itself. `2` is the exporter's exit code.
+      if (cmd === "fetch_server_config") throw "SSH_EXPORT_FAILED|2";
+      return null;
+    });
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    const snack = await screen.findByRole("alert");
+    expect(snack).toHaveTextContent(i18n.t("sshErrors.exportFailed", { code: "2" }));
+    expect(snack).not.toHaveTextContent("SSH_EXPORT_FAILED");
+    // The log still keeps the RAW code — the same log/display divergence the copy family has.
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "ERROR",
+      "user.config.download_failed err=SSH_EXPORT_FAILED|2",
+    );
+    // Nothing was staged (the export never got that far), so there is nothing to clean up.
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_staged_temp_file",
+      expect.anything(),
+    );
+  });
+
+  // ─── WR-01 round 2: the four `fetch_server_config` exits that carried NO code ─────────
+  //
+  // SSH_EXPORT_FAILED (above) was only one of the ways the export refuses. Four OTHER exits
+  // returned a bare English sentence with no machine code at all, so neither translator
+  // could key on them and they reached this snackbar as raw English prose
+  // («TrustTunnel not found on server (/opt/trusttunnel/trusttunnel_endpoint)»). None of
+  // them is exotic: a partially-uninstalled endpoint, an install that never finished, or a
+  // user list that drifted from credentials.toml. Each now returns `CODE|detail`.
+  //
+  // Table-driven because the assertion is identical for all four — the interesting part is
+  // the code/copy pair, and a table makes a missing one visible at a glance.
+  const codedFetchFailures: ReadonlyArray<{
+    label: string;
+    raw: string;
+    key: string;
+    params?: Record<string, string>;
+  }> = [
+    {
+      label: "endpoint binary gone (partially uninstalled server)",
+      raw: "SSH_ENDPOINT_NOT_INSTALLED|/opt/trusttunnel/trusttunnel_endpoint",
+      key: "sshErrors.endpointNotInstalled",
+    },
+    {
+      label: "vpn.toml / hosts.toml missing (install never finished)",
+      raw: "SSH_ENDPOINT_CONFIG_MISSING",
+      key: "sshErrors.endpointConfigMissing",
+    },
+    {
+      // Both details are rendered: the user needs to know WHICH login was refused and
+      // WHICH ones exist, otherwise the message is unactionable.
+      label: "requested login is not in credentials.toml",
+      raw: "SSH_USER_NOT_IN_CREDENTIALS|carol|alice, bob",
+      key: "sshErrors.userNotInCredentials",
+      params: { user: "carol", users: "alice, bob" },
+    },
+    {
+      label: "login fails the backend whitelist",
+      raw: "SSH_CLIENT_NAME_INVALID|bad?name",
+      key: "sshErrors.clientNameInvalid",
+      params: { user: "bad?name" },
+    },
+  ];
+
+  for (const { label, raw, key, params } of codedFetchFailures) {
+    it(`Download failure — ${label} — is shown in Russian, not raw English`, async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd) => {
+        // Tauri rejects with the Err string itself.
+        if (cmd === "fetch_server_config") throw raw;
+        return null;
+      });
+
+      render(
+        <UserConfigModal
+          isOpen={true}
+          username="swift-fox"
+          sshParams={mockSshParams}
+          onClose={vi.fn()}
+          _deeplinkOverride="tt://test"
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: new RegExp(i18n.t("server.users.download_config"), "i"),
+        }),
+      );
+
+      // role="alert" is the error-variant snackbar; the expected copy is resolved through
+      // the real i18n instance (language forced to "ru" in beforeEach) so this can never
+      // drift from ru.json.
+      const snack = await screen.findByRole("alert");
+      expect(snack).toHaveTextContent(i18n.t(key, params ?? {}));
+      // …and the machine code never reaches the reader.
+      expect(snack).not.toHaveTextContent(raw.split("|")[0]);
+
+      // The diagnostic record keeps the RAW code — the same log/display divergence the
+      // COPY_* family has. A translated sentence there would destroy the ability to grep
+      // the log for the exact failing branch.
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "ERROR",
+        `user.config.download_failed err=${raw}`,
+      );
+    });
+  }
+
+  // ─── CR-01: the staged temp file carries the endpoint password ────────────────────
+  //
+  // `fetch_server_config(stageToTemp: true)` writes the export into %TEMP%. Nothing deleted
+  // it, so every download left a plaintext VPN credential on disk under a predictable name.
+  // The cleanup must run on ALL THREE exits, not only the happy one — hence three tests.
+
+  it("CR-01: the staged temp file is deleted after a SUCCESSFUL download", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/TrustTunnel_swift-fox.toml";
+      if (cmd === "copy_file") return undefined;
+      if (cmd === "delete_staged_temp_file") return undefined;
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce("/home/user/config.toml");
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("delete_staged_temp_file", {
+        // Exactly the path fetch_server_config staged — not the user's Save-As pick.
+        path: "/tmp/TrustTunnel_swift-fox.toml",
+      });
+    });
+  });
+
+  it("CR-01: the staged temp file is deleted when the user CANCELS Save-As", async () => {
+    // The credential is on disk from the moment fetch_server_config returns, so cancelling
+    // the dialog must not leave it behind — this exit never reaches copy_file at all.
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/TrustTunnel_swift-fox.toml";
+      if (cmd === "delete_staged_temp_file") return undefined;
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce(null);
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("delete_staged_temp_file", {
+        path: "/tmp/TrustTunnel_swift-fox.toml",
+      });
+    });
+    expect(invoke).not.toHaveBeenCalledWith("copy_file", expect.anything());
+  });
+
+  it("CR-01: the staged temp file is deleted when the COPY FAILS", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/TrustTunnel_swift-fox.toml";
+      if (cmd === "copy_file") throw "COPY_FAILED|Access is denied. (os error 5)";
+      if (cmd === "delete_staged_temp_file") return undefined;
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce("/home/user/config.toml");
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    // The user is told the save failed…
+    await screen.findByRole("alert");
+    // …and the credential is still removed from %TEMP% regardless.
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("delete_staged_temp_file", {
+        path: "/tmp/TrustTunnel_swift-fox.toml",
+      });
+    });
+  });
+
+  it("CR-01: a FAILED cleanup is logged but never shown as a download error", async () => {
+    // Best-effort by design: the user's file is already written, so a leftover temp file must
+    // not repaint a successful download red. It still has to be visible in diagnostics.
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/TrustTunnel_swift-fox.toml";
+      if (cmd === "copy_file") return undefined;
+      if (cmd === "delete_staged_temp_file") throw "TEMP_CLEANUP_FAILED|os error 32";
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce("/home/user/config.toml");
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "ERROR",
+        "user.config.staged_cleanup_failed err=TEMP_CLEANUP_FAILED|os error 32",
+      );
+    });
+    // The download itself is still recorded as a success…
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "STATE",
+      expect.stringContaining("user.config.downloaded user=swift-fox"),
+    );
+    // …and the user still sees the SUCCESS snackbar. Asserting its presence (role="status",
+    // SnackBar.tsx:214) keeps the absence check below from passing vacuously on a screen that
+    // simply never rendered a snackbar at all.
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      i18n.t("server.users.config_saved", { user: "swift-fox" }),
+    );
+    // No error snackbar — role="alert" is the error variant.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("shows skeleton loading state when deeplink fetch is in flight", () => {
     vi.mocked(invoke).mockReturnValueOnce(new Promise(() => {}));
     render(

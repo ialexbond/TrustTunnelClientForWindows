@@ -108,6 +108,8 @@ export function makeWizardState(overrides: Partial<WizardState> = {}): WizardSta
     showLogs: false,
     setShowLogs: vi.fn(),
     errorMessage: "",
+    // Save-As outcome rendered by DoneStep — separate from errorMessage (see useWizardState)
+    saveAsError: "",
     configPath: "",
     copied: false,
     logsEndRef: createRef<HTMLDivElement>(),

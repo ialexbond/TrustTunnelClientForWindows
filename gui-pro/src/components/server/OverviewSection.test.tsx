@@ -1473,7 +1473,7 @@ describe("OverviewSection", () => {
       const { rerender } = render(<OverviewSection state={state} />);
       await waitFor(() => { expect(portsSeen.length).toBeGreaterThanOrEqual(1); });
 
-      // SSH port changes (host unchanged) — mirrors a security_change_ssh_port flow.
+      // SSH port changes while the host stays the same — the poller must re-target the new port.
       const stateNewPort = makeState({ sshParams: { host: "10.0.0.1", port: 2222, user: "root", password: "pass", keyPath: undefined } });
       rerender(<OverviewSection state={stateNewPort} />);
 

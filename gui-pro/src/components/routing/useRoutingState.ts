@@ -20,9 +20,21 @@ export interface RuleEntry {
   label?: string;
 }
 
+/**
+ * One running program, as `list_running_processes` reports it.
+ *
+ * NAME ONLY, and deliberately so. The struct used to carry a `path` that the backend hard-coded to
+ * `None` on every code path — dead data that read as live, and the picker had already wired it into
+ * its search filter and rendered it as a second line under each row. A full image path is
+ * `C:\Users\<name>\…`, i.e. the Windows user name, which `processes.rs` and this file both go out of
+ * their way to keep off every channel including the log. The field was one populated value away
+ * from putting it on screen, so it is gone from both sides of the bridge rather than left waiting.
+ *
+ * If a path is ever genuinely needed for display, that is a deliberate decision with its own
+ * review — not an accident of a field that happened to be already wired.
+ */
 export interface ProcessInfo {
   name: string;
-  path?: string;
 }
 
 export interface RoutingRules {
@@ -120,6 +132,12 @@ export interface UseRoutingStateReturn {
   iplistGroups: IplistGroup[];
   processList: ProcessInfo[];
   processListLoading: boolean;
+  /**
+   * A translated, user-facing message when the process enumeration FAILED — empty otherwise.
+   * Deliberately never the raw backend error: a Win32 or path-bearing message would put the
+   * Windows user name on screen, and the list of programs someone routes is their own business.
+   */
+  processListError: string;
 
   // State
   loading: boolean;
@@ -199,6 +217,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
   const [groupFetching, setGroupFetching] = useState(false);
   const [processList, setProcessList] = useState<ProcessInfo[]>([]);
   const [processListLoading, setProcessListLoading] = useState(false);
+  const [processListError, setProcessListError] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -497,10 +516,27 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     [markDirty]
   );
 
+  /**
+   * The ONE duplicate rule for adding a program, whichever way the user got here (D-04/D-05).
+   *
+   * Two halves, and they pull in opposite directions:
+   *   • COMPARE FOLDED. `Chrome.exe` and `chrome.exe` are the same program, so the second one must
+   *     not appear as a twin. Case-insensitivity here is purely about not showing the user two rows
+   *     for one program — it changes nothing about routing.
+   *   • STORE VERBATIM. The name goes in exactly as it arrived. The tempting shortcut is to
+   *     lowercase before storing so the comparison becomes trivial; that would silently rewrite a
+   *     rule the user typed. Process-name semantics belong to the C++ core, which lowercases and
+   *     path-strips BOTH sides of its own comparison, so casing can never affect matching there —
+   *     normalizing on our side would buy nothing and cost the user their own spelling.
+   *
+   * The persisted rule file is written verbatim by the Rust writer, and its format is core-owned;
+   * nothing in this hook may start normalizing what it hands over.
+   */
   const addProcess = useCallback(
     (name: string) => {
       setRules((prev) => {
-        if (prev.processes.includes(name)) return prev;
+        const folded = name.toLowerCase();
+        if (prev.processes.some((existing) => existing.toLowerCase() === folded)) return prev;
         const updated = { ...prev, processes: [...prev.processes, name] };
         markDirty(updated);
         return updated;
@@ -520,17 +556,26 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     [markDirty]
   );
 
+  // A failure here used to stop at the console. The picker then rendered an empty list under the
+  // words "no processes found" — telling the user the exact opposite of what happened, since there
+  // were plenty of processes and we simply could not see them. Now the failure becomes state the
+  // picker can show. The console keeps the raw detail for a developer; the user gets a TRANSLATED
+  // message and never the raw error text, because a Win32 or path-bearing string would print their
+  // Windows user name on screen. The error is cleared before every attempt, so a stale one can
+  // never outlive a load that succeeded.
   const loadProcessList = useCallback(async () => {
     setProcessListLoading(true);
+    setProcessListError("");
     try {
       const list = await invoke<ProcessInfo[]>("list_running_processes");
       setProcessList(list);
     } catch (e) {
       console.error("Failed to list processes:", e);
+      setProcessListError(t("routing.processListError"));
     } finally {
       setProcessListLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // ─── Save ──────────────────────────────────────────
 
@@ -711,6 +756,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     iplistGroups,
     processList,
     processListLoading,
+    processListError,
     loading,
     saving,
     error,

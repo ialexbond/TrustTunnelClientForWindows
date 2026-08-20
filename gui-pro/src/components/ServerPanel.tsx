@@ -26,7 +26,6 @@ interface ServerPanelProps {
   onClearConfig: () => void;
   onDisconnect: () => void;
   onConfigExported: (configPath: string) => void;
-  onPortChanged?: (newPort: number) => void;
   onPanelReady?: () => void;  // called when panelDataLoaded becomes true
   /**
    * H-05 — fired right before a user-initiated retry re-runs `loadServerInfo`

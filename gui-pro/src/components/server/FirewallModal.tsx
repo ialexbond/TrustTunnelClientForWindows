@@ -15,17 +15,25 @@ import type { SecurityState } from "./useSecurityState";
  * `FirewallSection.tsx` into a Modal triggered from the Security tab summary
  * cards (4-card layout in `SecuritySection.tsx`).
  *
- * Three sections inside the Modal:
- *   1. Toggle UFW (top) — D-3.3. Calls `state.startFirewall` / `state.stopFirewall`.
- *      `stopFirewall` already wraps a ConfirmDialog inside `useSecurityState` (lines
- *      ~402-414), so we route the disable click through it directly. We DO NOT
- *      re-implement the confirm here — the hook owns the policy.
+ * Four parts inside the Modal (owner UAT 2026-08-20 swapped the two buttons — the
+ * arrangement below is a REQUIREMENT and is pinned by tests in FirewallModal.test.tsx,
+ * because every other test reaches its button by testid and would stay green if a
+ * refactor moved them back):
+ *   1. Status row (top) — state text on the left, the ADD-RULE trigger on the right.
+ *      The trigger appears only when UFW is installed AND active: the backend accepts
+ *      `ufw allow ...` while UFW is down, but parse_ufw_status skips such rules, so the
+ *      user would add one, never see it, and conclude the app is broken.
  *   2. Rules table — D-3.1. Read-only list of UFW rules with per-row Trash button
- *      that calls `state.deleteRule(n)` (also pre-wrapped in a ConfirmDialog inside
- *      the hook).
- *   3. Add Rule form — D-3.2. Reuses `state.newRule` + `state.setNewRule` so the
- *      validation surface (`addRule` action with port/source/comment validators) is
- *      identical to the legacy inline FirewallSection. No double validation here.
+ *      that calls `state.deleteRule(n)` (pre-wrapped in a ConfirmDialog inside the hook).
+ *   3. Add Rule form — D-3.2, opened by the trigger above and rendered under the table.
+ *      Reuses `state.newRule` + `state.setNewRule` so the validation surface (`addRule`
+ *      with port/source/comment validators) is identical to the legacy inline
+ *      FirewallSection. No double validation here.
+ *   4. Enable/disable toggle (bottom-right) — D-3.3. Calls `state.startFirewall` /
+ *      `state.stopFirewall`, sharing the corner with the install CTA so the action that
+ *      changes what the firewall DOES is always in the same place (unified with
+ *      MtProtoModal / Fail2banModal). Disable routes through the ConfirmDialog owned by
+ *      `useSecurityState`; we do NOT re-implement the confirm here.
  *
  * Modal lifecycle (T-03):
  *   - NEVER `if (!isOpen) return null` — Modal primitive owns 200ms exit anim.
@@ -195,11 +203,15 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
         <h2 id="firewall-modal-title" className="text-title">{t("server.security.firewall.modal_title")}</h2>
       </div>
 
-      {/* Section 1 — Toggle UFW (D-3.3) — P0-4 #O ФИКС:
-          Разделили статус (StatusIndicator pill) и действие (Button с явным
-          imperative label «Включить» / «Отключить» / «Установить»). Старый
-          single-button-показывал-status-как-label был anti-pattern: пользователь
-          видел кнопку «Активен» и не понимал что click отключит. */}
+      {/* Section 1 — UFW status row (D-3.3). The enable/disable toggle NO LONGER lives
+          here — owner UAT 2026-08-20 moved it to the bottom-right footer and gave this row
+          the add-rule trigger instead. The row is now status + the action you reach for
+          most often; the action that changes what the firewall DOES sits in the footer.
+
+          P0-4 #O ФИКС (still holds): статус (StatusIndicator pill) и действие разделены,
+          у кнопки явный imperative label «Включить» / «Отключить» / «Установить». Старый
+          single-button-показывал-status-как-label был anti-pattern: пользователь видел
+          кнопку «Активен» и не понимал что click отключит. */}
       {/* P UAT 2026-05-04 fix: dot indicator убран — он только для табы
           «Безопасность» (summary cards). В Modal'е достаточно текста.
           Status text окрашен в соответствующий semantic color. */}
@@ -230,21 +242,23 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
                 : t("server.security.summary.status_inactive")}
           </span>
         </div>
-        {/* When installed, the enable/disable action lives here in the status row.
-            The INSTALL action (not-installed) moved to the bottom footer (owner UAT) —
-            unified with MtProto / Fail2ban so the install CTA is always at the bottom. */}
-        {fwInstalled && (
+        {/* Owner UAT 2026-08-20: the status row carries the ADD-RULE trigger, not the
+            enable/disable toggle. Rationale — the row is about the rules the modal is
+            mostly used for, and the destructive/state-changing toggle belongs in the
+            bottom-right footer where the INSTALL CTA already sits (unified with
+            MtProto / Fail2ban). Add-rule shows only when there is a live ruleset to add
+            to (installed + active) and the inline form is closed, which is the same
+            condition the button carried when it lived at the bottom of Section 3. */}
+        {fwInstalled && fwActive && !state.showAddRule && (
           <Button
-            variant={fwActive ? "secondary" : "primary"}
+            variant="secondary"
             size="sm"
-            onClick={handleToggle}
-            loading={state.fwBusy}
+            onClick={() => state.setShowAddRule(true)}
             disabled={state.fwBusy}
-            data-testid="ufw-toggle-button"
+            icon={<Plus className="w-3.5 h-3.5" />}
+            data-testid="show-add-form-button"
           >
-            {fwActive
-              ? t("server.security.firewall.action_disable")
-              : t("server.security.firewall.action_enable")}
+            {t("server.security.firewall.add_rule_button")}
           </Button>
         )}
       </div>
@@ -372,28 +386,17 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
         </div>
       )}
 
-      {/* Section 3 — Add Rule (D-3.2). P UAT 2026-05-03 fix: показываем
-          «Add rule» button только когда UFW active. Backend `ufw allow ...`
-          accept'ит правило когда disabled тоже, но они НЕ отображаются в
-          rules table (parse_ufw_status пропускает при !active). User
-          добавляет → не видит → думает что не сработало. Решение: disable
-          add'а пока user не enable'нул UFW. */}
-      {fwInstalled && fwActive && (
-        <>
-          {!state.showAddRule ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => state.setShowAddRule(true)}
-              disabled={state.fwBusy}
-              className="mt-3"
-              icon={<Plus className="w-3.5 h-3.5" />}
-              data-testid="show-add-form-button"
-            >
-              {t("server.security.firewall.add_rule_button")}
-            </Button>
-          ) : (
-            <div
+      {/* Section 3 — Add Rule form (D-3.2). Its TRIGGER now lives in the status row
+          (owner UAT 2026-08-20); only the inline form stays here, directly under the
+          rules table it appends to.
+
+          P UAT 2026-05-03 fix: the add path is offered only when UFW is active. The
+          backend accepts `ufw allow ...` while disabled too, but such rules are NOT
+          shown in the table (parse_ufw_status skips them when inactive) — the user
+          would add, not see it, and conclude it failed. The same condition therefore
+          gates the trigger in the status row. */}
+      {fwInstalled && fwActive && state.showAddRule && (
+        <div
               className="mt-3 p-3 rounded-[var(--radius-md)] border space-y-2"
               style={{ borderColor: "var(--color-border)" }}
               data-testid="add-rule-form"
@@ -523,9 +526,29 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
                   {t("server.security.firewall.add_rule")}
                 </Button>
               </div>
-            </div>
-          )}
-        </>
+        </div>
+      )}
+
+      {/* Enable/disable toggle — modal-footer standard (owner UAT 2026-08-20): bottom-right,
+          the same corner the install CTA below already uses. It moved out of the status row
+          so the row can carry the add-rule trigger; putting the state-changing action in the
+          footer also matches MtProtoModal / Fail2banModal, where the action that changes what
+          the service DOES is always the bottom-right button rather than a header control. */}
+      {fwInstalled && (
+        <div className="flex justify-end gap-2 mt-4">
+          <Button
+            variant={fwActive ? "secondary" : "primary"}
+            size="sm"
+            onClick={handleToggle}
+            loading={state.fwBusy}
+            disabled={state.fwBusy}
+            data-testid="ufw-toggle-button"
+          >
+            {fwActive
+              ? t("server.security.firewall.action_disable")
+              : t("server.security.firewall.action_enable")}
+          </Button>
+        </div>
       )}
 
       {/* Install CTA — modal-footer standard (owner UAT): bottom-right, unified with

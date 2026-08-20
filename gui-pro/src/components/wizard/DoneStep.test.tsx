@@ -66,6 +66,45 @@ describe("DoneStep", () => {
     expect(screen.queryByText(i18n.t("wizard.done.add_config"))).not.toBeInTheDocument();
   });
 
+  // ── Save-As failure is VISIBLE on this screen (Phase 25 round 2) ──
+  // The failure used to be state-only: the handler wrote into `errorMessage`, which only
+  // ErrorStep and RecoveryStep render, so a user standing on Done saw nothing at all.
+  it("renders the Save-As failure in Russian, as an alert", () => {
+    const ru = i18n.t("pathErrors.sourceOutsideRoots");
+    const w = makeWizardState({
+      step: "done",
+      configPath: "/tmp/c.toml",
+      saveAsError: ru,
+    });
+    render(<DoneStep {...w} />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(ru);
+    // The copy is real Russian, not a rendered i18n key or a bare backend code.
+    expect(alert.textContent).not.toContain("pathErrors.");
+    expect(alert.textContent).not.toContain("COPY_SOURCE");
+  });
+
+  it("shows no alert when the Save-As has not failed", () => {
+    const w = makeWizardState({ step: "done", configPath: "/tmp/c.toml", saveAsError: "" });
+    render(<DoneStep {...w} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // The report must not disable the action it reports on — the user's next move is to
+  // press the same button again (e.g. after picking a different folder).
+  it("keeps the Save-As button usable after a failure", () => {
+    const handleSaveAs = vi.fn();
+    const w = makeWizardState({
+      step: "done",
+      configPath: "/tmp/c.toml",
+      saveAsError: i18n.t("pathErrors.copyFailed", { detail: "disk full" }),
+      handleSaveAs,
+    });
+    render(<DoneStep {...w} />);
+    fireEvent.click(screen.getByText(i18n.t("buttons.save_as")));
+    expect(handleSaveAs).toHaveBeenCalledOnce();
+  });
+
   // ── Save-as button flow ──
 
   it("save-as button is present only when configPath exists", () => {

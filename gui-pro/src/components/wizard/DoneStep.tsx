@@ -109,6 +109,21 @@ export function DoneStep(w: WizardState) {
               >
                 {t('buttons.save_as')}
               </Button>
+              {/* Phase 25 round 2: a failed «Сохранить как» used to produce NOTHING on this
+                  screen — the handler wrote into `errorMessage`, which only ErrorStep and
+                  RecoveryStep render, and a rejection from the save dialog escaped as an
+                  unhandled promise rejection. The message now has a home directly under the
+                  button that produced it. It is a REPORT, not a state change: the buttons stay
+                  enabled so the user can simply try again, and the success hero above is
+                  untouched — the install did succeed, only this one save did not. */}
+              {w.saveAsError && (
+                <p
+                  role="alert"
+                  className="text-body-sm text-left leading-relaxed text-[var(--color-danger-fg)]"
+                >
+                  {w.saveAsError}
+                </p>
+              )}
             </>
           ) : (
             // No exported config (edge) → «Перейти к панели управления» stays the primary

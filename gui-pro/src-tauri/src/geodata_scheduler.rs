@@ -831,10 +831,15 @@ mod tests {
     #[test]
     fn cadence_constants_are_coherent() {
         assert_eq!(GEODATA_UPDATE_INTERVAL_SECS, 24 * 60 * 60, "D-11: one check per day");
-        assert!(STARTUP_SETTLE_SECS > 0, "the first check must not race startup work");
-        assert!(
-            STARTUP_SETTLE_SECS < GEODATA_UPDATE_INTERVAL_SECS,
-            "the settle delay must be far shorter than the cadence"
-        );
+        // Const blocks: both operands are compile-time constants, so the ordering invariant is
+        // proved while the test binary is compiled and cannot be skipped by a filtered run.
+        // See connectivity.rs `offline_floor_is_snappy` for which command actually enforces it.
+        const { assert!(STARTUP_SETTLE_SECS > 0, "the first check must not race startup work") };
+        const {
+            assert!(
+                STARTUP_SETTLE_SECS < GEODATA_UPDATE_INTERVAL_SECS,
+                "the settle delay must be far shorter than the cadence"
+            )
+        };
     }
 }

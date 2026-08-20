@@ -20,6 +20,11 @@ on:
       - "gui-pro/tsconfig.json"
       - "gui-pro/vite.config.ts"
       - "gui-pro/eslint.config.js"
+      # The i18n coverage gate itself. Its rules decide which locale keys count
+      # as reachable, so a change to it can flip the job's verdict without any
+      # gui-pro/ file changing — it has to be able to trigger its own run.
+      - "scripts/i18n-dead-keys.cjs"
+      - "scripts/i18n-dead-keys.sh"
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
@@ -52,6 +57,13 @@ jobs:
 
       - name: Vitest
         run: npm run test
+
+      # i18n coverage (T-42). Vitest's i18n.test.ts only proves ru.json and
+      # en.json agree with each other — a key whose screen was deleted stays
+      # green there forever, which is how 372 of 1728 leaves accumulated before
+      # anything looked. This step is the thing that stops them coming back.
+      - name: i18n dead-key gate
+        run: npm run i18n:check
 
   # gui-light job removed 2026-05-23 — the Light edition is out of scope
   # until its dedicated redesign milestone. Last on-fork typecheck failed
