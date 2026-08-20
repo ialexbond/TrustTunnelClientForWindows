@@ -53,6 +53,12 @@ uuid = { version = "1", features = ["v4"] }
 # (a merely-transitive `url` via tauri/reqwest is not directly usable in Rust).
 url = "2"
 base64 = "0.22"
+# Phase 24 (D-01) — PNG-кодирование иконок программ в processes.rs. Обе версии (0.17.16 и 0.18.1)
+# УЖЕ разрешены в Cargo.lock транзитивно (через image/tauri), поэтому объявление прямой
+# зависимости — НУЛЕВАЯ новая загрузка, ровно та же логика, что для windows-sys ниже. Берём
+# `png`, а не самописный энкодер и не base64-BMP: BMP в data URL теряет альфа-канал в большинстве
+# браузеров, а иконка без альфы выглядит как чёрный квадрат на строке списка.
+png = "0.17"
 sha2 = "0.10"
 trusttunnel-settings = { path = "../../trusttunnel/settings" }
 winreg = "0.55"
@@ -92,8 +98,27 @@ rand = "0.8"
 # CancelMibChangeNotify2 + MIB_IPINTERFACE_ROW / MIB_NOTIFICATION_TYPE, которыми
 # connectivity.rs будит монитор мгновенно при смене состояния сетевого интерфейса
 # (выдернули кабель / выключили Wi-Fi), вместо ожидания ~10-15s пробинга (Plan 02-07).
+#
+# Phase 24 (D-01, извлечение иконок программ в processes.rs): снова добавлены ТОЛЬКО features к
+# УЖЕ закреплённому windows-sys 0.59 — новых crates и новых загрузок нет.
+#   Win32_UI_Shell                — SHGetFileInfoW / SHFILEINFOW / SHGFI_*
+#   Win32_UI_WindowsAndMessaging  — GetIconInfo / ICONINFO / DestroyIcon / HICON
+#   Win32_Graphics_Gdi            — GetDIBits / GetObjectW / DeleteObject / GetDC / ReleaseDC /
+#                                   BITMAP / BITMAPINFO / RGBQUAD
+#   Win32_System_Com              — CoInitializeEx / CoUninitialize (SHGetFileInfoW требует COM
+#                                   НА ВЫЗЫВАЮЩЕМ потоке)
+#   Win32_Storage_FileSystem      — не «наш» модуль, но обязателен: сигнатура SHGetFileInfoW в
+#                                   windows-sys закрыта под all(Win32_Storage_FileSystem,
+#                                   Win32_UI_WindowsAndMessaging), потому что аргумент
+#                                   dwFileAttributes имеет тип FILE_FLAGS_AND_ATTRIBUTES оттуда.
+#                                   Без него биндинг просто не существует и сборка падает.
+#                                   С фикса HI-01 (код-ревью ф.24) этот модуль нужен и «сам по
+#                                   себе»: GetDriveTypeW + DRIVE_FIXED/REMOVABLE/RAMDISK/CDROM
+#                                   отсекают букву диска, которая на деле является сетевым
+#                                   маппингом (иначе SHGetFileInfoW снова уходит в SMB).
+# OpenProcess / QueryFullProcessImageNameW живут в Win32_System_Threading, который уже включён.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 regex = "1"

@@ -517,8 +517,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   // ── Reboot polling ──
   // WR-01 fix: use a ref-based stable handle so the 1-shot effect (deps=[rebooting]) always
   // reads CURRENT sshParams/host/callbacks, not the stale values captured when rebooting=true.
-  // Pre-fix symptom: if user changed SSH port via handlePortChanged during reboot, poller
-  // kept calling check_server_installation / ping_endpoint on the OLD port until 2-min timeout.
+  // Pre-fix symptom: when the connection parameters were replaced while a reboot poll was
+  // in flight, the poller kept calling check_server_installation / ping_endpoint against the
+  // SUPERSEDED host/port until the 2-min timeout. The guard must hold for ANY cause of that
+  // replacement — it is a property of polling across a parameter change, not of one caller.
   const rebootRefs = useRef({
     sshParams,
     host: state.host,

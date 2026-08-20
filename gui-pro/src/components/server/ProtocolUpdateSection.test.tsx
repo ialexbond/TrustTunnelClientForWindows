@@ -1172,16 +1172,13 @@ describe("ProtocolUpdateSection", () => {
     expectNoSecretLogged(SSH_PARAMS.password);
   });
 
-  // ─── §K CTA-03: the version Install confirm uses an action-verb label
-  //          («Установить» / downgrade «Установить старую версию»), not the
-  //          generic «Подтвердить». This confirm lives in VersionSection (the
-  //          SSH version surface) — asserted in VersionSection.test.tsx. Here we
-  //          pin the i18n keys exist with the expected RU values so the locale
-  //          contract for CTA-03 is covered in this file's surface too. ───
-  it("§K CTA-03: the install-confirm action labels are defined (ru)", () => {
-    expect(i18n.t("server.version.confirm_install")).toBe("Установить");
-    expect(i18n.t("server.version.confirm_install_downgrade")).toBe(
-      "Установить старую версию",
-    );
-  });
+  // ─── §K CTA-03 (the install-confirm action-label assertion) was REMOVED in Phase 25.
+  //     It asserted `i18n.t("server.version.confirm_install")` against a literal — a
+  //     tautology over ru.json, not a rendered behaviour. The confirm dialog it described
+  //     no longer exists anywhere: `VersionSection` was deleted earlier in this phase, and
+  //     `ProtocolUpdateSection` — the live version-picker — installs straight from
+  //     `protocol-install-button` with NO confirm step. Keeping the assertion pinned two
+  //     locale leaves alive for a surface that cannot come back unchanged; when a confirm
+  //     is ever reintroduced it will need copy written for it, not this one resurrected.
+  //     The whole `server.version.*` block went with it (19 leaves in each locale file). ───
 });

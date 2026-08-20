@@ -28,7 +28,6 @@ function makeServerState(overrides: Partial<ServerState> = {}): ServerState {
   return {
     sshParams: mockSshParams,
     pushSuccess: vi.fn(),
-    onPortChanged: vi.fn(),
     certRaw: null,
     setCertRaw: vi.fn(),
     setActionResult: vi.fn(),

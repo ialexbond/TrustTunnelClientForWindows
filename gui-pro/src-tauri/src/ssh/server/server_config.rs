@@ -243,6 +243,32 @@ fn parse_allowed_sni_from_hosts_toml(content: &str) -> Vec<AllowedSniHost> {
         .collect()
 }
 
+/// Render a REJECTED client name so it is safe to put in a `CODE|detail` payload.
+///
+/// Phase 25 (WR-01): `SSH_CLIENT_NAME_INVALID|{name}` exists to tell the user WHICH name was
+/// refused — but the name is here precisely because it failed `validate_client_name`'s
+/// whitelist, so it may hold anything the frontend (or a hand-edited server
+/// `credentials.toml`) put there: the `|` that separates code from detail, newlines, or
+/// megabytes of text. Both would be at the sender's discretion in the user's snackbar.
+///
+/// Per the project's whitelist-not-blacklist rule this keeps only the characters the
+/// validator itself accepts and replaces every other one with `?`, then caps the result at
+/// the validator's own 64-character limit (a name longer than that is invalid by definition,
+/// so nothing legitimate is ever truncated). The `…` marks the cut so the user can tell a
+/// truncated echo from a short name.
+fn echo_safe_client_name(s: &str) -> String {
+    const MAX_ECHO: usize = 64; // == validate_client_name's own upper bound
+    let mut out: String = s
+        .chars()
+        .take(MAX_ECHO)
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '?' })
+        .collect();
+    if s.chars().nth(MAX_ECHO).is_some() {
+        out.push('…');
+    }
+    out
+}
+
 /// Connect to a server where TrustTunnel is already installed,
 /// export the client config via trusttunnel_endpoint, and save it locally.
 /// NOTE: This function uses direct connect (NOT pooled) — deploy-style flow with emit_step.
@@ -284,9 +310,25 @@ pub async fn fetch_server_config(
     ).await?;
 
     if !bin_check.contains("TT_EXISTS") {
-        let msg = &format!("TrustTunnel not found on server ({bin})", bin = ENDPOINT_BINARY);
-        emit_step(app, "check", "error", msg);
-        return Err(msg.into());
+        // Phase 25 (WR-01 / D-05): the STEP channel and the RETURN value deliberately carry
+        // different text — do not "simplify" them back into one `msg` binding.
+        //   • The step payload keeps the human sentence, because `DeployingStep.tsx:233`
+        //     renders `step.message` VERBATIM for an errored row. Feeding it a bare
+        //     `SSH_…|…` would put machine text on the wizard's progress list.
+        //   • The Err is what reaches the Users-tab download snackbar, which translates by
+        //     stable code (`translateSshError`). Before this it returned English prose with
+        //     no code at all, so neither translator could touch it and the user read
+        //     «TrustTunnel not found on server (/opt/…)» in English.
+        // The binary path stays in the code's detail slot so the activity log keeps
+        // everything the old message carried; the Russian copy does not render it (a
+        // non-technical reader cannot act on an absolute server path).
+        emit_step(
+            app,
+            "check",
+            "error",
+            &format!("TrustTunnel not found on server ({bin})", bin = ENDPOINT_BINARY),
+        );
+        return Err(format!("SSH_ENDPOINT_NOT_INSTALLED|{bin}", bin = ENDPOINT_BINARY));
     }
 
     // Check config files exist
@@ -296,9 +338,16 @@ pub async fn fetch_server_config(
     ).await?;
 
     if !cfg_check.contains("CFG_OK") {
-        let msg = "Configuration files not found on server (vpn.toml / hosts.toml)";
-        emit_step(app, "check", "error", msg);
-        return Err(msg.into());
+        // Same step/return split as the binary check above. No detail slot: the two file
+        // names are a compile-time constant of the endpoint layout, so the Russian sentence
+        // can name them itself instead of interpolating a value that never varies.
+        emit_step(
+            app,
+            "check",
+            "error",
+            "Configuration files not found on server (vpn.toml / hosts.toml)",
+        );
+        return Err("SSH_ENDPOINT_CONFIG_MISSING".into());
     }
 
     emit_step(app, "check", "ok", "TrustTunnel installed, config found");
@@ -353,7 +402,21 @@ pub async fn fetch_server_config(
     // the deploy-log event (emit_log is sanitized for `key = value` secrets, but a
     // username is not secret-shaped) before the validation gate. Validate first so
     // the auto-picked username is never logged unvalidated.
-    validate_client_name(&name)?;
+    //
+    // Phase 25 (WR-01 / D-05): wrap the shared validator's English prose in a stable code.
+    // `validate_client_name` itself is left ALONE on purpose. Its other two production
+    // callers are the deeplink exports (`export_config_deeplink` / `..._advanced`), whose
+    // failure lands in `UserConfigModal`'s `setDeeplinkError(formatError(e))` and is rendered
+    // RAW (`message={effectiveError}`, UserConfigModal.tsx:414). Changing the validator
+    // globally would swap an English sentence for a bare machine code on that surface —
+    // a regression, not a fix. So the code is minted at THIS call site only.
+    validate_client_name(&name).map_err(|e| {
+        // The log/step channel keeps the validator's own reason (which of the two rules
+        // was broken); the returned code carries the refused NAME, which is what the user
+        // has to change. Neither channel loses information the other had.
+        emit_step(app, "export", "error", &format!("Invalid client name: {e}"));
+        format!("SSH_CLIENT_NAME_INVALID|{}", echo_safe_client_name(&name))
+    })?;
 
     if client_name.trim().is_empty() && !available_users.is_empty() {
         emit_log(app, "info", &format!("Client name not specified, using: {name}"));
@@ -362,13 +425,22 @@ pub async fn fetch_server_config(
     if !available_users.is_empty() {
         emit_log(app, "info", &format!("Available users: {}", available_users.join(", ")));
         if !available_users.contains(&name.as_str()) {
-            let msg = format!(
-                "User '{}' not found in credentials.toml. Available: {}",
-                name,
-                available_users.join(", ")
+            let available = available_users.join(", ");
+            // Same step/return split. BOTH details survive into the code — which user was
+            // asked for and which ones the server actually has is the whole actionable
+            // content of this failure, so the Russian copy renders them (dropping them
+            // would leave the user with "not found" and nothing to do about it).
+            // `name` is whitelist-validated above; the available list is server-controlled
+            // and echoed the same way `SSH_EXPORT_FAILED|{code}|{users}` already echoes it
+            // (the frontend rejoins everything past the second `|`, so a username
+            // containing a separator cannot truncate the list — see translateSshError).
+            emit_step(
+                app,
+                "export",
+                "error",
+                &format!("User '{name}' not found in credentials.toml. Available: {available}"),
             );
-            emit_step(app, "export", "error", &msg);
-            return Err(msg);
+            return Err(format!("SSH_USER_NOT_IN_CREDENTIALS|{name}|{available}"));
         }
     }
 
@@ -2307,5 +2379,48 @@ active
             "fallback.example.com",
         );
         assert_eq!(sni2, "fallback.example.com");
+    }
+
+    // ── Phase 25 (WR-01): the echo carried by SSH_CLIENT_NAME_INVALID|{name} ────────────
+    //
+    // The detail slot exists so the snackbar can name the refused value, but the value is
+    // by definition one that failed the whitelist. These pin the two properties the
+    // `CODE|detail` wire format depends on: the separator can never appear in the echo,
+    // and the echo can never be unbounded.
+
+    #[test]
+    fn echo_safe_client_name_keeps_the_validator_whitelist_verbatim() {
+        // A name that only LOOKS invalid to the caller (e.g. it was too long, or the
+        // rejection came from a different rule) must round-trip unchanged — the echo is a
+        // diagnostic, not a second validator.
+        assert_eq!(echo_safe_client_name("client-01"), "client-01");
+        assert_eq!(echo_safe_client_name("my_device.2"), "my_device.2");
+    }
+
+    #[test]
+    fn echo_safe_client_name_neutralizes_the_code_separator() {
+        // The `|` is the ONLY character whose survival would corrupt the payload shape:
+        // translateSshError splits on it, so an echoed `|` would fabricate a third field.
+        // `_` is inside the validator's whitelist, so only the separator itself changes —
+        // the echo is not a sanitizer with its own opinion, it is the SAME whitelist.
+        assert_eq!(echo_safe_client_name("evil|SSH_AUTH_FAILED"), "evil?SSH_AUTH_FAILED");
+        // Newlines / spaces / shell metacharacters get the same treatment — one whitelist,
+        // no per-character special cases to keep in sync.
+        assert_eq!(echo_safe_client_name("a b\nc;d"), "a?b?c?d");
+        assert!(!echo_safe_client_name("пользователь|x").contains('|'));
+    }
+
+    #[test]
+    fn echo_safe_client_name_is_bounded_at_the_validators_own_limit() {
+        // 64 == validate_client_name's upper bound, so nothing VALID is ever truncated…
+        let exactly_64 = "a".repeat(64);
+        assert_eq!(echo_safe_client_name(&exactly_64), exactly_64);
+        assert!(!echo_safe_client_name(&exactly_64).ends_with('…'));
+
+        // …but a megabyte of text cannot become a megabyte of snackbar.
+        let huge = "a".repeat(10_000);
+        let echoed = echo_safe_client_name(&huge);
+        assert_eq!(echoed.chars().count(), 65, "64 kept chars + the truncation marker");
+        assert!(echoed.ends_with('…'), "the cut is visible to the reader");
     }
 }

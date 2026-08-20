@@ -7,6 +7,15 @@ import { cn } from "../lib/cn";
 export const buttonVariants = cva(
   [
     "inline-flex items-center justify-center",
+    // Every size below sets a FIXED height (h-8/h-9/h-10). A label that wraps to a
+    // second line therefore does not grow the button — it spills out of it, which is
+    // how the process picker's three-button footer rendered as mangled boxes once
+    // Phase 24 added the «Обзор» file action to a row sized for two. Wrapping inside a
+    // fixed-height box is never the right answer for a button: refusing to wrap turns
+    // a silent visual corruption into visible overflow, which is a layout bug someone
+    // can see and fix. `min-w-0` lets a button still shrink inside a flex row rather
+    // than forcing its parent to overflow.
+    "whitespace-nowrap min-w-0",
     "font-medium",
     "rounded-[var(--radius-md)]",
     "transition-all duration-[var(--transition-fast)] ease-[var(--ease-out)]",

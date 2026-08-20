@@ -351,29 +351,6 @@ ssh_pool_command!(security_firewall_set_logging, ssh::firewall_set_logging, leve
 ssh_pool_command!(security_firewall_tail_log, ssh::firewall_tail_log, lines: u32);
 ssh_pool_command!(security_firewall_set_http_port, ssh::firewall_set_http_port, open: bool);
 
-// ─── Manual pooled security commands (port reuse) ────────────────
-
-#[tauri::command]
-pub async fn security_change_ssh_port(
-    app: tauri::AppHandle,
-    pool: tauri::State<'_, crate::ssh::SshPool>,
-    host: String,
-    port: u16,
-    user: String,
-    password: String,
-    key_path: Option<String>,
-    key_data: Option<String>,
-    new_port: u16,
-) -> Result<serde_json::Value, String> {
-    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
-    let handle = pool.acquire(&params, Some(app.clone())).await?;
-    let actual_port = ssh::change_ssh_port(&app, &handle, new_port, port).await?;
-    // Drop stale handle and invalidate pool — the SSH daemon restarted on a new port
-    drop(handle);
-    pool.invalidate().await;
-    Ok(serde_json::json!({ "newPort": actual_port }))
-}
-
 // ─── MTProto proxy commands ──────────────────────────────────────
 
 // UAT 2026-05-20 — `mtproto_install` is cancellable. Replaces `ssh_command!` macro
@@ -1222,8 +1199,11 @@ pub async fn security_get_pubkey_for_recovery(host: String) -> Result<String, St
 
 /// security_disable_password_auth — sshd_config edit + restart с rollback.
 ///
-/// MANUAL command (NOT macro) because needs `pool.invalidate()` after success
-/// — sshd restart kills existing pool handles. Mirrors `security_change_ssh_port` pattern.
+/// MANUAL command (NOT macro) because needs `pool.invalidate()` after success — restarting sshd
+/// drops every session it was serving, so the pooled handles are dead and the next security action
+/// would fail on a stale one. The `ssh_pool_command!` macro has no post-call hook, hence the manual
+/// body. Any future command that restarts the SSH daemon needs the same treatment for the same
+/// reason — the rule follows the restart, not this particular command.
 #[tauri::command]
 pub async fn security_disable_password_auth(
     app: tauri::AppHandle,

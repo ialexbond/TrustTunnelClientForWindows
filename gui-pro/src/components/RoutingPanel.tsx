@@ -206,6 +206,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           processes={state.rules.processes}
           processList={state.processList}
           processListLoading={state.processListLoading}
+          processListError={state.processListError}
           onModeChange={state.setProcessMode}
           onAdd={state.addProcess}
           onRemove={state.removeProcess}

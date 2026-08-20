@@ -76,8 +76,6 @@ function buildState(overrides: {
     deleteRule: vi.fn().mockResolvedValue(undefined),
     addRule: vi.fn().mockResolvedValue(undefined),
     loadFwLog: vi.fn().mockResolvedValue(undefined),
-    changeSshPort: vi.fn().mockResolvedValue(undefined),
-    portBusy: false,
     applyFail2banPreset: vi.fn().mockResolvedValue(undefined),
     applyFail2banCustom: vi.fn().mockResolvedValue(undefined),
     certbotTimerStatus: null,
@@ -287,5 +285,48 @@ describe("FirewallModal", () => {
     render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
     const showAddBtn = await screen.findByTestId("show-add-form-button");
     expect(showAddBtn).toBeDisabled();
+  });
+
+  // ── Owner UAT 2026-08-20 — button placement is a REQUIREMENT, not incidental ──
+  //
+  // The owner asked for the two buttons to swap: «Добавить правило» into the status
+  // row, the enable/disable toggle into the bottom-right footer. Every test above
+  // reaches its button by data-testid, so a refactor could move them back and the
+  // whole suite would stay green — silently undoing the request. These three pin the
+  // arrangement itself. They assert CONTAINMENT (which region owns the button), not
+  // pixels or class names, so ordinary restyling does not make them brittle.
+
+  it("owner UAT: the add-rule trigger lives in the status row", async () => {
+    const state = buildState({ firewall: { installed: true, active: true, rules: [] } });
+    render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
+
+    const statusRow = await screen.findByTestId("ufw-toggle-row");
+    const addBtn = await screen.findByTestId("show-add-form-button");
+    expect(statusRow).toContainElement(addBtn);
+  });
+
+  it("owner UAT: the enable/disable toggle is NOT in the status row (it moved to the footer)", async () => {
+    const state = buildState({ firewall: { installed: true, active: true, rules: [] } });
+    render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
+
+    const statusRow = await screen.findByTestId("ufw-toggle-row");
+    const toggle = await screen.findByTestId("ufw-toggle-button");
+    // Still rendered — just not here any more.
+    expect(toggle).toBeInTheDocument();
+    expect(statusRow).not.toContainElement(toggle);
+  });
+
+  it("add-rule trigger is absent while the firewall is installed but INACTIVE", async () => {
+    // Not cosmetic: the backend accepts `ufw allow ...` while UFW is down, but
+    // parse_ufw_status skips those rules, so the user would add one, never see it in
+    // the table, and conclude the app is broken. The condition moved with the button
+    // when it was relocated — this proves it did not get left behind at the old site.
+    const state = buildState({ firewall: { installed: true, active: false, rules: [] } });
+    render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
+
+    expect(await screen.findByTestId("ufw-toggle-row")).toBeInTheDocument();
+    expect(screen.queryByTestId("show-add-form-button")).not.toBeInTheDocument();
+    // The footer toggle is still offered, so the user can turn UFW on.
+    expect(await screen.findByTestId("ufw-toggle-button")).toBeInTheDocument();
   });
 });

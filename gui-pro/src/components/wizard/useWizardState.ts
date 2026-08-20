@@ -1,15 +1,18 @@
 import { useState, useEffect, useRef, useCallback, useReducer } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { WizardStep, DeployStep, DeployLog, ServerInfo } from "./types";
 import { reducer, INITIAL_STATE, type Step } from "./machine";
 import { resolveResume, type ServerProbe } from "./resolveResume";
 import { loadSnapshot, saveSnapshot, migrateLegacySshPassword } from "./persist";
 import { formatError } from "../../shared/utils/formatError";
+import { translatePathError } from "../../shared/utils/translatePathError";
 import { sanitizeLogMessage } from "../../shared/utils/sanitizeLogMessage";
 import { generateUsername, generatePassword } from "../../shared/utils/credentialGenerator";
 import { buildConfigFileName } from "../../shared/utils/configFileName";
+import { saveFileDialog } from "../../shared/utils/saveFileDialog";
 import { readCachedCountryCode } from "../server/useServerGeoIp";
 import { DEFAULT_DEEPLINK, type DeeplinkFields } from "../server/useUserFormState";
 
@@ -323,6 +326,11 @@ interface UseWizardStateParams {
 }
 
 export function useWizardState({ onSetupComplete, onClose }: UseWizardStateParams) {
+  // Phase 25 (FLOW-01): the hook needs translation access for handleSaveAs, which is
+  // the second `copy_file` door and must render the Rust path-validator codes in
+  // Russian rather than raw. Legal at the top of a hook body, and the test setup
+  // initialises the shared i18n instance globally so renderHook() resolves it.
+  const { t } = useTranslation();
   // ── Wizard navigation — reducer-driven (WIZARD-01, D-11) ──
   // The step is the machine's state, seeded from the persisted snapshot. There
   // is NO compatibility shim mapping checking/uninstalling/fetching onto other
@@ -494,6 +502,16 @@ export function useWizardState({ onSetupComplete, onClose }: UseWizardStateParam
   });
   const [showLogs, setShowLogs] = useState(false);
   const [errorMessage, setErrorMessage] = useState(() => loadSaved("errorMessage", ""));
+  // ── Save-As failure, SESSION-ONLY and separate from `errorMessage` (Phase 25 round 2) ──
+  // `errorMessage` is rendered by ErrorStep and RecoveryStep ONLY — never by DoneStep. So the
+  // Save-As catch, which fires while the user is standing on Done, was writing into a field
+  // nothing on that screen displays: the failure was state-only and invisible. It cannot reuse
+  // `errorMessage` either, because that field legitimately holds a deploy-phase error at the
+  // moment Done renders; showing it here would flash an unrelated red line under a green
+  // success hero. Hence a dedicated field, set by `handleSaveAs` alone and cleared at the top
+  // of every attempt, so what DoneStep renders can only ever be THIS action's outcome. Not
+  // persisted (no saveField): a stale save error must not survive a wizard reopen.
+  const [saveAsError, setSaveAsError] = useState("");
   const [configPath, setConfigPath] = useState(() => loadSaved("configPath", ""));
   const [copied, setCopied] = useState(false);
   // ── Post-install reachability warning (C-09 / D-16, 06-15) — SESSION-ONLY ──
@@ -1664,22 +1682,49 @@ export function useWizardState({ onSetupComplete, onClose }: UseWizardStateParam
     // the save) — when it isn't readily available the prefix is omitted gracefully.
     // The internal AppData file (configPath) is unchanged — this is the dialog default
     // name only.
-    const country = readCachedCountryCode(host);
-    const fileName = buildConfigFileName(vpnUsername.trim(), country);
-    const dest = await save({
-      defaultPath: fileName,
-      filters: [{ name: "TOML Config", extensions: ["toml"] }],
-    });
-    if (dest) {
-      try {
+    setSaveAsError("");
+    try {
+      const country = readCachedCountryCode(host);
+      const fileName = buildConfigFileName(vpnUsername.trim(), country);
+      // Phase 25 round 2: `save()` used to sit OUTSIDE the try, and DoneStep wires this
+      // handler as a bare `onClick={w.handleSaveAs}` with no `.catch`. A rejection from the
+      // dialog plugin therefore left the function as an UNHANDLED promise rejection and the
+      // user saw nothing at all — no message, no snackbar, not even an English one. Inside
+      // the try it lands in the same catch as the copy and is displayed like any other
+      // failure of this action.
+      // T-41: `saveFileDialog`, not the plugin's bare `save()` — see the catch below.
+      const dest = await saveFileDialog({
+        defaultPath: fileName,
+        filters: [{ name: "TOML Config", extensions: ["toml"] }],
+      });
+      // dest === null → the user cancelled the dialog. Not a failure: nothing to report.
+      if (dest) {
         await invoke("copy_file", { source: configPath, destination: dest });
-      } catch (e) {
-        // WR-04: was a console-only swallow (invisible to the user). Capture the
-        // error into errorMessage state — consistent with every other catch in this
-        // hook — so it is no longer silently lost. (A dedicated save-as snackbar on
-        // the Done screen is a separate UX enhancement, tracked for follow-up.)
-        setErrorMessage(formatError(e));
       }
+    } catch (e) {
+      // WR-04: was a console-only swallow. Phase 25 round 1 captured it into state, but
+      // into `errorMessage`, which DoneStep does not render — so the failure was still
+      // invisible on the screen where it happens. It now lands in `saveAsError`, the field
+      // DoneStep displays (see the declaration for why this is not `errorMessage`).
+      //
+      // Phase 25 (FLOW-01 / D-05): this is the SECOND of the two `copy_file` doors (the
+      // other is UserConfigModal's download). The backend returns stable codes from the Rust
+      // path validators, so this catch is TRANSLATED rather than shown raw — otherwise the
+      // Done screen would render a bare machine code. `translatePathError` falls through to
+      // the raw string for anything it does not recognise, so nothing becomes less readable.
+      //
+      // WR-01 asked whether this door needs the same translateSshError chaining the Users-tab
+      // download got. It does NOT: the download wraps `fetch_server_config`, so SSH codes and
+      // path codes land in one catch there, whereas this try wraps only the dialog and the
+      // copy — the config was exported earlier in the wizard, by a different call with its own
+      // error handling, and no SSH-backed await is inside this try. Add the SSH translator if
+      // one is ever moved in.
+      //
+      // The one non-COPY_* thing that CAN arrive here is a rejection from the save dialog
+      // itself. T-41: it used to render verbatim, i.e. the plugin's English sentence on a
+      // Russian screen. `saveFileDialog` now stamps SAVE_DIALOG_FAILED on it, which
+      // `translatePathError` owns a case for, so this line covers it with no extra branch.
+      setSaveAsError(translatePathError(e, t));
     }
   };
 
@@ -1823,6 +1868,8 @@ export function useWizardState({ onSetupComplete, onClose }: UseWizardStateParam
     finalizing,
     showLogs, setShowLogs,
     errorMessage,
+    // Save-As outcome for DoneStep — deliberately NOT folded into `errorMessage`.
+    saveAsError,
     configPath,
     copied,
     logsEndRef,

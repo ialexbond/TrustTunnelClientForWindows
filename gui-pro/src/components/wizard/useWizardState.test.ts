@@ -3,6 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
+import i18n from "../../shared/i18n";
 import { useWizardState } from "./useWizardState";
 import { useHostKeyVerification } from "../../shared/hooks/useHostKeyVerification";
 import type { ServerInfo } from "./types";
@@ -109,6 +110,136 @@ describe("useWizardState", () => {
       expect(mockSave).toHaveBeenCalledWith(
         expect.objectContaining({ defaultPath: "DE_TrustTunnel_keen-mole17.toml" }),
       );
+    });
+
+    // Phase 25 (FLOW-01 / D-05): this is the SECOND copy_file door. Plan 25-01 turned
+    // the backend prose into machine codes, so leaving this catch on the raw string
+    // would newly regress the wizard Done screen from an English sentence to a bare
+    // code. It gets the same translator as the Users-tab download.
+    it("shows the localized path error when the Save-As copy is refused", async () => {
+      mockSave.mockResolvedValueOnce("C:/Users/tester/config.toml");
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "copy_file") throw "COPY_SOURCE_OUTSIDE_ROOTS";
+        return null;
+      });
+      const { result } = renderWizard();
+      act(() => {
+        result.current.setHost("10.0.0.1");
+        result.current.setVpnUsername("keen-mole17");
+      });
+      await act(async () => {
+        await result.current.handleSaveAs();
+      });
+      // Resolved through the real i18n instance (test setup initialises it globally)
+      // so the assertion cannot drift from ru.json.
+      //
+      // Phase 25 round 2: asserted on `saveAsError`, not `errorMessage`. DoneStep renders
+      // only the former; the latter belongs to ErrorStep/RecoveryStep, so a test pinned to
+      // it passed while the user on the Done screen saw nothing.
+      expect(result.current.saveAsError).toBe(i18n.t("pathErrors.sourceOutsideRoots"));
+      expect(result.current.saveAsError).not.toContain("COPY_SOURCE_OUTSIDE_ROOTS");
+    });
+
+    it("still surfaces an UNMAPPED Save-As failure verbatim", async () => {
+      mockSave.mockResolvedValueOnce("C:/Users/tester/config.toml");
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "copy_file") throw "some unmapped backend failure";
+        return null;
+      });
+      const { result } = renderWizard();
+      act(() => {
+        result.current.setHost("10.0.0.1");
+        result.current.setVpnUsername("keen-mole17");
+      });
+      await act(async () => {
+        await result.current.handleSaveAs();
+      });
+      expect(result.current.saveAsError).toBe("some unmapped backend failure");
+    });
+
+    // Phase 25 round 2: `save()` sat OUTSIDE the try and DoneStep wires the handler as a
+    // bare onClick with no `.catch`, so a dialog rejection escaped as an unhandled promise
+    // rejection — the user got NO message in any language. The whole point of this test is
+    // that `handleSaveAs()` RESOLVES (an unhandled rejection would fail the await below)
+    // and leaves something on screen behind it.
+    it("surfaces a save-DIALOG rejection instead of letting it escape unhandled", async () => {
+      // jsdom reports navigator.language = en-US, so i18n boots in English here.
+      // Switch to RU explicitly: the point of this test is that a Russian user reads
+      // Russian, and a language-agnostic `i18n.t(...)` comparison alone would pass
+      // even if the sentence were English.
+      await act(async () => {
+        await i18n.changeLanguage("ru");
+      });
+      mockSave.mockRejectedValueOnce(new Error("dialog plugin unavailable"));
+      const { result } = renderWizard();
+      act(() => {
+        result.current.setHost("10.0.0.1");
+        result.current.setVpnUsername("keen-mole17");
+      });
+      await act(async () => {
+        await expect(result.current.handleSaveAs()).resolves.toBeUndefined();
+      });
+      // T-41: this assertion used to read `.toBe("dialog plugin unavailable")` — it
+      // pinned the English passthrough, i.e. it encoded the bug. `saveFileDialog` now
+      // stamps SAVE_DIALOG_FAILED on the rejection so `translatePathError` owns it.
+      expect(result.current.saveAsError).toBe(i18n.t("pathErrors.saveDialogFailed"));
+      expect(result.current.saveAsError).toMatch(/[А-Яа-я]/);
+      expect(result.current.saveAsError).not.toContain("dialog plugin unavailable");
+      expect(result.current.saveAsError).not.toContain("SAVE_DIALOG_FAILED");
+    });
+
+    // T-41(b): `formatError` turns a thrown non-Error/non-string into the English
+    // literal "Unknown error", which reached the Done screen untranslated.
+    it("localizes a copy failure that throws a value carrying no message at all", async () => {
+      await act(async () => {
+        await i18n.changeLanguage("ru");
+      });
+      mockSave.mockResolvedValueOnce("C:/Users/tester/config.toml");
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "copy_file") throw { unexpected: true };
+        return null;
+      });
+      const { result } = renderWizard();
+      act(() => {
+        result.current.setHost("10.0.0.1");
+        result.current.setVpnUsername("keen-mole17");
+      });
+      await act(async () => {
+        await result.current.handleSaveAs();
+      });
+      expect(result.current.saveAsError).toBe(i18n.t("commonErrors.unknown"));
+      expect(result.current.saveAsError).toMatch(/[А-Яа-я]/);
+      expect(result.current.saveAsError).not.toContain("Unknown error");
+    });
+
+    // A cancelled dialog is not a failure — it must leave the screen clean.
+    it("leaves no error behind when the user cancels the save dialog", async () => {
+      mockSave.mockResolvedValueOnce(null);
+      const { result } = renderWizard();
+      act(() => {
+        result.current.setHost("10.0.0.1");
+        result.current.setVpnUsername("keen-mole17");
+      });
+      await act(async () => {
+        await result.current.handleSaveAs();
+      });
+      expect(result.current.saveAsError).toBe("");
+    });
+
+    // The deploy-phase error field must not be repurposed: DoneStep renders `saveAsError`
+    // only, and a Save-As failure must never overwrite a deploy error the ErrorStep owns.
+    it("reports through saveAsError and leaves errorMessage untouched", async () => {
+      mockSave.mockResolvedValueOnce("C:/Users/tester/config.toml");
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "copy_file") throw "COPY_SOURCE_OUTSIDE_ROOTS";
+        return null;
+      });
+      const { result } = renderWizard();
+      await act(async () => {
+        await result.current.handleSaveAs();
+      });
+      expect(result.current.errorMessage).toBe("");
+      expect(result.current.saveAsError).not.toBe("");
     });
   });
 

@@ -7,7 +7,13 @@ use crate::ssh::portable_data_dir;
 // WR-03: path-traversal validation now lives in one shared place (commands::paths) instead of
 // three byte-similar copies. Re-export under the local name so the rest of this module reads
 // unchanged.
-use crate::commands::paths::validate_app_path;
+// FLOW-01: `copy_file`'s SOURCE has its own validator with its own (wider by exactly one
+// root, narrower than the destination's) allow-list — see `paths::validate_copy_source`.
+// `validate_app_path` still guards the data-dir-only commands below it.
+use crate::commands::paths::{validate_app_path, validate_copy_source, validate_temp_staged_path};
+// T-44: the startup sweep learns the staged-config filename SHAPE by asking the one function that
+// produces those names, instead of restating the pattern here where it could drift.
+use crate::ssh::deploy::client_config_filename;
 
 // ─── Config file watcher state ───────────────────────────────
 //
@@ -100,6 +106,13 @@ fn validate_save_destination(destination: &str) -> Result<(), String> {
     // Reject when the resolved parent IS a reparse point (junction/symlink). `canonicalize`
     // already followed it, but rejecting outright avoids relying on prefix math against a
     // target that may legitimately sit outside every allowed root.
+    //
+    // IN-04: the `if let Ok(...)` skips the check on a metadata error (permission denied, path
+    // too long) instead of rejecting, and that is deliberate — confinement here is decided by
+    // the canonicalize above (which already failed the call if the parent would not resolve)
+    // plus the canonical prefix test below, both of which run regardless. A metadata failure
+    // can only cost the clearer error message, never the boundary. Mirrors the same decision
+    // in `paths.rs::validate_copy_source`, where the reasoning is written out in full.
     if let Ok(meta) = std::fs::symlink_metadata(parent) {
         if meta.file_type().is_symlink() {
             return Err("Access denied: destination resolves through a reparse point".into());
@@ -155,19 +168,333 @@ pub async fn write_string_to_path(
 
 /// Copy a file to a user-chosen destination (for "Save As" functionality).
 ///
-/// The source MUST be inside the app data directory — prevents the frontend
-/// from tricking the backend into reading arbitrary files.
+/// The source MUST resolve inside one of exactly TWO roots — the app data directory
+/// and the OS temp dir (`paths::validate_copy_source`, FLOW-01/D-02). The temp root is
+/// not a loosening for convenience: `ssh/server/server_config.rs:524` deliberately
+/// stages the Users-tab download there (Phase-19 UAT fix) so the folder-as-truth
+/// adoption scan never turns a downloaded config into a phantom «Подключения» card.
+/// Before Phase 25 the source check was `validate_app_path` (data dir only), so the app
+/// rejected the very file it had just written and «Скачать конфиг» saved nothing.
+///
+/// `%USERPROFILE%` is deliberately absent from that source list even though the
+/// DESTINATION validator carries it — see `validate_copy_source` for why the two
+/// allow-lists must stay asymmetric.
 ///
 /// The destination is NOT validated against the app data dir, because the
 /// frontend only reaches this command via `tauri-plugin-dialog::save()` which
-/// is the OS file picker — the user explicitly chose the path. Validating
+/// is the OS file picker — the user explicitly chose the path. Validating the
 /// destination here would break every Save-As flow (Desktop, Downloads, etc.).
+///
+/// CR-02 — that is the ONLY justification, and it must not be propped up with a second one
+/// that is false. This comment used to add "unlike `write_string_to_path` the CONTENT is not
+/// attacker-chosen: it can only ever be a file that already sits inside the two allowed source
+/// roots". It can not. `write_string_to_path` is registered right beside this command
+/// (`lib.rs:715-716`) and its own allow-list (`validate_save_destination`, above) contains
+/// BOTH roots this command accepts as sources — the app data dir and `std::env::temp_dir()`.
+/// So two invokes chain into an arbitrary-content write to any path the app can reach:
+/// `write_string_to_path(<any bytes>, "%TEMP%\\x")` then `copy_file("%TEMP%\\x", <anywhere>)`.
+///
+/// The honest disposition: this capability pre-dates Phase 25 — the same chain already worked
+/// through `portable_data_dir()` alone before the temp root was added as a source — and it is
+/// not a meaningful escalation, because reaching it at all requires executing script in the
+/// webview, at which point the attacker already holds `invoke` over the whole command surface
+/// (a strictly larger primitive than this two-step write). It is therefore an ACCEPTED
+/// residual, recorded as such in `memory/security-posture.md`. What it is not is evidence that
+/// the destination needs no guard — do not cite it that way when revisiting this decision.
 #[tauri::command]
 pub fn copy_file(source: String, destination: String) -> Result<(), String> {
-    validate_app_path(&source)?;
-    std::fs::copy(&source, &destination)
-        .map_err(|e| format!("Failed to copy file: {e}"))?;
+    // Copy from the CANONICAL buffer the guard decided against, never from the raw
+    // `source` string — otherwise validate and copy could resolve the same string to two
+    // different targets (the F16/TOCTOU fix already applied to `validate_app_path_canonical`).
+    let canonical_source = validate_copy_source(&source)?;
+    std::fs::copy(&canonical_source, &destination)
+        .map_err(|e| format!("COPY_FAILED|{e}"))?;
     Ok(())
+}
+
+/// CR-01: remove the config the Users-tab download staged in the OS temp dir.
+///
+/// **What this closes.** `fetch_server_config(stageToTemp: true)` writes the re-exported client
+/// config into `std::env::temp_dir()` (a deliberate Phase-19 fix — see `copy_file` above), and
+/// that file carries the endpoint PASSWORD, as `ssh/server/server_config.rs` states at the write
+/// itself. Nothing deleted it. Windows does not clear `%TEMP%` on reboot, so every «Скачать
+/// конфиг» permanently deposited a plaintext VPN credential under a predictable name
+/// (`[<CC>_]TrustTunnel_<login>.toml`) in a directory every process running as that user can
+/// read. The frontend now calls this down all three exits of the download — copy succeeded,
+/// Save-As cancelled, copy failed — from a `finally`.
+///
+/// **Why a separate command instead of making `copy_file` delete its source.** `copy_file` has a
+/// second caller: the wizard's Save-As (`components/wizard/useWizardState.ts`), whose source is
+/// the app's LIVE config in the data dir. A self-deleting copy would destroy it. Keeping the
+/// deletion in its own explicitly named command also lets it carry a strictly narrower
+/// allow-list than the copy source — `validate_temp_staged_path` accepts the temp root ONLY and
+/// refuses the app data dir ahead of everything else, so this command cannot be aimed at the
+/// app's own files no matter what path the webview passes.
+///
+/// Same F16/TOCTOU shape as `copy_file`: the delete runs against the CANONICAL buffer the guard
+/// decided on, never against the raw string, so validate and delete cannot resolve to two
+/// different targets.
+///
+/// Errors are returned for the activity log, not for a snackbar — the caller treats a failed
+/// cleanup as best-effort, because a leftover temp file must never turn a successful save into a
+/// red error for the user. Hence no i18n entries for these codes.
+#[tauri::command]
+pub fn delete_staged_temp_file(path: String) -> Result<(), String> {
+    let canonical = validate_temp_staged_path(&path)?;
+    std::fs::remove_file(&canonical).map_err(|e| format!("TEMP_CLEANUP_FAILED|{e}"))
+}
+
+// ─── Startup sweep for configs staged by PRE-CR-01 builds (T-44) ──────────────────────
+//
+// `delete_staged_temp_file` above only helps from the moment it shipped. Every «Скачать конфиг»
+// performed by an EARLIER build left its staged export in `std::env::temp_dir()` — and that file
+// carries the endpoint password in plaintext (`ssh/server/server_config.rs`, PP-1). Those files
+// self-heal only if the user downloads a config for the SAME login again (the new write overwrites
+// them, and the new code then deletes it); anything under a different login or country prefix sits
+// there until the profile is wiped. This sweep is the one-shot that clears the accumulated
+// backlog.
+//
+// It is a DELETION primitive running unattended at startup, with no user watching and nothing to
+// confirm it, so it is built to refuse rather than to succeed. Three independent narrowings, each
+// of which alone would already stop it from touching a stranger's file:
+//   * it enumerates `std::env::temp_dir()` and nothing else — it never walks, never recurses;
+//   * it only considers names the app's OWN producer emits (`StagedNameShape`, learned from
+//     `client_config_filename` rather than guessed);
+//   * every candidate still goes through `validate_temp_staged_path` — the same guard the
+//     interactive command uses, which refuses the app data dir unconditionally, refuses anything
+//     that canonicalizes outside the temp root, refuses reparse points, and refuses non-files.
+// On top of that an age gate keeps it off files a concurrently-running instance may have staged
+// (see `STAGED_CONFIG_STALE_AFTER`).
+
+/// The filename shape `deploy::client_config_filename` produces, learned by ASKING that function
+/// instead of restating its rules here.
+///
+/// Hardcoding `TrustTunnel_*.toml` would silently drift the day the producer is renamed, and both
+/// directions of that drift are bad: too NARROW and the sweep quietly stops cleaning while the
+/// credential leak returns unnoticed; too WIDE and an unattended deletion starts eating files that
+/// were never ours. Probing the producer keeps the two in step — rename the brand, change the
+/// extension, or drop the country prefix, and this follows without an edit here.
+struct StagedNameShape {
+    /// Everything the producer puts BEFORE the login, e.g. `TrustTunnel_`.
+    brand_prefix: String,
+    /// Everything it puts AFTER, e.g. `.toml`.
+    suffix: String,
+    /// The optional leading country segment as the producer renders it for the probe country —
+    /// e.g. `ZZ_`. Empty when the producer emits no country prefix at all.
+    country_template: String,
+    /// What the producer returns for a degenerate (empty) login, e.g. `trusttunnel_client.toml`.
+    /// It carries neither brand nor country, so it is matched literally.
+    fallback: String,
+}
+
+/// Probe login for the shape derivation. It must survive `client_config_filename` VERBATIM — no
+/// whitespace (the producer trims), not all-dots (that is its degenerate branch), and long enough
+/// that it cannot appear by accident inside the producer's own literals.
+const NAME_PROBE_LOGIN: &str = "t44shapeprobe";
+/// Probe country. Exactly two ASCII letters is the only shape the producer prefixes at all.
+const NAME_PROBE_COUNTRY: &str = "ZZ";
+
+impl StagedNameShape {
+    /// Returns `None` when the producer's output no longer decomposes into a recognisable
+    /// prefix/login/suffix. That is a FAIL-CLOSED result: the caller then sweeps nothing at all.
+    /// For a deletion primitive "I no longer understand the naming, so I do nothing" is the only
+    /// safe answer — the alternative (fall back to some remembered pattern) is exactly the silent
+    /// drift this whole struct exists to prevent.
+    fn learn() -> Option<Self> {
+        let plain = client_config_filename(NAME_PROBE_LOGIN, None);
+        let (brand_prefix, suffix) = plain.split_once(NAME_PROBE_LOGIN)?;
+
+        // An empty brand prefix or an empty suffix would turn `matches` into "every file in
+        // %TEMP%" / "every file with this extension". Refuse to operate rather than widen.
+        if brand_prefix.is_empty() || suffix.is_empty() {
+            return None;
+        }
+
+        // The country form must be the plain form with a pure PREFIX bolted on; if the producer
+        // ever starts rewriting the rest of the name for a country, this derivation no longer
+        // describes it and we stop.
+        let with_country = client_config_filename(NAME_PROBE_LOGIN, Some(NAME_PROBE_COUNTRY));
+        let country_template = with_country.strip_suffix(&plain)?.to_string();
+
+        Some(Self {
+            brand_prefix: brand_prefix.to_string(),
+            suffix: suffix.to_string(),
+            country_template,
+            fallback: client_config_filename("", None),
+        })
+    }
+
+    /// Does `file_name` look like something the producer wrote?
+    fn matches(&self, file_name: &str) -> bool {
+        file_name == self.fallback
+            || self.matches_branded(file_name)
+            || self
+                .strip_country_segment(file_name)
+                .is_some_and(|rest| self.matches_branded(rest))
+    }
+
+    /// `<brand><non-empty login><suffix>`. The length test is what keeps `TrustTunnel_.toml`
+    /// (no login at all — a name the producer cannot emit) out.
+    fn matches_branded(&self, name: &str) -> bool {
+        name.len() > self.brand_prefix.len() + self.suffix.len()
+            && name.starts_with(&self.brand_prefix)
+            && name.ends_with(&self.suffix)
+    }
+
+    /// Peel off a leading country segment when one is present, generically: positions where the
+    /// template holds a letter are the ones the probe country supplied, so they accept any ASCII
+    /// letter; every other position (the separator) must match the template literally. Derived the
+    /// same way as the rest of the shape, so a change to the separator needs no edit here.
+    fn strip_country_segment<'a>(&self, name: &'a str) -> Option<&'a str> {
+        if self.country_template.is_empty() {
+            return None;
+        }
+        let head = name.get(..self.country_template.len())?;
+        let rest = name.get(self.country_template.len()..)?;
+        // ASCII-only guard: without it a multi-byte head would zip short against the template and
+        // "match" on a prefix of the comparison.
+        if !head.is_ascii() {
+            return None;
+        }
+        let fits = head
+            .chars()
+            .zip(self.country_template.chars())
+            .all(|(c, t)| if t.is_ascii_alphabetic() { c.is_ascii_alphabetic() } else { c == t });
+        fits.then_some(rest)
+    }
+}
+
+/// How long a staged file must have sat untouched before the sweep will remove it.
+///
+/// **Why an age gate at all: a SECOND INSTANCE.** Nothing stops the user from having another copy
+/// of the app running, and that instance may have staged its export seconds ago and be sitting on
+/// an open Save-As dialog right now. Deleting that file would break its copy — the sweep would
+/// have caused the very failure it exists to prevent. There is no cross-process lock over `%TEMP%`,
+/// and inventing one (lockfile, named mutex) for a best-effort cleanup buys a new class of bug
+/// worse than the leak, so AGE is the mechanism: a file young enough to belong to a live download
+/// is left alone.
+///
+/// **Why 24 hours and not minutes.** The Save-As dialog has no timeout — a user can open it and
+/// walk away — so any threshold short enough to feel "tidy" is a threshold that can delete a live
+/// download. And a generous one costs nothing here, because the files this sweep exists for were
+/// written by builds shipped BEFORE the phase-25 fix: they are days or months old by the time this
+/// code first runs. The single case a day's grace does not clean on the first start — a download
+/// made minutes ago with the previous build, then upgraded immediately — is picked up by the next
+/// start after that. Slow and certain is the right trade for an unattended delete.
+const STAGED_CONFIG_STALE_AFTER: std::time::Duration =
+    std::time::Duration::from_secs(24 * 60 * 60);
+
+/// What happened to one candidate. Named outcomes rather than a bool so the log can say WHY a file
+/// was left behind, and so the tests can assert the specific refusal instead of "it still exists"
+/// (which any bug that skipped the file entirely would also satisfy).
+#[derive(Debug, PartialEq, Eq)]
+enum StagedSweepOutcome {
+    Removed,
+    /// Young enough that a concurrently-running instance may still be using it.
+    TooYoung,
+    /// `validate_temp_staged_path` said no. Carries its `TEMP_CLEANUP_*` code.
+    Refused(String),
+    /// The guard allowed it but the delete itself failed (locked file, permissions).
+    Failed(String),
+}
+
+/// Decide and act on ONE candidate. `min_age` is a parameter rather than a constant read so the
+/// tests can exercise the guard chain without backdating every fixture.
+fn sweep_one_staged_config(
+    path: &std::path::Path,
+    min_age: std::time::Duration,
+) -> StagedSweepOutcome {
+    // `symlink_metadata` deliberately does NOT follow a link — the age of a link's target must not
+    // decide the fate of the link. Any failure to read the timestamp, and a timestamp in the FUTURE
+    // (clock skew, a file copied from another machine, `elapsed()` returning Err), count as "too
+    // young": the unknown case must fall on the do-nothing side.
+    let old_enough = std::fs::symlink_metadata(path)
+        .and_then(|meta| meta.modified())
+        .map(|mtime| mtime.elapsed().is_ok_and(|age| age >= min_age))
+        .unwrap_or(false);
+    if !old_enough {
+        return StagedSweepOutcome::TooYoung;
+    }
+
+    // The same guard the interactive command runs, for the same reasons — this is the step that
+    // makes the name match advisory rather than load-bearing. Deleting the CANONICAL buffer it
+    // returns (not `path`) keeps the check-then-use window closed here too.
+    match validate_temp_staged_path(&path.to_string_lossy()) {
+        Err(code) => StagedSweepOutcome::Refused(code),
+        Ok(canonical) => match std::fs::remove_file(&canonical) {
+            Ok(()) => StagedSweepOutcome::Removed,
+            Err(e) => StagedSweepOutcome::Failed(e.to_string()),
+        },
+    }
+}
+
+/// Sweep `std::env::temp_dir()` once for staged configs left by pre-CR-01 builds (T-44).
+///
+/// Best-effort by construction: every failure path is a `continue` or an early return, nothing is
+/// propagated, and nothing reaches the user. The log is the only report.
+///
+/// D-29: neither the file NAMES nor the paths are logged — a staged name embeds the VPN login. Only
+/// counts and `TEMP_CLEANUP_*` codes go out, which is the same discipline the interactive cleanup
+/// follows.
+pub fn sweep_stale_staged_configs() {
+    let Some(shape) = StagedNameShape::learn() else {
+        crate::logging::log_app(
+            "WARN",
+            "[temp-sweep] staged-config naming no longer decomposes — sweep disabled (fail-closed)",
+        );
+        return;
+    };
+
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        // No temp dir, or no permission to list it. Nothing to do and nothing worth reporting.
+        return;
+    };
+
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        // A name that is not valid UTF-8 cannot be one of ours: the producer builds its output from
+        // a whitelist-validated login and its own ASCII literals.
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !shape.matches(file_name) {
+            continue;
+        }
+        match sweep_one_staged_config(&entry.path(), STAGED_CONFIG_STALE_AFTER) {
+            StagedSweepOutcome::Removed => removed += 1,
+            // Expected and uninteresting: another instance may be mid-download.
+            StagedSweepOutcome::TooYoung => {}
+            StagedSweepOutcome::Refused(code) => crate::logging::log_app(
+                "WARN",
+                &format!("[temp-sweep] candidate refused by the path guard: {code}"),
+            ),
+            StagedSweepOutcome::Failed(e) => crate::logging::log_app(
+                "WARN",
+                &format!("[temp-sweep] delete failed: {e}"),
+            ),
+        }
+    }
+
+    if removed > 0 {
+        crate::logging::log_app(
+            "INFO",
+            &format!("[temp-sweep] removed {removed} stale staged config(s) from the temp dir"),
+        );
+    }
+}
+
+/// Startup entry point: run the sweep on a detached thread.
+///
+/// The sibling startup sweeps (`dns_guard::sweep_stale_dns_on_startup`,
+/// `net_egress::sweep_stale_overrides`) run inline because each touches a handful of files in a
+/// directory the app owns. This one enumerates `%TEMP%`, a directory the app does not control and
+/// which on a long-lived profile can hold tens of thousands of entries, and then canonicalizes each
+/// candidate. That is not work to put in front of the window appearing, and the requirement is
+/// explicit: the cleanup must never block or slow startup. Detached and unjoined — nothing waits on
+/// it, and a panic inside it cannot take the app down.
+pub fn spawn_stale_staged_config_sweep() {
+    std::thread::spawn(sweep_stale_staged_configs);
 }
 
 /// Copy a config file into the app directory (next to the executable).
@@ -677,6 +1004,230 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
 mod tests {
     use super::*;
 
+    // ── delete_staged_temp_file: CR-01 end to end through the COMMAND ─────────────────
+    //
+    // `paths.rs` already covers `validate_temp_staged_path` case by case. These two go through
+    // the registered command itself, because the thing that has to be true is not "the guard
+    // returns Err" but "the file is gone" / "the file is still there".
+
+    /// The credential really leaves the disk. Before CR-01 the staged export — which carries
+    /// the endpoint password — stayed in `%TEMP%` forever after every «Скачать конфиг».
+    #[test]
+    fn delete_staged_temp_file_removes_the_staged_config() {
+        let staged = std::env::temp_dir()
+            .join(format!("tt_test_cmd_cleanup_{}.toml", std::process::id()));
+        std::fs::write(&staged, "password = \"secret\"\n").expect("temp write must succeed");
+        assert!(staged.exists(), "the fixture must exist before the call");
+
+        let result = delete_staged_temp_file(staged.to_string_lossy().to_string());
+        let still_there = staged.exists();
+        let _ = std::fs::remove_file(&staged);
+
+        result.expect("removing a file staged in the temp dir must succeed");
+        assert!(!still_there, "the staged credential must be gone from %TEMP%");
+    }
+
+    /// The command must be impossible to aim at the app data dir — that is where the wizard's
+    /// live config lives, and `copy_file`'s wizard door reads from it. A frontend that passed a
+    /// data-dir path must get a refusal AND leave the file untouched.
+    #[test]
+    fn delete_staged_temp_file_refuses_the_app_data_dir_and_leaves_the_file() {
+        let live = portable_data_dir()
+            .join(format!("tt_test_cmd_live_{}.toml", std::process::id()));
+        std::fs::write(&live, "loglevel = \"info\"\n").expect("app-dir write must succeed");
+
+        let err = delete_staged_temp_file(live.to_string_lossy().to_string())
+            .expect_err("the app data dir must never be deletable through this command");
+        let survived = live.exists();
+        let _ = std::fs::remove_file(&live);
+
+        assert_eq!(
+            err,
+            crate::commands::paths::TEMP_CLEANUP_APP_DATA_DIR,
+            "the refusal must name the app data dir, got: {err}"
+        );
+        assert!(survived, "the live config must still be on disk");
+    }
+
+    // ── The T-44 startup sweep ────────────────────────────────────────────────────────
+    //
+    // The thing under test is a DELETION that runs unattended, so the cases that matter are the
+    // ones where nothing must happen. Each of those asserts BOTH the specific refusal and that the
+    // fixture survived: a bug that skipped the file for the wrong reason (never matched the name,
+    // never ran at all) would satisfy a bare "it still exists" check and prove nothing.
+    //
+    // `sweep_one_staged_config` is called with `Duration::ZERO` where the age gate is not the
+    // subject — otherwise every fixture would have to be backdated and the guard under test would
+    // never be reached. The gate itself gets its own test through the real driver.
+
+    /// A staged export under the producer's own name is recognised and removed. The name comes
+    /// FROM `client_config_filename`, so this cannot pass against a matcher that agrees with a
+    /// stale hardcoded pattern rather than with the producer.
+    #[test]
+    fn sweep_removes_a_staged_config_whose_name_the_producer_would_emit() {
+        let name = client_config_filename(&format!("t44rm{}", std::process::id()), Some("DE"));
+        let staged = std::env::temp_dir().join(&name);
+        std::fs::write(&staged, "password = \"secret\"\n").expect("temp write must succeed");
+
+        let shape = StagedNameShape::learn().expect("the producer's shape must be derivable");
+        let outcome = sweep_one_staged_config(&staged, std::time::Duration::ZERO);
+        let still_there = staged.exists();
+        let _ = std::fs::remove_file(&staged);
+
+        assert!(shape.matches(&name), "the sweep must recognise its own producer's name: {name}");
+        assert_eq!(outcome, StagedSweepOutcome::Removed, "got: {outcome:?}");
+        assert!(!still_there, "the staged credential must be gone from %TEMP%");
+    }
+
+    /// The three name forms the producer can emit — branded, country-prefixed, and the degenerate
+    /// fallback — are all recognised, and a plausible near-miss is not.
+    #[test]
+    fn sweep_name_shape_covers_every_producer_form_and_nothing_else() {
+        let shape = StagedNameShape::learn().expect("the producer's shape must be derivable");
+
+        assert!(shape.matches(&client_config_filename("alice", None)));
+        assert!(shape.matches(&client_config_filename("alice", Some("de"))));
+        assert!(shape.matches(&client_config_filename("", None)), "the degenerate fallback name");
+
+        // Near-misses. The last two matter most: a sweep that accepted a bare `.toml` or a
+        // login-less stem would be deleting other software's files out of a shared directory.
+        assert!(!shape.matches("notes.txt"));
+        assert!(!shape.matches("trusttunnel_client.toml.bak"));
+        assert!(!shape.matches("somethingelse.toml"));
+        assert!(!shape.matches(&format!("{}{}", shape.brand_prefix, shape.suffix)));
+    }
+
+    /// **The blast-radius guard.** A file with the producer's exact name sitting in the APP DATA
+    /// DIR — where the wizard's live config lives — must survive. The sweep only ever enumerates
+    /// the temp dir, and even handed the path directly the shared guard refuses it unconditionally.
+    #[test]
+    fn sweep_refuses_the_same_name_in_the_app_data_dir_and_leaves_it_on_disk() {
+        let name = client_config_filename(&format!("t44app{}", std::process::id()), None);
+        let live = portable_data_dir().join(&name);
+        std::fs::write(&live, "password = \"live\"\n").expect("app-dir write must succeed");
+
+        let outcome = sweep_one_staged_config(&live, std::time::Duration::ZERO);
+        // Also drive the real entry point, to pin that a full sweep never leaves the temp dir.
+        sweep_stale_staged_configs();
+        let survived = live.exists();
+        let _ = std::fs::remove_file(&live);
+
+        assert_eq!(
+            outcome,
+            StagedSweepOutcome::Refused(
+                crate::commands::paths::TEMP_CLEANUP_APP_DATA_DIR.to_string()
+            ),
+            "the refusal must name the app data dir, got: {outcome:?}"
+        );
+        assert!(survived, "the live config must still be on disk");
+    }
+
+    /// A file in the temp dir that is not ours is never a candidate — the name filter drops it
+    /// before any deletion code sees it. `%TEMP%` is shared with every other program on the
+    /// machine, so this is the difference between a cleanup and vandalism.
+    #[test]
+    fn sweep_leaves_a_non_matching_file_in_the_temp_dir_alone() {
+        let name = format!("tt_test_t44_unrelated_{}.toml", std::process::id());
+        let other = std::env::temp_dir().join(&name);
+        std::fs::write(&other, "not ours\n").expect("temp write must succeed");
+
+        let shape = StagedNameShape::learn().expect("the producer's shape must be derivable");
+        sweep_stale_staged_configs();
+        let survived = other.exists();
+        let _ = std::fs::remove_file(&other);
+
+        assert!(!shape.matches(&name), "a foreign name must not match the producer's shape");
+        assert!(survived, "a file that is not ours must not be touched");
+    }
+
+    /// The age gate, through the REAL driver with the REAL threshold: a freshly staged file — the
+    /// shape a second instance's in-flight download has — is left alone even though its name
+    /// matches perfectly.
+    #[test]
+    fn sweep_leaves_a_freshly_staged_config_for_a_concurrent_instance() {
+        let name = client_config_filename(&format!("t44fresh{}", std::process::id()), None);
+        let staged = std::env::temp_dir().join(&name);
+        std::fs::write(&staged, "password = \"in flight\"\n").expect("temp write must succeed");
+
+        let shape = StagedNameShape::learn().expect("the producer's shape must be derivable");
+        sweep_stale_staged_configs();
+        let survived = staged.exists();
+        let _ = std::fs::remove_file(&staged);
+
+        assert!(shape.matches(&name), "the fixture must be a name the sweep DOES recognise");
+        assert!(
+            survived,
+            "a file young enough to belong to a live download must survive the sweep"
+        );
+    }
+
+    /// **The escape-through-a-link case.** A reparse point planted in the temp dir under the
+    /// producer's name, pointing OUT of the temp dir, must not be followed: neither the link nor
+    /// its target may be removed. The temp dir is world-writable, so planting one is a real move,
+    /// not a hypothetical.
+    ///
+    /// A junction is used rather than a file symlink because `mklink /J` needs neither elevation
+    /// nor Developer Mode, so this actually runs on an ordinary dev machine — the same fixture
+    /// choice `paths.rs` documents for its own reparse-point tests.
+    #[cfg(windows)]
+    #[test]
+    fn sweep_refuses_a_reparse_point_that_leaves_the_temp_dir() {
+        let name = client_config_filename(&format!("t44link{}", std::process::id()), None);
+        let link = std::env::temp_dir().join(&name);
+        // The target is a directory OUTSIDE the temp root, with a file in it to prove nothing was
+        // deleted through the link.
+        let target_dir = portable_data_dir().join(format!("tt_test_t44_target_{}", std::process::id()));
+        let victim = target_dir.join("victim.toml");
+        std::fs::create_dir_all(&target_dir).expect("target mkdir must succeed");
+        std::fs::write(&victim, "password = \"must survive\"\n").expect("target write must succeed");
+        let _ = std::fs::remove_dir(&link);
+
+        // `mklink` is a cmd builtin, hence `/C`.
+        let created = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target_dir)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !created {
+            let _ = std::fs::remove_file(&victim);
+            let _ = std::fs::remove_dir(&target_dir);
+            println!(
+                "SKIPPED: `mklink /J` failed on this machine (temp dir on a filesystem without \
+                 reparse points?) — the escape-through-a-link half was NOT exercised."
+            );
+            return;
+        }
+
+        // Without this the test would pass identically against code with no reparse check at all.
+        let is_reparse_point = std::fs::symlink_metadata(&link)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+
+        let shape = StagedNameShape::learn().expect("the producer's shape must be derivable");
+        let outcome = sweep_one_staged_config(&link, std::time::Duration::ZERO);
+        let link_survived = std::fs::symlink_metadata(&link).is_ok();
+        let victim_survived = victim.exists();
+
+        // Remove the junction ENTRY only — `remove_dir_all` here would descend into the target.
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_file(&victim);
+        let _ = std::fs::remove_dir(&target_dir);
+
+        assert!(is_reparse_point, "the fixture is not a reparse point — this test would pass vacuously");
+        assert!(shape.matches(&name), "the fixture must carry a name the sweep DOES consider");
+        assert_eq!(
+            outcome,
+            StagedSweepOutcome::Refused(
+                crate::commands::paths::TEMP_CLEANUP_REPARSE_POINT.to_string()
+            ),
+            "the refusal must name the reparse point, got: {outcome:?}"
+        );
+        assert!(link_survived, "the sweep must not delete a link it did not create");
+        assert!(victim_survived, "nothing may be deleted THROUGH the link");
+    }
+
     #[test]
     fn test_validate_minimal_config() {
         let toml = r#"
@@ -773,6 +1324,115 @@ some_future_key = "value"
         let read_back = std::fs::read_to_string(&path).unwrap();
         assert_eq!(read_back, "new content");
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ── FLOW-01 / D-04: `copy_file` end to end, on the shape the UI really uses ──────
+    //
+    // These call the REAL command function, not the validator in isolation. The Phase-19
+    // download bug survived precisely because nothing exercised `copy_file` end to end:
+    // `fetch_server_config(stageToTemp: true)` stages into `std::env::temp_dir()`
+    // (ssh/server/server_config.rs:524, a deliberate Phase-19 UAT fix) while the source
+    // check confined to `portable_data_dir()` only — so the app rejected the very file it
+    // had just written, and «Скачать конфиг» saved nothing.
+
+    /// The happy path of «Панель управления» → Пользователи → «Скачать конфиг»: a config
+    /// staged in the OS temp dir copies to the destination the user picked in Save-As, and
+    /// the bytes survive intact.
+    #[test]
+    fn copy_file_accepts_a_temp_staged_source() {
+        // The copy source is staged exactly where the app stages it — the OS temp dir.
+        let temp_copy_root = std::env::temp_dir();
+        // `std::process::id()` in the name: the house pattern in this module — parallel test
+        // binaries share one temp dir and would otherwise collide on a fixed name.
+        let src = temp_copy_root.join(format!("tt_test_copy_src_{}.toml", std::process::id()));
+        let dst = temp_copy_root.join(format!("tt_test_copy_dst_{}.toml", std::process::id()));
+        let content = "loglevel = \"info\"\nvpn_mode = \"general\"\n";
+        std::fs::write(&src, content).expect("staging the source must succeed");
+
+        let result = copy_file(
+            src.to_string_lossy().to_string(),
+            dst.to_string_lossy().to_string(),
+        );
+        let copied = std::fs::read_to_string(&dst).ok();
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
+
+        result.expect("a source staged in the OS temp dir must be an allowed copy source");
+        assert_eq!(
+            copied.as_deref(),
+            Some(content),
+            "the destination must hold the exact bytes of the staged source"
+        );
+    }
+
+    /// The OTHER door onto the same command: the wizard's Save-As
+    /// (`components/wizard/useWizardState.ts:1675`) hands `copy_file` an APP-DIR source. Adding
+    /// the temp root must not cost the data-dir root — this is the no-regression guard for it.
+    /// Under `cargo test --lib` `portable_data_dir()` resolves to the test binary's own
+    /// directory, which is writable.
+    #[test]
+    fn copy_file_still_accepts_an_app_dir_source() {
+        let dir = portable_data_dir();
+        let src = dir.join(format!("tt_test_copy_appdir_{}.toml", std::process::id()));
+        let dst = std::env::temp_dir().join(format!(
+            "tt_test_copy_appdir_dst_{}.toml",
+            std::process::id()
+        ));
+        let content = "loglevel = \"warn\"\n";
+        std::fs::write(&src, content).expect("staging in the app dir must succeed");
+
+        let result = copy_file(
+            src.to_string_lossy().to_string(),
+            dst.to_string_lossy().to_string(),
+        );
+        let copied = std::fs::read_to_string(&dst).ok();
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
+
+        result.expect("a source inside portable_data_dir must remain an allowed copy source");
+        assert_eq!(copied.as_deref(), Some(content));
+    }
+
+    /// The negative half of D-04: a real, existing file outside BOTH allowed roots is refused
+    /// with the stable outside-roots code, and nothing lands at the destination. Asserting the
+    /// specific code (not merely `is_err()`) is what keeps this honest — any future rejection
+    /// reason would false-green a bare `is_err()`.
+    #[test]
+    fn copy_file_rejects_a_source_outside_both_allowed_roots() {
+        // Read %SystemRoot% from the environment rather than hardcoding a drive letter — the
+        // Windows install is not always on C:. Falls back to a POSIX path that is likewise
+        // outside both roots when the variable is absent.
+        let outside = std::env::var("SystemRoot")
+            .map(|root| {
+                std::path::PathBuf::from(root)
+                    .join("System32")
+                    .join("drivers")
+                    .join("etc")
+                    .join("hosts")
+            })
+            .unwrap_or_else(|_| std::path::PathBuf::from("/etc/hosts"));
+        let dst = std::env::temp_dir().join(format!(
+            "tt_test_copy_denied_{}.toml",
+            std::process::id()
+        ));
+
+        let err = copy_file(
+            outside.to_string_lossy().to_string(),
+            dst.to_string_lossy().to_string(),
+        )
+        .expect_err("a source outside the app data dir and the OS temp dir must be refused");
+        let leaked = dst.exists();
+        let _ = std::fs::remove_file(&dst);
+
+        assert!(
+            err.starts_with("COPY_SOURCE_OUTSIDE_ROOTS"),
+            "the rejection must carry the stable outside-roots code (25-02 localizes by code, \
+             never by English prose — D-05), got: {err}"
+        );
+        assert!(
+            !leaked,
+            "a refused source must not produce a destination file"
+        );
     }
 
     #[test]

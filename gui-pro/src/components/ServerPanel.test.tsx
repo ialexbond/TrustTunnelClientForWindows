@@ -29,9 +29,6 @@ vi.mock("./server/OverviewSection", () => ({
 vi.mock("./server/UsersSection", () => ({
   UsersSection: () => <div data-testid="users-section">UsersSection</div>,
 }));
-vi.mock("./server/ServerSettingsSection", () => ({
-  ServerSettingsSection: () => <div data-testid="settings-section">ServerSettingsSection</div>,
-}));
 vi.mock("./server/SecurityTabSection", () => ({
   SecurityTabSection: () => <div data-testid="security-section">SecurityTabSection</div>,
 }));

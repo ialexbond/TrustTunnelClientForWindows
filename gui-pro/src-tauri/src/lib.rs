@@ -266,6 +266,13 @@ pub fn run() {
             // password, so nothing should outlive the session that wrote it.
             net_egress::sweep_stale_overrides();
 
+            // T-44: the same argument, one directory over. Builds shipped BEFORE the phase-25
+            // cleanup left their «Скачать конфиг» exports — password-bearing — in the OS temp dir,
+            // and those never self-heal under a login the user does not download again. Detached
+            // thread, unlike the sweeps above, because this one enumerates %TEMP% (see
+            // `spawn_stale_staged_config_sweep`); it must not sit in front of the window.
+            commands::config::spawn_stale_staged_config_sweep();
+
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {
                 // Force decorations off (window-state plugin may restore old value)
@@ -713,6 +720,9 @@ pub fn run() {
             commands::ssh_commands::check_process_conflict,
             commands::ssh_commands::kill_existing_process,
             commands::config::copy_file,
+            // CR-01: the credential-cleanup half of the Users-tab download — removes the
+            // password-carrying config that fetch_server_config staged in %TEMP%.
+            commands::config::delete_staged_temp_file,
             commands::config::write_string_to_path,
             commands::config::copy_config_to_app_dir,
             commands::config::auto_detect_config,
@@ -795,7 +805,6 @@ pub fn run() {
             commands::ssh_commands::security_firewall_set_logging,
             commands::ssh_commands::security_firewall_tail_log,
             commands::ssh_commands::security_firewall_set_http_port,
-            commands::ssh_commands::security_change_ssh_port,
             // Phase 16 — SSH-key feature (D-1.1..D-2.3)
             commands::ssh_commands::security_generate_ssh_key,
             commands::ssh_commands::security_get_ssh_key_status,
@@ -854,6 +863,22 @@ pub fn run() {
             routing_rules::update_vpn_mode,
             routing_rules::cleanup_hosts_block,
             processes::list_running_processes,
+            // Phase 24 (D-01) — real Windows application icons for the process filter. Separate
+            // from list_running_processes on purpose: the picker must open instantly, so icons are
+            // fetched afterwards. Takes process NAMES only and derives paths from its own
+            // snapshot — a path-accepting signature would hand the webview an arbitrary-file
+            // icon-read primitive.
+            processes::get_process_icons,
+            // Phase 24 (D-01 + D-04) — the ONE command in the app that resolves an icon from a
+            // caller-supplied path. It exists because a program the user picked off the disk in
+            // the file dialog is usually not running, so the name-based command above can never
+            // resolve it. The dialog is only where the path comes from — nothing on this side can
+            // verify a string ever passed through it — so what actually narrows the surface is the
+            // command's own guard: a plain local-drive path to an .exe, checked before any
+            // filesystem access, plus a drive-type check that refuses a network mapping. The
+            // command above stays strictly name-only. Two surfaces, so the dangerous one is
+            // separately auditable.
+            processes::get_process_icon_for_path,
             commands::network::ping_endpoint,
             commands::network::health_check,
             // T-22 B3 (boot guard): network-readiness probe for auto-connect-on-launch

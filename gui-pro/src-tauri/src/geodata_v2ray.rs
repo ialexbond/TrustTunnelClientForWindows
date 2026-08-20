@@ -1347,15 +1347,22 @@ mod tests {
 
         // The two ceilings must stay ordered: the prealloc hint is a sizing guess bounded well
         // below the hard cap on the accumulated body, which is what actually refuses the download.
-        assert!(
-            MAX_GEODATA_PREALLOC_BYTES < MAX_GEODATA_DOWNLOAD_BYTES,
-            "the prealloc hint must stay below the hard download cap"
-        );
+        // Const blocks: both ceilings are compile-time constants, so an edit that inverts them
+        // fails while the test binary COMPILES instead of only on a test run someone may have
+        // filtered out. See connectivity.rs `offline_floor_is_snappy` for the enforcement point.
+        const {
+            assert!(
+                MAX_GEODATA_PREALLOC_BYTES < MAX_GEODATA_DOWNLOAD_BYTES,
+                "the prealloc hint must stay below the hard download cap"
+            )
+        };
         // Both `.dat` files are tens of megabytes — the cap must leave real releases plenty of room.
-        assert!(
-            MAX_GEODATA_DOWNLOAD_BYTES >= 128 * 1024 * 1024,
-            "the cap must not be tight enough to refuse a legitimate release"
-        );
+        const {
+            assert!(
+                MAX_GEODATA_DOWNLOAD_BYTES >= 128 * 1024 * 1024,
+                "the cap must not be tight enough to refuse a legitimate release"
+            )
+        };
     }
 
     /// WR-04: moving the commit onto a blocking thread must not blur the error classification the

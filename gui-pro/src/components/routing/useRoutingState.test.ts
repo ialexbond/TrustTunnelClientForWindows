@@ -678,6 +678,118 @@ describe("useRoutingState", () => {
     expect(result.current.rules.processes).toEqual(["firefox.exe"]);
   });
 
+  // ── The ONE duplicate rule: compare folded, store verbatim (D-05) ─────────────────────────────
+  //
+  // The two halves pull in opposite directions, and the second is the one that gets forgotten. It
+  // is tempting to lowercase before storing so the comparison becomes trivial — that would silently
+  // rewrite a rule the user typed. The C++ core lowercases and path-strips BOTH sides of its own
+  // match, so casing never affects routing: a case-mismatched twin is purely a display artifact,
+  // and process-name semantics belong to the core, not to us. Hence a test on the stored STRING and
+  // not only on the list length — a length-only test passes on a lowercasing implementation and
+  // therefore proves nothing about the half that is easy to get wrong.
+
+  it("addProcess treats a name differing only in letter case as the same program", async () => {
+    setupInvokeForLoad(makeRules({ processes: ["chrome.exe"] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.addProcess("Chrome.exe");
+    });
+
+    expect(result.current.rules.processes).toEqual(["chrome.exe"]);
+  });
+
+  it("addProcess stores the casing the user picked, not a folded form", async () => {
+    setupInvokeForLoad(makeRules({ processes: [] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.addProcess("Chrome.exe");
+    });
+
+    // Verbatim. Not "chrome.exe".
+    expect(result.current.rules.processes).toEqual(["Chrome.exe"]);
+  });
+
+  it("addProcess never rewrites an existing entry with a later case-mismatched attempt", async () => {
+    setupInvokeForLoad(makeRules({ processes: ["Chrome.exe"] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.addProcess("chrome.exe");
+    });
+    act(() => {
+      result.current.addProcess("CHROME.EXE");
+    });
+
+    expect(result.current.rules.processes).toEqual(["Chrome.exe"]);
+  });
+
+  it("removeProcess still matches the stored form and leaves the rest of the list alone", async () => {
+    setupInvokeForLoad(makeRules({ processes: ["Chrome.exe", "firefox.exe"] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.removeProcess("Chrome.exe");
+    });
+
+    expect(result.current.rules.processes).toEqual(["firefox.exe"]);
+  });
+
+  it("addProcess still adds two genuinely different names", async () => {
+    setupInvokeForLoad(makeRules({ processes: [] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.addProcess("Chrome.exe");
+    });
+    act(() => {
+      result.current.addProcess("firefox.exe");
+    });
+
+    expect(result.current.rules.processes).toEqual(["Chrome.exe", "firefox.exe"]);
+  });
+
   it("loadProcessList invokes list_running_processes and populates processList", async () => {
     const mockProcesses = [
       { name: "chrome.exe", path: "C:\\chrome.exe" },

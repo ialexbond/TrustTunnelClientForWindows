@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
 import { Copy, Download } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Modal } from "../../shared/ui/Modal";
@@ -12,9 +11,12 @@ import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
+import { translatePathError } from "../../shared/utils/translatePathError";
+import { translateSshError } from "../../shared/utils/translateSshError";
 import { cn } from "../../shared/lib/cn";
 import { fromServerResponse as advancedFromServer } from "../../shared/utils/userAdvanced";
 import { buildConfigFileName } from "../../shared/utils/configFileName";
+import { saveFileDialog } from "../../shared/utils/saveFileDialog";
 import { readCachedCountryCode } from "./useServerGeoIp";
 
 /**
@@ -30,7 +32,9 @@ import { readCachedCountryCode } from "./useServerGeoIp";
  *     The image-clipboard path was removed — it did not work in the WebView2.
  *   - Read-only deeplink input + inline Copy icon writes text via
  *     navigator.clipboard.writeText.
- *   - Download button: fetch_server_config → save() dialog → copy_file.
+ *   - Download button: fetch_server_config → save() dialog → copy_file →
+ *     delete_staged_temp_file (CR-01: the staged export carries the endpoint
+ *     password, so it is removed from %TEMP% on every exit, not just the happy one).
  *
  * Close policy (D-10): backdrop click + Escape + X icon. No "Done" CTA.
  *
@@ -258,6 +262,13 @@ export function UserConfigModal({
     if (!username) return;
     setIsDownloading(true);
     activityLog("USER", `user.config.download_initiated user=${username}`);
+    // CR-01: the file `fetch_server_config` stages in %TEMP% carries the endpoint PASSWORD
+    // (ssh/server/server_config.rs says so at the write itself). Remember its path the moment
+    // it exists, so the `finally` below can delete it down ALL THREE exits of this flow — the
+    // copy succeeded, the user cancelled Save-As (dest === null, copy_file never runs), or the
+    // copy failed. Before this, every download left a plaintext VPN credential in %TEMP% under
+    // a predictable name, and Windows never clears it.
+    let stagedPath: string | null = null;
     try {
       const path = await invoke<string>("fetch_server_config", {
         ...sshParams,
@@ -274,13 +285,19 @@ export function UserConfigModal({
         // turns it into an unwanted Connection-tab card and it can't overwrite a tracked config.
         stageToTemp: true,
       });
+      stagedPath = path;
       // UAT (06-uat fix 14): branded, consistent default name
       // `[COUNTRY_]TrustTunnel_<username>.toml` (matching the wizard DoneStep save).
       // The country prefix is BEST-EFFORT — read synchronously from the already-cached
       // GeoIP for this host (no fetch, never blocks the save); omitted gracefully when
       // not readily available.
       const country = readCachedCountryCode(sshHost);
-      const dest = await save({
+      // T-41: `saveFileDialog`, not the plugin's bare `save()`. A rejection from the
+      // dialog (plugin missing, OS refusing to show it) carries no code, so it used to
+      // slip past BOTH translators below and land in the snackbar as the plugin's own
+      // English sentence. The wrapper stamps SAVE_DIALOG_FAILED on it so the chain can
+      // localize it — cancelling still resolves `null` and is still silent.
+      const dest = await saveFileDialog({
         defaultPath: buildConfigFileName(username, country),
         filters: [{ name: "TOML Config", extensions: ["toml"] }],
       });
@@ -291,9 +308,59 @@ export function UserConfigModal({
       }
       // dest === null → user cancelled save dialog — silently return.
     } catch (e) {
-      activityLog("ERROR", `user.config.download_failed err=${formatError(e)}`);
-      pushSuccess(formatError(e), "error");
+      // Phase 25 (FLOW-01 / D-05): the log line and the snackbar deliberately carry
+      // DIFFERENT text — do not "simplify" them back into one value.
+      //   • The log keeps the RAW backend string. `copy_file` fails with stable machine
+      //     codes from the Rust path validators (commands/paths.rs::validate_copy_source
+      //     → COPY_SOURCE_OUTSIDE_ROOTS / _REPARSE_POINT / _UNRESOLVABLE, and
+      //     COPY_FAILED from commands/config.rs). A code is greppable and pins the exact
+      //     rejected branch; a translated sentence would destroy that.
+      //   • The snackbar gets Russian, because the user cannot act on a machine code.
+      const raw = formatError(e);
+      activityLog("ERROR", `user.config.download_failed err=${raw}`);
+      // WR-01: THREE awaits fail into this one catch, and they speak two different code
+      // vocabularies. `copy_file` returns the PATH family (`COPY_*`, commands/paths.rs);
+      // `fetch_server_config` returns the SSH family (`SSH_*`) — and an SSH export failure
+      // (server down, sudo missing, disk full on the server) is by far the most likely way
+      // this flow breaks. Translating by the path vocabulary alone left exactly that case
+      // showing raw English, so the phase's own «Russian text, not a raw Rust error» bar was
+      // unmet for the common failure.
+      //
+      // Do NOT read a list of SSH codes into this comment. The family is open and has already
+      // grown once inside this phase (four uncoded exits of `fetch_server_config` were given
+      // codes after this chain was written). Its membership lives in exactly two places —
+      // the `Err(...)` sites under `ssh/` and the switch in `translateSshError` — and a
+      // hand-copied roster here would go stale the next time one is added.
+      //
+      // The chain is safe, and its ORDER is not load-bearing for correctness: the two families
+      // are disjoint by prefix, so no code can be claimed by both. Path goes first because this
+      // is primarily a local-file door. What makes the composition work is that
+      // `translatePathError` returns its input UNCHANGED when it recognises nothing — an
+      // untouched result is the signal to hand the string to the SSH vocabulary. And
+      // `translateSshError` falls through to the raw string in turn, so an error neither one
+      // knows still reaches the user verbatim instead of as a blank snackbar.
+      const localizedPath = translatePathError(e, t);
+      pushSuccess(
+        localizedPath === raw ? translateSshError(raw, t) : localizedPath,
+        "error",
+      );
     } finally {
+      // CR-01: best-effort credential cleanup, on every exit. Deliberately NOT reported to the
+      // user — the file they asked for is already saved, and a failed temp delete must never
+      // turn a successful download into a red snackbar. It IS logged, so a cleanup that starts
+      // failing is visible in diagnostics instead of silent. The backend command refuses any
+      // path outside the OS temp root and refuses the app data dir outright, so this can never
+      // reach the wizard's live config even if `stagedPath` were something unexpected.
+      if (stagedPath) {
+        try {
+          await invoke("delete_staged_temp_file", { path: stagedPath });
+        } catch (cleanupError) {
+          activityLog(
+            "ERROR",
+            `user.config.staged_cleanup_failed err=${formatError(cleanupError)}`,
+          );
+        }
+      }
       setIsDownloading(false);
     }
   };

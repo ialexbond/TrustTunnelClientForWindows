@@ -175,37 +175,6 @@ export function useControlPanelOrchestrator({
     setRefreshKey(k => k + 1);
   }, []);
 
-  const handlePortChanged = useCallback(async (newPort: number) => {
-    if (!creds) return;
-    const oldPort = creds.port;
-    const newPortStr = newPort.toString();
-    const updated = { ...creds, port: newPortStr };
-    setCreds(updated);
-    try {
-      await invoke("save_ssh_credentials", {
-        host: updated.host,
-        port: updated.port,
-        user: updated.user,
-        password: updated.password,
-        keyPath: updated.keyPath || null,
-      });
-      // WR-04: the per-host store is keyed by host:port:user. Saving under the NEW
-      // port creates a SECOND record and leaves the OLD-port record + its keyring
-      // entry orphaned. Clear the old-port record AFTER the new one is saved (so a
-      // failure mid-way never leaves the host with NO record). Skip when the port
-      // is unchanged — there is nothing to re-key.
-      if (oldPort !== newPortStr) {
-        await invoke("clear_ssh_credentials_for", {
-          host: updated.host,
-          port: oldPort,
-          user: updated.user,
-        });
-      }
-    } catch (e) {
-      console.error("Failed to persist updated SSH port:", e);
-    }
-  }, [creds]);
-
   const handleDisconnect = useCallback(async () => {
     // WR-09 fix: await keyring cleanup before clearing state. Previously the
     // un-awaited invoke could race the 2s polling interval: user clicks
@@ -239,7 +208,6 @@ export function useControlPanelOrchestrator({
     // Callbacks
     handleConnect,
     handleDisconnect,
-    handlePortChanged,
     handleSidecarUpdateApplied,
     handleSidecarUpdateSeen,
     // Parent callbacks threaded through to the presentation layer

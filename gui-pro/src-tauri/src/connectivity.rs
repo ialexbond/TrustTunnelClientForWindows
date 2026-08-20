@@ -2489,7 +2489,17 @@ mod detection_cadence_tests {
             "cadence floor must collapse the old ~80s floor",
         );
         // The per-probe timeout is tight so a failed cycle does not balloon the window.
-        assert!(TUNNEL_PROBE_TIMEOUT_SECS <= 5);
+        // Const block: both sides are compile-time constants, so this invariant is proved by
+        // const evaluation rather than by the test happening to be run — a bad edit to the
+        // constant can no longer slip past a `--skip`/filtered run.
+        //
+        // Measured, because the exact enforcement point is not obvious: an in-body const block
+        // is evaluated at CODEGEN, so `cargo test` (which builds the lib-test binary this
+        // module lives in) turns a violation into a hard E0080. `cargo check` and `cargo
+        // clippy` never get that far, which is why both clippy gates stay green. Plain `cargo
+        // build` does not cover it either — this is `#[cfg(test)]` code and is not in that
+        // build at all. Same for every other `const { assert!(…) }` in this file.
+        const { assert!(TUNNEL_PROBE_TIMEOUT_SECS <= 5) };
         // Worst-case declaration window (cadence + final tunnel probe + reason-gate
         // probe) stays well under the old ~95-140s.
         let worst_case = cadence_floor + Duration::from_secs(TUNNEL_PROBE_TIMEOUT_SECS * 2);
@@ -2499,7 +2509,7 @@ mod detection_cadence_tests {
         );
         // Require N>1 failures so a single transient miss never declares offline
         // (T-07-01: don't false-kill a busy tunnel).
-        assert!(MAX_FAILURES >= 2, "must tolerate at least one transient miss");
+        const { assert!(MAX_FAILURES >= 2, "must tolerate at least one transient miss") };
     }
 
     #[test]
@@ -2609,14 +2619,18 @@ mod detection_cadence_tests {
         // The debounce floor must be well below the resume threshold so coalescing a
         // burst never interferes with resume-from-suspend detection (02-10), and below
         // the poll cadence so a coalesced event is still covered by the next poll.
-        assert!(
-            EVENT_WAKE_MIN_INTERVAL_MS < RESUME_GAP_THRESHOLD_SECS * 1000,
-            "the wake debounce must stay far under the resume threshold",
-        );
-        assert!(
-            EVENT_WAKE_MIN_INTERVAL_MS < POLL_INTERVAL_SECS * 1000,
-            "a coalesced wake must be re-covered by the next poll cadence",
-        );
+        const {
+            assert!(
+                EVENT_WAKE_MIN_INTERVAL_MS < RESUME_GAP_THRESHOLD_SECS * 1000,
+                "the wake debounce must stay far under the resume threshold",
+            )
+        };
+        const {
+            assert!(
+                EVENT_WAKE_MIN_INTERVAL_MS < POLL_INTERVAL_SECS * 1000,
+                "a coalesced wake must be re-covered by the next poll cadence",
+            )
+        };
     }
 
     /// Windows-only: registering the interface-change notifier and dropping it must
@@ -2674,7 +2688,7 @@ mod detection_cadence_tests {
 
         // The confirm window is sane: >1 check (so one blip can't kill) and stays well
         // under the resume threshold so a confirm pass is never mistaken for a suspend.
-        assert!(UPLINK_CONFIRM_CHECKS >= 2, "must take more than one sample to be flap-safe");
+        const { assert!(UPLINK_CONFIRM_CHECKS >= 2, "must take more than one sample to be flap-safe") };
         let window = Duration::from_millis(UPLINK_CONFIRM_INTERVAL_MS) * UPLINK_CONFIRM_CHECKS;
         assert!(
             window < Duration::from_secs(RESUME_GAP_THRESHOLD_SECS),

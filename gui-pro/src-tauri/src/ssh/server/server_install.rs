@@ -271,9 +271,17 @@ echo "=== Step 5c: Remove TrustTunnel ufw rules BY COMMENT (ownership-scoped) ==
 # guards make port {ssh_port} un-closable:
 #   (1) RE-ASSERT the allow BEFORE the sweep — idempotent (ufw dedups), so the live
 #       session survives even if a later `ufw reload` flushes conntrack mid-script.
-#   (2) EXCLUDE the SSH port from the sweep by PORT TOKEN, never by comment tag
-#       (change_ssh_port retags the rule plain 'SSH', so only the numeric port is a
-#       reliable guard). The `(^|[^0-9])…([^0-9]|$)` anchor stops 22 from matching
+#   (2) EXCLUDE the SSH port from the sweep by PORT TOKEN, never by comment tag.
+#       A ufw rule's comment is NOT a reliable identifier for the live SSH allow.
+#       Two DIFFERENT files write two different strings for the same rule — this
+#       script re-asserts 'SSH keep active session' just below, while the security
+#       module writes 'SSH (TrustTunnel)' when it opens the port — an earlier
+#       release wrote others, and an administrator or any external tooling can
+#       retag a rule by hand at any time. The numeric port is the one
+#       property that cannot drift, so it is the only trustworthy guard. NEVER
+#       relax this back to matching on the comment tag: that is precisely the
+#       regression that deleted the active SSH allow and bricked a live server.
+#       The `(^|[^0-9])…([^0-9]|$)` anchor stops 22 from matching
 #       2222 / 443 from matching 4433, and the trailing space/`(v6)` is `[^0-9]` so
 #       BOTH the v4 rule and its IPv6 twin are spared.
 if command -v ufw >/dev/null 2>&1; then
