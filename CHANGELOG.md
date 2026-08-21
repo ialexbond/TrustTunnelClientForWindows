@@ -16,9 +16,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Fixed a use-after-free crash when the QUIC connection from the location ping is discarded after the pinger is destroyed (e.g. when multiple endpoint addresses are available and only one connection is selected).
-
 ### Security
+
+## [1.1.5-rc.6] - 2026-08-21
+
+### Fixed
+
+- Fixed a use-after-free crash when the QUIC connection from the location ping is discarded after the pinger is destroyed (e.g. when multiple endpoint addresses are available and only one connection is selected).
 
 ## [1.1.5-rc.5] - 2026-08-12
 
@@ -546,7 +550,8 @@ For this purpose, new event `VPN_EVENT_CONNECTION_INFO` was introduced in `VpnEv
 
 - VpnLibs is now open-source.
 
-[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.5...HEAD
+[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.6...HEAD
+[1.1.5-rc.6]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.5...v1.1.5-rc.6
 [1.1.5-rc.5]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.4...v1.1.5-rc.5
 [1.1.5-rc.4]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.3...v1.1.5-rc.4
 [1.1.5-rc.3]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.2...v1.1.5-rc.3
