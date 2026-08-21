@@ -261,6 +261,9 @@ static void do_report(ag::QuicConnector *self) {
     self->result = std::make_unique<ag::QuicConnectorResult>();
     self->result->fd = ag::udp_socket_release_fd(self->socket.release());
     self->result->client = std::move(self->client);
+    // The client may outlive the connector once the ping is done, so detach the callbacks
+    // referencing the connector.
+    self->result->client->update_callbacks({});
     self->result->first_packet = {self->server_payload, self->server_payload + self->server_payload_size};
     self->parameters.handler.handler(self->parameters.handler.arg, ag::QUIC_CONNECTOR_EVENT_READY, nullptr);
 }

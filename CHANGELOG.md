@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Fixed a use-after-free crash when the QUIC connection from the location ping is discarded after the pinger is destroyed (e.g. when multiple endpoint addresses are available and only one connection is selected).
+
 ### Security
 
 ## [1.1.5-rc.5] - 2026-08-12
