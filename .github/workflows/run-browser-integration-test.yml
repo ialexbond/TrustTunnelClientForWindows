@@ -76,7 +76,7 @@ jobs:
         env:
           ARTIFACTORY_URL: ${{ vars.ARTIFACTORY_URL }}
         run: |
-          curl -O ${ARTIFACTORY_URL}/adguard-pods/binaries/agvpn_helper/agvpn_helper-linux.tar.gz
+          curl -fsSL -O ${ARTIFACTORY_URL}/artifactory/adguard-pods/binaries/agvpn_helper/agvpn_helper-linux.tar.gz
           tar -C output --strip-components=1 -xvf agvpn_helper-linux.tar.gz
 
       - name: Run browser tests
