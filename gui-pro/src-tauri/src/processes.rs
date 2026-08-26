@@ -114,7 +114,11 @@ fn collect_process_pids<I: IntoIterator<Item = (String, u32)>>(entries: I) -> BT
 /// wrong palette — Chrome's logo comes out with its blue and orange traded, which is easy to miss
 /// on a 24 px row.
 fn bgra_to_rgba(pixels: &mut [u8]) {
-    for px in pixels.chunks_exact_mut(4) {
+    // `as_chunks_mut::<4>()` rather than `chunks_exact_mut(4)`: clippy 1.98 added
+    // `chunks_exact_to_as_chunks`, which fires on a CONSTANT chunk size and is denied by the
+    // `-D warnings` gate. Same semantics — both ignore a trailing partial chunk — but the const
+    // generic gives `&mut [u8; 4]`, so the length is known at compile time instead of asserted.
+    for px in pixels.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
 }
@@ -154,7 +158,8 @@ fn alpha_from_mask(pixels: &mut [u8], mask: &[u8], width: usize, height: usize) 
 /// arrive with straight (non-premultiplied) alpha that is already correct; touching those would
 /// corrupt them, which is why this is a guarded fallback and not an unconditional pass.
 fn apply_alpha_fallback(pixels: &mut [u8], mask: &[u8], width: usize, height: usize) {
-    if pixels.chunks_exact(4).all(|px| px[3] == 0) {
+    // See `bgra_to_rgba` for why this is `as_chunks` and not `chunks_exact` (clippy 1.98).
+    if pixels.as_chunks::<4>().0.iter().all(|px| px[3] == 0) {
         alpha_from_mask(pixels, mask, width, height);
     }
 }
@@ -1045,7 +1050,11 @@ mod tests {
 
         alpha_from_mask(&mut buffer, &mask, 2, 2);
 
-        let alphas: Vec<u8> = buffer.chunks_exact(4).map(|px| px[3]).collect();
+        // `as_chunks` for the same reason as the two production sites — CI lints the lib only
+        // (`--no-deps`, no `--all-targets`), so this one would not have failed there, but a local
+        // `--all-targets` run on clippy 1.98 does flag it, and a lint that fires locally and not in
+        // CI is the kind of divergence that trains people to ignore local output.
+        let alphas: Vec<u8> = buffer.as_chunks::<4>().0.iter().map(|px| px[3]).collect();
         assert_eq!(
             alphas,
             vec![0, 255, 255, 0],
