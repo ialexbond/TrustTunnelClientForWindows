@@ -671,11 +671,50 @@ pub async fn spawn_trusttunnel(
                                         "INFO",
                                         "[reconnect] unexpected sidecar exit — starting supervisor",
                                     );
+                                    // OWNER RULING (28-UAT test 9) — the hybrid. The sidecar PROCESS
+                                    // died, which says nothing about whether the user's servers are
+                                    // reachable, so the origin is retried FIRST with the full
+                                    // RECONNECT_MAX_ATTEMPTS budget — that is what preserves the
+                                    // reboot-recovery guarantee, and the origin is the server the user
+                                    // actually chose. Only when it has genuinely refused to come back
+                                    // does the walk move on to the other participating servers.
+                                    //
+                                    // WHAT THIS REPLACES, AND WHY. The queue used to be a single entry,
+                                    // on an executor's reading of D-01: that decision contrasts
+                                    // `tunnel-lost` (failover) with `internet-lost` (no failover) and
+                                    // never mentions this THIRD drop class, so «no failover» here was a
+                                    // guess nobody had been asked to confirm. Its failure mode was the
+                                    // bad one: with «Авто-режим» ON, a crash the origin could not
+                                    // recover from ended in a dead session and untried servers, and the
+                                    // user watching it had every reason to think the feature was broken.
+                                    //
+                                    // The opposite extreme was rejected too — walking immediately would
+                                    // move a person to a different exit country over a local process
+                                    // crash, and would break reboot recovery, where waiting for the
+                                    // origin is exactly right. `WalkKind` is what lets one walk
+                                    // machine serve both: it changes ONLY the origin's budget.
+                                    //
+                                    // `build_failover_queue` still applies every existing guard — the
+                                    // master toggle, per-server participation, `should_failover` — so a
+                                    // user with failover off, or with no other participating server,
+                                    // gets the one-entry queue and byte-identical behaviour.
+                                    let queue = crate::connectivity::build_failover_queue(
+                                        crate::connectivity::TUNNEL_LOST_REASON,
+                                        &config_path,
+                                    );
+                                    crate::logging::log_app(
+                                        "INFO",
+                                        &format!(
+                                            "[reconnect] sidecar exit — retrying the same server first, then {} other candidate(s) (owner ruling 2026-08-26)",
+                                            queue.len().saturating_sub(1)
+                                        ),
+                                    );
                                     crate::connectivity::start_reconnect_supervisor(
                                         app_handle.clone(),
-                                        config_path,
+                                        queue,
                                         log_level,
                                         generation,
+                                        crate::lifecycle::WalkKind::LocalProcessDeath,
                                     );
                                 }
                                 None => {
@@ -814,7 +853,12 @@ const HARD_KILL_CONFIRM_POLL_MS: u64 = 100;
 /// Connected STATUS and kills the session if it never arrives within 60s. Since delay-green DELAYS
 /// that status, the cap has to emit Connected (at the latest) before the watchdog's deadline — 45s
 /// leaves a comfortable margin while still covering the ~30-40s http3 warmup.
-const TRAFFIC_READINESS_CAP: std::time::Duration = std::time::Duration::from_secs(45);
+/// 28-02: `pub(crate)` so the relationship can be ASSERTED rather than described.
+/// `lifecycle::RECONNECT_ATTEMPT_WINDOW`'s doc comment already names this constant as if it were
+/// reachable — but while it was private that reference resolved to nothing, so the comment
+/// described a link the compiler could not see and nothing stopped a future edit from breaking it.
+/// The `attempt_window_must_stay_above_the_traffic_readiness_cap` tripwire now holds it.
+pub(crate) const TRAFFIC_READINESS_CAP: std::time::Duration = std::time::Duration::from_secs(45);
 
 /// 3.8 F-3 (Fable-5 review): safety margin between the traffic-readiness fallback emit and the
 /// connect-timeout watchdog's deadline. The honest Connected fallback must land at least this

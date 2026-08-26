@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfigList, type ConfigSummary } from "./useConfigList";
 import { usePerConfigPing, toConfigPing, type PingTarget, type ConfigPing } from "./usePerConfigPing";
-import { configPingToReading } from "../lib/configPingToReading";
-import type { Candidate, Reading } from "../lib/decideAutoSwitch";
+import { configPingToReading, type Reading } from "../lib/configPingToReading";
 import { samePath, normalizePath } from "../utils/samePath";
 import { dedupeConfigsByIdentity } from "../utils/dedupeConfigsByIdentity";
 import type { VpnStatus } from "../types";
@@ -12,27 +11,41 @@ import type { VpnStatus } from "../types";
  * loop (Phase 12 / 12-07).
  *
  * Background: before this hook, `ConnectionPanel` owned BOTH `useConfigList` and `usePerConfigPing`
- * internally. The auto-switch engine (`useAutoSwitch`) also needs that exact data — the inactive
- * configs in priority order with their latest ping reading — to build its candidate list. Running a
- * SECOND `usePerConfigPing` for the engine would mean two inactive-ping loops fanning out the same
- * probes (T-12-14, a self-DoS). So the App now owns ONE loop here and feeds both consumers:
+ * internally. A second App-level consumer also needed that exact data — the inactive configs in
+ * priority order with their latest ping reading — and running a SECOND `usePerConfigPing` for it
+ * would have meant two inactive-ping loops fanning out the same probes (T-12-14, a self-DoS). So
+ * the App owns ONE loop here and feeds both consumers:
  *   - ConnectionPanel receives `configs`/`pings`/`reload`/`refresh`/`loading` as props (it falls
  *     back to its own internal hooks only when these are NOT supplied — keeps its unit tests intact).
- *   - useAutoSwitch receives the derived `candidates` (priority-ordered inactive configs + readings).
+ *   - the `candidates` derivation (priority-ordered inactive configs + readings) is kept as a
+ *     read-only view of the same data — see the note on `ConfigPingSource.candidates` below.
  *
- * It mirrors ConnectionPanel's prior derivation exactly so the cards and the engine agree on the
- * same identity-collapsed list and the same target set:
+ * It mirrors ConnectionPanel's prior derivation exactly so the cards and every derived view agree
+ * on the same identity-collapsed list and the same target set:
  *   - `dedupeConfigsByIdentity` collapses same-server (host+user) twins before pinging (11-UAT gap A),
  *     active-path-aware so the connected file wins;
  *   - the ping targets are memoized on the joined id|path so a pure re-render does not restart the
  *     loop (usePerConfigPing keys on the target set internally too).
  *
  * The candidate list (D-02) is the dedup'd configs MINUS the active one, sorted by manifest `order`,
- * each joined with its latest reading mapped back from the pill's `ConfigPing` (configPingToReading).
- * The engine walks this top-down and switches to the first reachable+below-threshold config.
+ * each joined with its latest reading mapped from the pill's `ConfigPing` (configPingToReading).
  */
+
+/**
+ * An inactive config + its latest reading, in priority (manifest) order.
+ *
+ * Phase 28 / plan 28-09: this type used to live in `shared/lib/decideAutoSwitch.ts`, which is now
+ * deleted along with the frontend latency-polling engine that consumed it. It moved HERE, to the
+ * only module that still produces it.
+ */
+export interface Candidate {
+  path: string;
+  order: number;
+  reading: Reading;
+}
+
 export interface ConfigPingSource {
-  /** Identity-collapsed config list (the exact set the cards render + the engine considers). */
+  /** Identity-collapsed config list (the exact set the cards render). */
   configs: ConfigSummary[];
   /** id → latest ConfigPing band, the SAME map the cards render. */
   pings: Record<string, ConfigPing>;
@@ -44,23 +57,36 @@ export interface ConfigPingSource {
    * Manually ping every visible config's endpoint ONCE (the «Обновить пинг» button next to «Добавить
    * конфиг»). There is no automatic ping — this is the ONLY way a fresh reachability reading lands.
    * While a tunnel is up the target set still includes every card (BUG-B B2 removed the active-exclusion),
-   * so a round DOES measure them — the active reading is then tunnel-routed (F26), display-only, and never
-   * drives an auto-switch (the engine reads the frozen pre-connect band).
+   * so a round DOES measure them — the active reading is then tunnel-routed (F26) and DISPLAY-ONLY. It
+   * is deliberately never written into the frozen `lastGoodByPath` cache, so it cannot masquerade as an
+   * honest pre-connect band anywhere else.
    */
   refreshPings: () => Promise<void>;
   /** True while a manual ping round is in flight (drives the refresh button's spinner + disabled state). */
   pinging: boolean;
   /** First-load skeleton flag. */
   loading: boolean;
-  /** Priority-ordered (manifest order) INACTIVE configs + their latest reading — for the engine. */
+  /**
+   * Priority-ordered (manifest order) INACTIVE configs + their latest reading.
+   *
+   * Phase 28 / plan 28-09: this used to feed the frontend auto-switch engine's candidate walk. That
+   * engine is gone — failover is decided in Rust on a real loss of the tunnel (27 D-06), and Rust
+   * builds its own queue from the manifest + the participation set, never from a latency reading.
+   * The derivation is KEPT rather than deleted because it is the tested read-only expression of
+   * «the inactive configs in priority order with their frozen bands» (three suites assert it,
+   * including the F2 path-form regression), and because the multi-server surface still on the
+   * roadmap wants exactly that view. It steers nothing.
+   */
   candidates: Candidate[];
   /**
-   * PA-2 (17-02): the ACTIVE config's FROZEN pre-connect reachability reading — the honest band the
-   * auto-switch engine evaluates for a breach, REPLACING the dishonest through-tunnel `probe_tunnel_latency`.
-   * While connected this is the retained `lastGoodByPath` band for `activeConfigPath` (the SAME number the
-   * active card shows AT REST — D-02; a manual «Обновить пинг» while connected can surface a live
-   * tunnel-routed number on the CARD, but the engine always reads THIS frozen band). While disconnected it
-   * is the live direct probe (the engine is inert then anyway). No config carries the password (D-29).
+   * PA-2 (17-02): the ACTIVE config's FROZEN pre-connect reachability reading. While connected this
+   * is the retained `lastGoodByPath` band for `activeConfigPath` (the SAME number the active card
+   * shows AT REST — D-02; a manual «Обновить пинг» while connected can surface a live tunnel-routed
+   * number on the CARD, but this stays the frozen band). While disconnected it is the live direct
+   * probe. No config carries the password (D-29).
+   *
+   * Phase 28 / plan 28-09: like `candidates`, this was the retired engine's breach signal and now
+   * drives no decision — see the note above.
    */
   activeReading: Reading;
   /**
@@ -113,7 +139,7 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // card (active included) is frozen at its honest pre-connect reachability.
 
   // Active-path-aware identity collapse — same rule ConnectionPanel applied internally, lifted
-  // here so the cards (fed these configs as a prop) and the engine see the identical set.
+  // here so the cards (fed these configs as a prop) and every derived view see the identical set.
   const visibleConfigs = useMemo(
     () => dedupeConfigsByIdentity(configs, activeConfigPath),
     [configs, activeConfigPath],
@@ -135,8 +161,8 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // inactive cards) no longer applies — nothing pings unless the user explicitly clicks. So targets
   // include the INACTIVE cards even while connected: a manual click measures them. The number is
   // tunnel-routed when connected (still not an honest RTT — F26), but the owner asked to see a live
-  // measurement on demand. The engine still consumes the FROZEN pre-connect band (candidates below), so
-  // this manual live number never drives an auto-switch decision.
+  // measurement on demand. It stays out of the frozen `lastGoodByPath` cache (the write guard below),
+  // so it is shown and then forgotten.
   //
   // BUG-B (17-uat) B2: the ACTIVE endpoint is now IN the manual-refresh target set while connected too
   // (the D-02 exclusion is REMOVED), so «Обновить пинг» measures it on demand like the inactive cards —
@@ -145,9 +171,9 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // patchedPings CONNECTED branch below therefore FALLS BACK to the retained honest band whenever the
   // active card's live reading is NOT a numeric value (Unreachable / no-data), so a connected server can
   // NEVER regress to «Недоступен» (the original PING-IP tail bug). A NUMERIC live reading DOES show (the
-  // owner wants to see it). The auto-switch ENGINE still reads the FROZEN band (candidates/activeReading
-  // below), so this live active number never drives a switch decision. While DISCONNECTED every card is
-  // probed directly — the honest pre-connect RTT.
+  // owner wants to see it), but only on the card — `candidates`/`activeReading` below still resolve the
+  // FROZEN band, so the two never disagree about what the honest pre-connect number was. While
+  // DISCONNECTED every card is probed directly — the honest pre-connect RTT.
   // Stable key for the visible set — extracted so the exhaustive-deps rule can statically check the
   // memo's dep array (a complex expression inline trips the lint rule).
   // PP-8 (17-07, n-8): memoized on `visibleConfigs` so the `.map().join()` over every config is NOT
@@ -164,7 +190,7 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   );
   // Manual ping: `usePerConfigPing` no longer pings automatically (no on-mount, no interval — owner's
   // decision). `refreshPings` runs ONE round over the current targets on demand (the «Обновить пинг»
-  // button); `pinging` drives the button spinner. The band map still feeds the cards + the engine.
+  // button); `pinging` drives the button spinner. The band map feeds the cards.
   const { pings, refreshPings, pinging } = usePerConfigPing(targets);
 
   // F23/F24: cache each config's LAST-KNOWN good DIRECT reading (a numeric band measured while probed —
@@ -176,10 +202,12 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // F2 (17-REVIEW): the cache key is the NORMALIZED path (`normalizePath` — the SAME form `samePath`
   // compares). The active-config path arrives from localStorage `tt_config_path` (tray adopt / deeplink /
   // legacy writers) in a DIFFERENT string form than the manifest `c.path` (`\` vs `/`, drive-letter case)
-  // for the SAME file. Keying + reading raw let `activeReading`/`candidates` look up a form that never
-  // matched a write site → `undefined` → `no-data` every tick → the auto-switch engine returns before
-  // `decideAutoSwitch` (silently dead) while the UI claims it is armed. Normalizing every write + read
-  // guarantees the seed-path form and the manifest-path form can never diverge.
+  // for the SAME file. Keying + reading raw let every read site (`patchedPings`, `activeReading`,
+  // `candidates`) look up a form that never matched a write site → `undefined` → `no-data`, so a
+  // config the app HAD a good measurement for still read as unmeasured. Normalizing every write +
+  // read guarantees the seed-path form and the manifest-path form can never diverge. (Historically
+  // this also silently disarmed the frontend auto-switch engine, which read `activeReading` every
+  // tick; that engine was deleted in 28-09, but the display consequence above is unchanged.)
   const lastGoodByPath = useRef<Record<string, ConfigPing>>({});
 
   // F1 (17-REVIEW): the through-tunnel POISON boundary. A manual «Обновить пинг» while CONNECTED probes
@@ -209,7 +237,7 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     }
     // Record each config's latest numeric DIRECT band — but ONLY while DISCONNECTED. A manual ping
     // while connected (now possible — targets always include every card) travels through the tunnel
-    // (F26), so it is NOT an honest pre-connect RTT; caching it would poison the frozen band the engine
+    // (F26), so it is NOT an honest pre-connect RTT; caching it would poison the frozen band the cards
     // and the post-disconnect bridge rely on. So skip the cache write while tunnelUp — the tunnel-routed
     // number is shown live on the card (patchedPings below) but never becomes the retained "good" value.
     if (!tunnelUp) {
@@ -228,7 +256,7 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     }
     // F23: invalidate entries whose path left the config list (deleted config), so a REUSED path
     // (delete X, import a different server Y at the same filename) never serves X's retained RTT to
-    // Y's card/engine. Mirrors usePerConfigPing's WR-05 prune of the id-keyed pings map.
+    // Y's card. Mirrors usePerConfigPing's WR-05 prune of the id-keyed pings map.
     // Fable R2 review (MINOR): SKIP the prune when the list is transiently EMPTY. useConfigList.reload()'s
     // catch does setConfigs([]) on a failed list_configs invoke; without this guard a single failed
     // reload while connected would wipe the WHOLE cache — including the connected active config's
@@ -318,7 +346,7 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     // (targets now include every card even connected, so a manual round populates `pings`) — the owner
     // wants to see a fresh number on demand. Otherwise (no manual refresh since connect) freeze the card
     // at its retained pre-connect band. The live connected number is tunnel-routed (F26) and is
-    // display-only — the engine still reads the frozen band (candidates below).
+    // display-only — `candidates`/`activeReading` below still read the frozen band.
     const next: Record<string, ConfigPing> = {};
     const activeConfig = visibleConfigs.find((c) => samePath(c.path, activeConfigPath));
     for (const c of visibleConfigs) {
@@ -351,14 +379,13 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pings, visibleConfigs, tunnelUp, seedVersion, pinging]);
 
-  // D-02 candidate list: inactive configs in manifest order, each with its latest reading. The engine
-  // consumes this only while connected+masterOn; when off it is harmlessly ignored.
-  // F24 (14-UAT round 3): while CONNECTED feed the engine the STABLE frozen pre-connect reachability
+  // D-02 candidate list: inactive configs in manifest order, each with its latest reading. See the
+  // `ConfigPingSource.candidates` note — since 28-09 this steers nothing, it is a read-only view.
+  // F24 (14-UAT round 3): while CONNECTED it resolves the STABLE frozen pre-connect reachability
   // (lastGoodByPath — the same number the card shows), NEVER the live through-tunnel probe. The live
-  // probe is garbage while connected (rides the tunnel, fluctuates 190↔600 ms), so basing a switch
-  // decision on it caused false verdicts; the frozen pre-connect reachability is the best STABLE proxy
-  // for a candidate's quality. While DISCONNECTED the live direct probe is honest (and the engine is
-  // inert anyway).
+  // probe is garbage while connected (rides the tunnel, fluctuates 190↔600 ms); the frozen pre-connect
+  // reachability is the best STABLE proxy for a config's quality. While DISCONNECTED the live direct
+  // probe is honest, so it is used as-is.
   const candidates: Candidate[] = useMemo(
     () =>
       visibleConfigs
@@ -378,25 +405,25 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     [visibleConfigs, activeConfigPath, pings, tunnelUp],
   );
 
-  // PA-2 (17-02): the ACTIVE config's reading the auto-switch engine evaluates for a breach. This
-  // REPLACES the dishonest through-tunnel `probe_tunnel_latency` the engine used to invoke each tick
-  // (F26 caught it reading 14 ms while the direct RTT was 69 ms — it bypassed the tunnel). While
-  // CONNECTED we hand the engine the SAME frozen pre-connect band the active card shows (D-02 —
-  // `lastGoodByPath[activeConfigPath]`); the through-tunnel probe is retired entirely. While
-  // DISCONNECTED it is the live direct probe (the engine is inert then, so the value is moot). A config
-  // with no retained reading reads honest `no-data` (neutral — the engine treats a transient no-data as
-  // "wait", never a breach). One honesty thread: the D-04-truthful number feeds BOTH the card and this.
+  // PA-2 (17-02): the ACTIVE config's honest reading. While CONNECTED it is the SAME frozen pre-connect
+  // band the active card shows (D-02 — `lastGoodByPath[activeConfigPath]`); the through-tunnel
+  // `probe_tunnel_latency` that used to stand in for it is retired entirely, because F26 caught it
+  // reading 14 ms while the server's direct RTT was 69 ms — it bypassed the tunnel rather than
+  // measuring it (see the note in `src-tauri/src/commands/ping.rs`). While DISCONNECTED it is the live
+  // direct probe. A config with no retained reading reads honest `no-data` rather than a fabricated
+  // number. One honesty thread: the D-04-truthful measurement feeds BOTH the card and this.
   // seedVersion re-derives this after a post-freeze seedRetainedPing ref write (same reason patchedPings
-  // depends on it), so the connecting→connected transition surfaces the seeded active band to the engine.
+  // depends on it), so the connecting→connected transition surfaces the seeded active band here too.
+  // Like `candidates`, this drives no decision since 28-09 — see the interface note above.
   const activeReading: Reading = useMemo(() => {
     const activeConfig = visibleConfigs.find((c) => samePath(c.path, activeConfigPath));
     // F2 (17-REVIEW): key the frozen-band lookup off the RESOLVED `activeConfig.path` (normalized), NOT
     // the raw `activeConfigPath` prop. The prop comes from localStorage `tt_config_path` in a different
     // string form (`\` vs `/`, drive-letter case) than the manifest `c.path` the cache is written under;
-    // indexing raw returned `undefined` on any such mismatch → `no-data` every tick → useAutoSwitch reset
-    // its breach counter and returned BEFORE decideAutoSwitch, so auto-switch was silently dead for the
-    // whole session while the UI claimed it was armed. `activeConfig` is already resolved via `samePath`
-    // just above, so its `path` is the canonical manifest form — normalize it to match the write key.
+    // indexing raw returned `undefined` on any such mismatch → an honest-looking `no-data` for a config
+    // whose good band was sitting in the cache all along, for the whole session. `activeConfig` is
+    // already resolved via `samePath` just above, so its `path` is the canonical manifest form —
+    // normalize it to match the write key.
     const source = tunnelUp
       ? activeConfig
         ? lastGoodByPath.current[normalizePath(activeConfig.path)]

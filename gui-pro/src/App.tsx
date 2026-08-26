@@ -16,6 +16,7 @@ import {
 import RoutingPanel from "./components/RoutingPanel";
 import AboutPanel from "./components/AboutPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
+import { VPN_FLOW_EVENT, type VpnFlowEvent } from "./shared/ipc/events";
 import { PanelErrorBoundary } from "./shared/ui/PanelErrorBoundary";
 import { VpnProvider } from "./shared/context/VpnContext";
 import { useKeyboardShortcuts } from "./shared/hooks/useKeyboardShortcuts";
@@ -30,8 +31,6 @@ import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
 import { useDeepLinkImport } from "./shared/hooks/useDeepLinkImport";
 import { useConfigLifecycle } from "./shared/hooks/useConfigLifecycle";
 import { useAutoConnect } from "./shared/hooks/useAutoConnect";
-import { useAutoSwitch } from "./shared/hooks/useAutoSwitch";
-import { useAppSettings } from "./shared/hooks/useAppSettings";
 import { useConfigPingSource } from "./shared/hooks/useConfigPingSource";
 import { useTabPersistence } from "./shared/hooks/useTabPersistence";
 import { useActivityLogStartup } from "./shared/hooks/useActivityLogStartup";
@@ -572,7 +571,8 @@ function App() {
       // alongside the ping push. FIX for the origin-leak mislabel: `pending_connect_origin` is a single
       // shared AppState cell. A launch AutoConnectLaunch origin whose Connected is observed only via the
       // mount snapshot is never consumed, so it survived into the NEXT connect — and the manual connect
-      // path (unlike useAutoSwitch → AutoSwitch and useAutoConnect → AutoConnectLaunch) never set its
+      // path (unlike useAutoConnect → AutoConnectLaunch, and now the Rust failover walk → AutoSwitch,
+      // both of which stamp their own origin) never set its
       // own origin, so it read the STALE cell and mislabelled itself «Автоподключение при запуске». By
       // asserting Manual here (this callback fires at every manual connect/switch site, right before the
       // connect), a stale origin can never leak into a manual connect: every initiator now sets its own
@@ -784,22 +784,21 @@ function App() {
   });
   useAutoConnect({ config, status, setStatus, setError, seedConfigPing: seedRetainedPing });
 
-  // ─── Phase 12 (12-07): smart auto-switch engine ───
-  // (The config-list + inactive-ping source it consumes — configPingSource — now lives ABOVE
-  // useVpnActions, see Fable-A review #3.)
-  // The persisted «Авто-режим» prefs (the SAME store the AutoModeSettings section writes). The
-  // master toggle gates the whole engine; threshold/interval/checks tune it.
-  const { settings: autoModeSettings } = useAppSettings();
-  // useAutoSwitch runs window-independently (the window hides-not-destroys to tray, so the FE hook
-  // keeps monitoring while connected). It is INERT unless connected + masterOn (default OFF), so a
-  // fresh install never auto-switches. useAutoConnect (above) is UNCHANGED — startup still targets
-  // the last-used config (D-01); the engine then keeps monitoring the active config (D-05) and, on a
-  // sustained breach, switches to the first healthy candidate via the EXISTING switchTo (D-02/D-04).
-  // The auto-switch engine must PROMOTE the chosen config to the app-level active pointer too —
-  // otherwise after an auto-switch `config.configPath` still points at the OLD config, so the engine
-  // keeps monitoring the wrong (now-inactive) server and the rest of the single-config surface
-  // (Routing/Settings/status panel, tt_config_path) goes stale. Mirror handleConnectConfig's promote,
-  // but awaitable so the engine arms the cooldown only after the disconnect→connect resolves.
+  // ─── Failover lives in Rust (27 D-06, plan 28-09) ───
+  // Phase 12's `useAutoSwitch` engine used to be mounted here: a timer that re-read the active
+  // config's frozen pre-connect latency band every N seconds and, after N consecutive breaches,
+  // switched to the first candidate below a threshold. It is DELETED. Failover now triggers on a
+  // real loss of the tunnel in `connectivity::should_failover` and walks the priority-ordered
+  // participating servers in `run_failover_walk` (28-02) — a binary fact the app can actually
+  // observe, instead of a latency number this process cannot honestly measure (F26; there is no
+  // through-tunnel RTT available to the webview). The switch reaches this window on the existing
+  // `vpn-flow` channel with `origin: "failover"` (28-03), and the SAME adoption branch that handles
+  // a tray connect re-points `config.configPath` + `tt_config_path` and refreshes the list — so the
+  // promotion the old engine did by hand still happens, one seam further down.
+  //
+  // Do NOT re-mount a frontend poller here. The «Авто-режим» master toggle is no longer read in
+  // App.tsx at all: `useAppSettings` mirrors it into `app_settings.json` (28-01) because the Rust
+  // monitor runs with no window open and cannot read localStorage.
 
   // Phase 13 (13-08b / 13-12): the ACTIVE-config connect (status-panel «Подключить», keyboard
   // shortcut, About/Connection panels) goes through `handleConnect`, which connects
@@ -1188,34 +1187,11 @@ function App() {
     [switchTo, pushPendingConnectPing, revertToPrevious, markLastUsed],
   );
 
-  // Phase 14 (D-10): the AUTO-switch shares the identical seamless amber experience + in-flight guard
-  // as the manual switch — it is a thin wrapper over the shared performSwitch (pushPing:false: the
-  // AutoSwitch origin is stamped inside switchTo's seam, not the manual pushPendingConnectPing). The
-  // engine already gates itself while status≠"connected" + the ~60s cooldown (D-09); performSwitch's
-  // connectInFlightRef additionally makes it mutually exclusive with every manual initiator (CR-01).
-  // FAB-06: it returns performSwitch's `{ accepted }` so useAutoSwitch only consumes the breach +
-  // arms the cooldown when the switch was ACTUALLY accepted (a refused/no-op tick keeps the count).
-  const handleAutoSwitch = useCallback(
-    (path: string): Promise<{ accepted: boolean }> => performSwitch({ path, pushPing: false }),
-    [performSwitch],
-  );
-
-  useAutoSwitch({
-    masterOn: autoModeSettings.masterOn,
-    thresholdMs: autoModeSettings.thresholdMs,
-    intervalSec: autoModeSettings.intervalSec,
-    checksN: autoModeSettings.checksN,
-    status,
-    activeConfigPath: config.configPath || undefined,
-    // PA-2 (17-02): the engine now decides on the ACTIVE config's FROZEN pre-connect band (the same
-    // honest number the card shows) instead of the retired through-tunnel `probe_tunnel_latency`.
-    activeReading: configPingSource.activeReading,
-    candidates: configPingSource.candidates,
-    switchTo: handleAutoSwitch,
-    // Phase 14 (D-13 / Pitfall 5): belt-and-suspenders — the engine short-circuits before doSwitch
-    // while the App-owned switch is in flight, so a second auto-switch cannot race the swap.
-    isSwitching,
-  });
+  // Plan 28-09: `handleAutoSwitch` stood here — a thin `performSwitch({ pushPing: false })` wrapper
+  // whose ONLY caller was the deleted `useAutoSwitch` engine. It went with it. `performSwitch` and
+  // every manual initiator (card tap, keyboard shortcut, status-panel button) are untouched; the
+  // Rust failover walk does not route through `performSwitch` at all — it respawns the sidecar
+  // itself and tells this window afterwards on the `vpn-flow` channel (28-03).
 
   useTabPersistence({ activeTab, config, status, connectedSince });
   useActivityLogStartup();
@@ -1250,25 +1226,101 @@ function App() {
   //   - connect@tray → ADOPT the pointer (setConfig + tt_config_path + refresh the list) so the hero
   //     follows the config the tray actually connected, instead of a stale/reverted FE pointer (the
   //     owner's "tray icon green while the tab shows all «Подключить» / no active card" split).
+  //
+  // Phase 28 (28-03, OQ-1): the SAME branch now also serves `origin: "failover"` — the Rust
+  // queue walk recovering on a candidate that is not the origin server. It is the identical
+  // problem one layer down: Rust is connected to B while the frontend-owned pointer still says
+  // A, so Routing/Settings/the status panel all describe a server the user is no longer on (the
+  // desync spelled out at App.tsx:790-803). Rust deliberately does NOT write frontend storage —
+  // the switch travels the same direction every other status fact already travels, and the
+  // frontend keeps ownership of the pointer.
+  //
+  // ONE branch, TWO accepted origins — on purpose. Giving failover its own copy of the adoption
+  // body is how the two paths drift: a later fix to the tray adoption would silently miss the
+  // failover one. Any other origin still early-returns (T-28-11): the payload steers app state,
+  // so an unrecognised sender adopts nothing, and `VpnFlowOrigin` makes the accepted set a
+  // compile-time closed union rather than a pair of string literals.
+  // FB-02 (Fable-5 Phase-28 review): a LIVE ref mirroring the config list, read synchronously by
+  // the listener closure below. Same render-time mirror pattern as `statusRef` /
+  // `seamlessSwitchActiveRef` above, and for the same reason: putting `configPingSource.configs`
+  // in the effect's dependency array would tear down and re-register the `vpn-flow` listener on
+  // every ping tick that reshapes the list — and a listener that is momentarily absent is a
+  // failover announcement that is silently lost.
+  const configsRef = useRef(configPingSource.configs);
+  configsRef.current = configPingSource.configs;
+
   useEffect(() => {
-    const unlistenPromise = listen<{ action?: string; origin?: string; configPath?: string }>(
-      "vpn-flow",
+    const unlistenPromise = listen<VpnFlowEvent>(
+      VPN_FLOW_EVENT,
       (event) => {
         const { action, origin, configPath } = event.payload || {};
-        if (origin !== "tray") return;
+        if (origin !== "tray" && origin !== "failover") return;
         if (action === "disconnect") {
           onExternalDisconnect();
         } else if (action === "connect" && configPath) {
           setConfig((prev) => ({ ...prev, configPath }));
           localStorage.setItem("tt_config_path", configPath);
+          // WR-06 (28-REVIEW) — the FRONTEND sibling of blocker CR-01. CR-01 fixed the BACKEND's
+          // own record of the live config (`AppState.config_path`, committed in `respawn_sidecar`);
+          // this is the OTHER pointer the same failover left stale — the manifest's "last used"
+          // marker, which is a file on disk, not session state.
+          //
+          // What breaks without it: the walk moves A→C and this window adopts C for the session,
+          // but the manifest still records A. Two consequences, both real:
+          //   1. `list_configs` sorts `last_used DESC, order ASC` (commands/manifest.rs), so the
+          //      dead A keeps the top of the «Подключение» list while the app runs on C.
+          //   2. `useAutoConnect` resolves its launch target from the manifest marker, preferring
+          //      the app-level pointer only when that pointer is usable (the WR-05 reconciliation:
+          //      `tt_config_path` set AND still listed in the manifest). Whenever it is not —
+          //      cleared storage, or an active path that has left the manifest — the restart
+          //      resumes A, the server the app just failed away from, and burns a whole fresh
+          //      failover walk to get back to C.
+          // Adopting a connect IS a use of that server, so the persisted marker moves with it.
+          //
+          // Deliberately inside the SHARED branch, so it covers `tray` as well as `failover`: a
+          // tray connect is just as much a use of that server, `performSwitch` already stamps the
+          // marker for a manual switch, and stamping only one origin is exactly how the two paths
+          // drift apart (the reason this branch is shared in the first place).
+          //
+          // Fire-and-forget like every other caller: `markLastUsed` never rejects (best-effort —
+          // the tunnel is already up, the marker is bookkeeping) and no config content crosses,
+          // only a manifest id (D-29). The refresh below may therefore re-read the pre-stamp
+          // order; that is cosmetic and self-heals on the next list read, whereas awaiting here
+          // would hold the pointer adoption behind two IPC round-trips.
+          void markLastUsed(configPath);
           connectionPanelRef.current?.refresh();
+          // FB-02 (D-04 conformance): announce an AUTOMATIC switch in the window too.
+          //
+          // D-04 says «announce EVERY automatic switch, whether or not the window is open», and
+          // the desktop notification carries it — but `notify::maybe_fire` suppresses that
+          // notification whenever the main window is visible and not minimized, on the recorded
+          // premise that «the FE snackbar already reports this transition». For THIS transition
+          // that premise was false: this branch only re-pointed state, and no in-window surface
+          // rendered the autoSwitched copy anywhere. Net effect with the window open: the hero
+          // card silently morphed into a different server — a different exit country — with no
+          // explanation at all. The two surfaces are now genuinely complementary again: the
+          // desktop notification when the window is away, this snackbar when it is in front.
+          //
+          // Only for `failover`. A TRAY connect is something the user just did by hand; telling
+          // them they did it would be noise, and the tray path is not what D-04 is about.
+          if (origin === "failover") {
+            const match = configsRef.current.find((c) => samePath(c.path, configPath));
+            pushSuccess(
+              match?.name
+                ? i18n.t("messages.auto_switched", { name: match.name })
+                // The list can be mid-refresh, or the config may have left the manifest. Say the
+                // true thing without a name rather than inventing one or saying nothing —
+                // «somewhere else» is still the fact the user needs.
+                : i18n.t("messages.auto_switched_unnamed"),
+            );
+          }
         }
       },
     );
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [onExternalDisconnect]);
+  }, [onExternalDisconnect, pushSuccess, i18n, markLastUsed]);
 
   // ─── Log viewing ───
   // Logs are surfaced exclusively through the in-window LogPanel overlay
@@ -1749,6 +1801,10 @@ function App() {
             // Phase 14 (D-13): lock «Авто-режим» master toggle + priority reorder while a switch is
             // in flight — a mid-switch master-on / reorder could arm a competing switch (Pitfall 5).
             isSwitching={isSwitching}
+            // «Порядок переключения» collapses same-server twins exactly as the Connection tab does,
+            // and the active file is the tiebreak that decides which twin represents the pair. Same
+            // value the Connection tab uses, so the two lists cannot disagree about a server.
+            activeConfigPath={config.configPath}
           />
         </div>
 

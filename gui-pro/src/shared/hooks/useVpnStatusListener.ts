@@ -71,7 +71,7 @@ export function useVpnStatusListener({
     // resolves, unlisten immediately.
     let cancelled = false;
     let resolvedUnlisten: (() => void) | null = null;
-    const unlistenStatus = listen<{ status: VpnStatus; error?: string; attempt?: number; max?: number }>(
+    const unlistenStatus = listen<{ status: VpnStatus; error?: string; attempt?: number; max?: number; failover?: boolean; server?: string }>(
       "vpn-status",
       (event) => {
         // AUDIT-2026-06-11 #14: mark BEFORE any processing — from this moment the mount snapshot
@@ -79,15 +79,24 @@ export function useVpnStatusListener({
         sawLiveStatusEventRef.current = true;
         traceLog(`vpn-status: ${event.payload.status}${event.payload.error ? ` error=${event.payload.error}` : ""}`);
 
-        // 02-20: surface the per-attempt «Попытка N/N» counter. The backend attaches
-        // `attempt`/`max` ONLY on a `reconnecting` event from the server-silent retry supervisor.
-        // Store them when present so StatusPanel can render the progress; clear them on a TERMINAL
-        // status so a stale «Попытка 3/3» can't linger over a later «Подключено» / «Восстановление»
-        // / «Отключено». Done outside the setStatus updater (no dependency on prev) — a plain
-        // idempotent side effect. F0/F4: cleared only on connected/disconnected/error (a transient
-        // recovering interleave must not wipe the counter before it renders).
+        // 02-20: surface the reconnect progress counter. The backend attaches `attempt`/`max`
+        // ONLY on a `reconnecting` event from the server-silent retry supervisor. Store them when
+        // present so StatusPanel can render the progress; clear them on a TERMINAL status so a
+        // stale counter can't linger over a later «Подключено» / «Восстановление» / «Отключено».
+        // Done outside the setStatus updater (no dependency on prev) — a plain idempotent side
+        // effect. F0/F4: cleared only on connected/disconnected/error (a transient recovering
+        // interleave must not wipe the counter before it renders).
+        //
+        // `failover` rides along and says what the two numbers MEAN — retries of one server, or a
+        // position in the queue of servers. It is carried, never interpreted here; the sentence is
+        // StatusPanel's job.
         if (event.payload.status === "reconnecting" && typeof event.payload.attempt === "number" && typeof event.payload.max === "number") {
-          setReconnectProgress?.({ attempt: event.payload.attempt, max: event.payload.max });
+          setReconnectProgress?.({
+            attempt: event.payload.attempt,
+            max: event.payload.max,
+            failover: event.payload.failover === true,
+            server: event.payload.server ?? null,
+          });
         } else if (
           event.payload.status === "connected" ||
           event.payload.status === "disconnected" ||

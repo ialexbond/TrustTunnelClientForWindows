@@ -87,17 +87,29 @@ describe("StatusPanel", () => {
     expect(btn).toBeEnabled();
   });
 
-  it("renders reconnecting state with an INERT spinner, not a live «Отмена» (BUG-A2)", () => {
-    // BUG-A2 (17-uat): `reconnecting` is AMBIGUOUS — it is set BOTH by the backend auto-retry
-    // supervisor (reconnectResolve null → the cancel would be safe) AND by a FE save-and-reconnect
-    // whose teardown ARMS the shared reconnectResolve latch (the cancel would be INERT — resolving
-    // that latch early is the BUG-A double-spawn storm). Since status alone can't tell them apart, the
-    // show-condition must NOT offer a live-but-dead cancel here — it renders the disabled spinner.
+  it("renders a LIVE «Отмена» while a BACKEND auto-reconnect runs (owner UAT 2026-08-26)", () => {
+    // `reconnecting` used to be treated as AMBIGUOUS — it is set BOTH by the backend auto-retry
+    // supervisor (reconnectResolve null → the cancel is safe) AND by a FE save-and-reconnect whose
+    // teardown ARMS the shared latch (the cancel would be INERT, and resolving that latch early is
+    // the BUG-A double-spawn storm). Hiding it in both cases meant an automatic reconnect could only
+    // be stopped from the tray menu, which the owner hit ten attempts deep.
+    //
+    // The two cases ARE separable: a FE save-and-reconnect raises `connectPending` for exactly its
+    // own span, a backend auto-retry raises nothing. Without `connectPending` this is the backend's
+    // reconnect and the cancel lands.
     render(<StatusPanel {...defaultProps} status="reconnecting" />);
-    // The status badge still reads «Переподключение» (its dot carries the connecting variant) …
     expect(screen.getByTestId("status-dot")).toBeInTheDocument();
-    // … but there is NO live «Отмена» button. The only action button is the DISABLED spinner (its
-    // accessible name is the status label «Переподключение», which the badge text also uses).
+    const cancel = screen.getByRole("button", { name: /Отмена/ });
+    expect(cancel).toBeEnabled();
+    fireEvent.click(cancel);
+    expect(defaultProps.onDisconnect).toHaveBeenCalled();
+  });
+
+  it("keeps the INERT spinner for a FE save-and-reconnect (reconnecting + connectPending)", () => {
+    // The other half of the same rule, and the reason the discriminator is `connectPending` rather
+    // than «show it whenever the status is reconnecting»: here the App's shared latch is armed, so a
+    // live button would be a dead no-op — the exact thing BUG-A2 forbids.
+    render(<StatusPanel {...defaultProps} status="reconnecting" connectPending />);
     expect(screen.queryByRole("button", { name: /Отмена/ })).not.toBeInTheDocument();
     const btn = screen.getByRole("button", { name: /Переподключение/ });
     expect(btn).toBeDisabled();
@@ -120,6 +132,24 @@ describe("StatusPanel", () => {
     expect(screen.getByText("Попытка 2 из 3")).toBeInTheDocument();
   });
 
+  it("names the SERVER, not the attempt, while a failover walk is running", () => {
+    // Owner UAT 2026-08-26. On a walk every candidate gets exactly one attempt, so the retry
+    // wording rendered «Попытка 1 из 1» on server after server — a counter that never moved,
+    // describing a process the person could not see. With `failover` the same two numbers are the
+    // QUEUE position, and the line answers the question actually being asked: how far along is
+    // this, and how much is left.
+    render(
+      <StatusPanel
+        {...defaultProps}
+        status="reconnecting"
+        reconnectProgress={{ attempt: 2, max: 4, failover: true }}
+      />
+    );
+    expect(screen.getByText("Пробуем сервер 2 из 4")).toBeInTheDocument();
+    // …and the retry wording must NOT also appear — the two readings are mutually exclusive.
+    expect(screen.queryByText(/Попытка/)).not.toBeInTheDocument();
+  });
+
   it("does NOT show any sub-text for a manual reconnect (no counter)", () => {
     // A manual save+reconnect is also `reconnecting` but carries no attempt counter —
     // nothing was lost, so neither the «Связь…» line (WR-01: banner-only) nor the
@@ -131,7 +161,7 @@ describe("StatusPanel", () => {
 
   it("clicking «Отмена» during recovering calls onDisconnect (cancel/stop)", () => {
     // BUG-A2: `recovering` is a reconnectResolve-null state, so it keeps the LIVE, working «Отмена».
-    // (`reconnecting` moved to the inert spinner — asserted above.)
+    // (`reconnecting` keeps it too now, unless a FE save-and-reconnect is what raised it — above.)
     render(<StatusPanel {...defaultProps} status="recovering" />);
     fireEvent.click(screen.getByRole("button", { name: /Отмена/ }));
     expect(defaultProps.onDisconnect).toHaveBeenCalledOnce();

@@ -364,6 +364,45 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// CR-01 (Phase 28 review) — repoint the BACKEND's own record of which config the live
+    /// sidecar was launched from.
+    ///
+    /// WHAT BROKE. `config_path` used to be written in exactly ONE place — `vpn_connect`, coupled
+    /// to the generation bump (G-19-6 v2, see the comment there). The Phase-28 failover walk
+    /// respawns candidates through `respawn_sidecar`, which never touched it, so after a walk moved
+    /// the user A→C the backend still believed it was on A. Five Rust consumers then read the dead
+    /// origin, and each one is a visible defect:
+    ///   1. `notify::maybe_fire` resolves the «Переключено автоматически» plate NAME from it — the
+    ///      plate announcing the switch named the server the walk just abandoned.
+    ///   2. `connectivity::handoff_reconnect_supervisor` (internet-lost recovery) respawns it — a
+    ///      local uplink blip silently returned the user to the dead server, contradicting the
+    ///      sentence the UI itself shows: «Обратно на прежний сервер приложение само не
+    ///      возвращается» (27 D-09).
+    ///   3. `connectivity::build_failover_queue` seeds the NEXT walk's origin with it, spending the
+    ///      walk's first and only attempt (D-02) on a server already known to be down.
+    ///   4. `tray::tray_vpn_connect` connects it from the tray.
+    ///   5. `sidecar.rs`'s `Terminated` arm respawns it with the FULL 10-attempt budget if C's
+    ///      process later dies — either ~10 attempts against a dead server, or a silent automatic
+    ///      RETURN to A if A has meanwhile recovered.
+    ///
+    /// WHY THIS IS NOT A BREACH OF OQ-1. OQ-1 rules that the FRONTEND owns the frontend-facing
+    /// pointer (`config.configPath` / `tt_config_path`) and that Rust must not write frontend
+    /// storage. It says nothing about Rust's own bookkeeping: `state.config_path` is the backend's
+    /// private record of the process it spawned, and a private record that does not track reality
+    /// is simply a bug. The `vpn-flow` announcement still carries the fact to the window, and the
+    /// window still owns its own pointer.
+    ///
+    /// Poison-recovering (`unwrap_or_else(|e| e.into_inner())`) like every other lock on this
+    /// struct: a poisoned pointer must not silently keep the STALE value, which is the failure this
+    /// method exists to end.
+    pub fn commit_live_config_path(&self, config_path: &str) {
+        let mut slot = self
+            .config_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *slot = Some(config_path.to_string());
+    }
+
     /// FAB-R4 (Fable-5 re-fix) — STAMP `switch_authorized_generation` with the live
     /// `connection_generation` when a switch / save-and-reconnect is authorized (the
     /// `set_switch_or_reconnect_pending(pending:true)` raise).
@@ -487,6 +526,32 @@ struct AdapterConflictPayload {
     message: String,
 }
 
+/// The progress counter that rides a `Reconnecting` event — the three fields travel TOGETHER.
+///
+/// Grouped rather than passed as three parallel `Option`s because they are one fact, not three:
+/// `failover` says what `attempt`/`max` MEAN, so a caller that supplied one without the others
+/// would be describing nothing. (It also keeps `write_vpn_status_and_emit` inside clippy's argument
+/// budget, but the reason to group them is that they are a single unit.)
+#[derive(Clone)]
+pub struct ReconnectProgress {
+    /// Retry number on a plain reconnect; the candidate's place in the queue on a failover walk.
+    pub attempt: u32,
+    /// Retry budget on a plain reconnect; how many servers the walk will try on a failover walk.
+    pub max: u32,
+    /// `true` on a failover walk — see `set_vpn_status_reconnecting_attempt` for what it changes.
+    pub failover: bool,
+    /// DISPLAY NAME of the server this step is reaching for, on a failover walk. `None` on a plain
+    /// reconnect (the server has not changed, so naming it says nothing) and whenever the name
+    /// cannot be read from the config.
+    ///
+    /// Why a name at all: two integers alone left the user watching «Попытка 1 из 1» — a counter
+    /// that never moves, about a server they cannot identify. The words (28-UAT test 3):
+    /// «не видно, к какому серверу он пытается подключиться… хотя бы писалось переключение на
+    /// такой-то конфиг». D-29: a display name only, never a host, a login, or a password — the same
+    /// string the notification plate has always carried.
+    pub server: Option<String>,
+}
+
 #[derive(Clone, Serialize)]
 pub struct VpnStatusPayload {
     // Typed status — serializes to the same lowercase wire strings as before.
@@ -504,6 +569,20 @@ pub struct VpnStatusPayload {
     attempt: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max: Option<u32>,
+    // Owner UAT 2026-08-26: is this counter about RETRIES of one server, or about walking a QUEUE
+    // of servers? On a failover walk each candidate gets exactly one attempt, so the retry counter
+    // read «Попытка 1 из 1» on every server — a number that changes nothing and explains nothing
+    // («идёт какой-то процесс, который пользователю неизвестен»). With this flag the same two
+    // integers carry the WALK's position instead — which server of how many — and the frontend
+    // picks the matching sentence. Optional and `skip_serializing_if`, so an ordinary retry emits
+    // exactly the bytes it always did. A bool, never a name or a path (D-29).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failover: Option<bool>,
+    // The server a failover step is reaching for, by DISPLAY NAME (28-UAT test 3). Present only on a
+    // walk's `reconnecting` events, so an ordinary retry still emits exactly the bytes it always did.
+    // D-29: a display name, never a host/login/secret.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server: Option<String>,
 }
 
 /// The ONLY writer of VPN status and the ONLY emitter of the `"vpn-status"` event
@@ -544,7 +623,7 @@ pub fn set_vpn_status_inner(
     // No attempt index on the generic path — only the reconnect supervisor's
     // per-attempt writer (`set_vpn_status_reconnecting_attempt`) populates those, so
     // this emit stays the byte-identical `{status, error}` shape every consumer reads.
-    write_vpn_status_and_emit(app, vpn_status, last_error, status, error, None, None);
+    write_vpn_status_and_emit(app, vpn_status, last_error, status, error, None);
 }
 
 /// The actual canonical write of `vpn_status`/`last_error` followed by the ONE
@@ -560,8 +639,7 @@ fn write_vpn_status_and_emit(
     last_error: &Arc<Mutex<Option<String>>>,
     status: VpnStatus,
     error: Option<String>,
-    attempt: Option<u32>,
-    max: Option<u32>,
+    progress: Option<ReconnectProgress>,
 ) {
     // WR-01: recover the poisoned guard so the canonical write ALWAYS lands
     // before we emit. The previous `if let Ok` silently dropped the write on a
@@ -591,7 +669,16 @@ fn write_vpn_status_and_emit(
     }
     app.emit(
         "vpn-status",
-        VpnStatusPayload { status, error, attempt, max },
+        VpnStatusPayload {
+            status,
+            error,
+            attempt: progress.as_ref().map(|p| p.attempt),
+            max: progress.as_ref().map(|p| p.max),
+            // Only ever present on a walk: an ordinary retry keeps emitting the exact bytes it
+            // always did, so no existing consumer or snapshot test sees a new field.
+            failover: progress.as_ref().and_then(|p| p.failover.then_some(true)),
+            server: progress.and_then(|p| p.server),
+        },
     )
     .ok();
 
@@ -605,20 +692,28 @@ fn write_vpn_status_and_emit(
     crate::notify::maybe_fire(app, prev, status);
 }
 
-/// 02-20 status-UX split: write+emit a `Reconnecting` status carrying the per-attempt
-/// index «Попытка N/N» for the server-silent auto-retry supervisor. Routes through the
-/// SAME single owner + emitter (`write_vpn_status_and_emit`) as `set_vpn_status` (D-01
-/// / STATUS-02) — it does NOT introduce a second status writer — but populates the
-/// optional `attempt`/`max` fields so the UI can show progress. There is exactly ONE
-/// `"vpn-status"` emit per call (no double-emit / flicker). `error` is left `None` (a
-/// healthy retry is not an error; the descriptive «Связь с сервером потеряна» banner is
-/// the frontend's job in Stage 2). `attempt`/`max` are a small integer index
-/// (secret-free, D-09), never a credential.
+/// 02-20 status-UX split: write+emit a `Reconnecting` status carrying the progress counter the
+/// server-silent auto-retry supervisor surfaces. Routes through the SAME single owner + emitter
+/// (`write_vpn_status_and_emit`) as `set_vpn_status` (D-01 / STATUS-02) — it does NOT introduce a
+/// second status writer — but populates the optional fields so the UI can show progress. There is
+/// exactly ONE `"vpn-status"` emit per call (no double-emit / flicker). `error` is left `None` (a
+/// healthy retry is not an error; the descriptive «Связь с сервером потеряна» banner is the
+/// frontend's job). The numbers are a small integer index (secret-free, D-09), never a credential.
+///
+/// `failover` says what the two numbers MEAN, and the caller must not get it wrong:
+///
+/// - `false` — retries of ONE server: «Попытка {attempt} из {max}»;
+/// - `true`  — position in the failover QUEUE: «Пробуем сервер {attempt} из {max}».
+///
+/// On a walk every candidate gets exactly one attempt, so passing the retry index there produced
+/// «Попытка 1 из 1» over and over — the UAT complaint (2026-08-26).
 pub fn set_vpn_status_reconnecting_attempt(
     app: &tauri::AppHandle,
     state: &AppState,
     attempt: u32,
     max: u32,
+    failover: bool,
+    server: Option<String>,
 ) {
     write_vpn_status_and_emit(
         app,
@@ -626,8 +721,7 @@ pub fn set_vpn_status_reconnecting_attempt(
         &state.last_error,
         VpnStatus::Reconnecting,
         None,
-        Some(attempt),
-        Some(max),
+        Some(ReconnectProgress { attempt, max, failover, server }),
     );
 }
 
@@ -1772,17 +1866,60 @@ pub async fn respawn_sidecar(
         }
     };
 
-    // 1. Fully kill the prior child (PID/job) so the WinTUN adapter is released
-    //    before the new spawn (Pitfall 3). On a process-death drop this is already
-    //    None; on a live-sidecar connectivity loss this kills the dead-tunnel child.
+    // CR-01: keep the caller's path string BEFORE step 3 shadows it with the canonical form.
+    // `vpn_connect` stores the RAW string it was handed, and every failover candidate past the
+    // origin is a manifest path — the exact form `notify`, the tray and the next
+    // `build_failover_queue` want to read back. Committing the canonical form instead would
+    // silently change the spelling of the pointer on every ordinary reconnect too, for no gain.
+    let requested_config_path = config_path.to_string();
+
+    // 1-2. Tear the PREVIOUS session down the way a user-initiated disconnect does — not with a
+    //      bare process kill.
+    //
+    //      Owner UAT 2026-08-26: a failover walk tried every one of five servers and all five
+    //      timed out with «Failed to ping location», while disconnecting by hand and connecting to
+    //      those same servers worked immediately. His reading was right and this is where the two
+    //      paths diverged — the previous session's STATE was still installed while the next
+    //      candidate tried to come up:
+    //
+    //        • SYSTEM DNS still pointed at the dead core's resolver, so the candidate's host name
+    //          could not be resolved. That is what every `[egress]` line on his walk was saying:
+    //          `os-best-route if=n/a (server unknown) -> no override`. The guard that pins the
+    //          handshake to a real physical adapter needs the server address, could not get one,
+    //          and stood down on all five attempts — leaving the core to pick a foreign virtual
+    //          adapter that reaches nothing. The adapter was a symptom; the unresolvable name was
+    //          the cause, and it was caused by us.
+    //        • The hosts-file block the old session installed stayed behind.
+    //        • The bare `child.kill()` skipped the graceful window `kill_sidecar` opens — the one
+    //          chance the core gets to remove its own WFP / killswitch filters before dying.
+    //
+    //      `vpn_disconnect` runs all three, which is exactly why the manual route never failed.
+    //      Doing the same here costs one bounded graceful wait (≤1.5s) on the first candidate.
     {
         let prior = state.sidecar_child.lock().ok().and_then(|mut g| g.take());
         if let Some(child) = prior {
-            child.child.kill().ok();
+            // Graceful-then-hard, the same call `vpn_disconnect` makes. The transient
+            // `disconnecting` flag is deliberately NOT latched: the reader task's Terminated arm
+            // already defers to a live supervisor (`reconnect_in_progress`), and latching it here
+            // would trip this function's own WR-05 intent re-check below and bail the respawn.
+            crate::sidecar::kill_sidecar(child).await.ok();
         }
     }
-    // 2. Sweep any stale saved-PID sidecar (per-edition, never image-name — D-07).
+    // Sweep any stale saved-PID sidecar (per-edition, never image-name — D-07).
     kill_stale_sidecar();
+
+    // Put the machine back on its PRE-VPN DNS before anything tries to resolve the next
+    // candidate. Order matters and is not arbitrary:
+    //   restore — undo the dead session's resolver (it also drops the snapshot file on success);
+    //   snapshot — re-take the baseline, which at this instant IS the pre-VPN state, so the
+    //              session about to start still has something to restore on ITS teardown. The
+    //              exists-guard makes this a no-op when the restore failed and kept the old file,
+    //              so a failed restore can never be overwritten with tunnel-resolver state;
+    //   flush   — drop anything the OS cached through the tunnel that just died.
+    routing_rules::cleanup_hosts_block().ok();
+    crate::dns_guard::restore_system_dns();
+    crate::dns_guard::snapshot_system_dns();
+    crate::dns_guard::flush_dns_cache();
 
     // 3. CA-2: confine the config path to the portable data dir BEFORE respawn (same guard
     //    as vpn_connect — canonicalize alone does not confine WHERE the path points). This
@@ -1935,6 +2072,20 @@ pub async fn respawn_sidecar(
             *guard = Some(child);
         }
     }
+
+    // CR-01: the backend's own active-config pointer follows the child we just STORED.
+    //
+    // Placed here on purpose — immediately after the store and AFTER the FAB-R1
+    // `respawn_may_store` refuse above — so the two facts can never disagree: a respawn that was
+    // refused killed its child and returned without reaching this line, so a stale A-retry can
+    // never repoint the pointer at A while a switch's B sidecar is the live one. Conversely every
+    // respawn that DID become the live session repoints it, which is what makes the failover walk
+    // honest for all five consumers listed on `AppState::commit_live_config_path`.
+    //
+    // On an ordinary single-server reconnect this writes back the value that was already there
+    // (the queue's only entry IS `state.config_path`), so the blast radius is exactly the walk.
+    // D-29: an internal pointer write, nothing logged and nothing emitted.
+    state.commit_live_config_path(&requested_config_path);
 
     // 6. Mark Reconnecting through the single mutator; the sidecar markers flip it to
     //    Connected on a successful handshake, which the supervisor waits on.
@@ -2160,12 +2311,12 @@ pub fn check_vpn_status_full(state: tauri::State<'_, AppState>) -> VpnStatusPayl
         .lock()
         .map(|g| g.clone())
         .unwrap_or(None);
-    // The snapshot never carries a live per-attempt counter — `attempt`/`max` are a
-    // transient progress signal on the live event, not persisted state (a window that
-    // mounts mid-reconnect reads the status + reason from here and starts its counter
-    // at the next live attempt event). Both `None` → the snapshot serializes to the
-    // byte-identical `{status, error}` shape (the skip_serializing_if drops them).
-    VpnStatusPayload { status, error, attempt: None, max: None }
+    // The snapshot never carries a live progress counter — `attempt`/`max`/`failover` are a
+    // transient signal on the live event, not persisted state (a window that mounts mid-reconnect
+    // reads the status + reason from here and starts its counter at the next live attempt event).
+    // All `None` → the snapshot serializes to the byte-identical `{status, error}` shape (the
+    // skip_serializing_if drops them).
+    VpnStatusPayload { status, error, attempt: None, max: None, failover: None, server: None }
 }
 
 /// Clear a VPN error from ALL windows (02-09, UAT Gap #3).
@@ -2483,6 +2634,8 @@ mod tests {
             error: None,
             attempt: None,
             max: None,
+            failover: None,
+            server: None,
         };
         assert_eq!(
             serde_json::to_string(&payload).unwrap(),
@@ -2493,19 +2646,59 @@ mod tests {
     #[test]
     fn reconnecting_attempt_payload_carries_counter_fields() {
         // 02-20 status-UX split: a `reconnecting` event from the server-silent retry
-        // supervisor carries the per-attempt index «Попытка N/N». When `attempt`/`max`
-        // are Some, they appear on the wire alongside {status, error} so the UI can show
-        // progress. Lock the exact bytes so the Stage-2 frontend knows the field names
-        // and shape to read.
+        // supervisor carries the progress counter. When `attempt`/`max` are Some, they appear on
+        // the wire alongside {status, error} so the UI can show progress. Lock the exact bytes so
+        // the frontend knows the field names and shape to read.
+        //
+        // A RETRY of one server carries no `failover` key at all — the flag is `skip_serializing_if
+        // = Option::is_none`, which is what keeps this path's bytes exactly what they always were.
         let payload = VpnStatusPayload {
             status: VpnStatus::Reconnecting,
             error: None,
             attempt: Some(2),
             max: Some(3),
+            failover: None,
+            server: None,
         };
         assert_eq!(
             serde_json::to_string(&payload).unwrap(),
             "{\"status\":\"reconnecting\",\"error\":null,\"attempt\":2,\"max\":3}"
+        );
+    }
+
+    #[test]
+    fn failover_walk_payload_marks_the_counter_as_a_queue_position() {
+        // Owner UAT 2026-08-26. On a walk the same two integers mean something else — which SERVER
+        // of how many, not which retry of one server — because every candidate gets exactly one
+        // attempt and «Попытка 1 из 1» told the person nothing. The `failover` flag is what lets
+        // the frontend render «Пробуем сервер 2 из 4» instead, so its presence on the wire is
+        // part of the contract and is locked here.
+        let payload = VpnStatusPayload {
+            status: VpnStatus::Reconnecting,
+            error: None,
+            attempt: Some(2),
+            max: Some(4),
+            failover: Some(true),
+            server: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&payload).unwrap(),
+            "{\"status\":\"reconnecting\",\"error\":null,\"attempt\":2,\"max\":4,\"failover\":true}"
+        );
+
+        // With a candidate name the wire gains ONE more field and nothing else moves — the walk
+        // names the server it is reaching for (28-UAT test 3) without disturbing any other consumer.
+        let named = VpnStatusPayload {
+            status: VpnStatus::Reconnecting,
+            error: None,
+            attempt: Some(2),
+            max: Some(4),
+            failover: Some(true),
+            server: Some("NL Hip Hosting".to_string()),
+        };
+        assert_eq!(
+            serde_json::to_string(&named).unwrap(),
+            "{\"status\":\"reconnecting\",\"error\":null,\"attempt\":2,\"max\":4,\"failover\":true,\"server\":\"NL Hip Hosting\"}"
         );
     }
 
@@ -2520,6 +2713,8 @@ mod tests {
             error: Some("Configuration parse error. Check your config file.".to_string()),
             attempt: None,
             max: None,
+            failover: None,
+            server: None,
         };
         assert_eq!(
             serde_json::to_string(&payload).unwrap(),
@@ -2531,6 +2726,8 @@ mod tests {
             error: None,
             attempt: None,
             max: None,
+            failover: None,
+            server: None,
         };
         assert_eq!(
             serde_json::to_string(&clean).unwrap(),
@@ -2568,6 +2765,8 @@ mod tests {
             error: None,
             attempt: None,
             max: None,
+            failover: None,
+            server: None,
         };
         assert_eq!(
             serde_json::to_string(&recovering).unwrap(),
@@ -2578,6 +2777,8 @@ mod tests {
             error: None,
             attempt: None,
             max: None,
+            failover: None,
+            server: None,
         };
         assert_eq!(
             serde_json::to_string(&reconnecting).unwrap(),
@@ -3158,6 +3359,91 @@ mod tests {
 
         // 5. `vpn_connect(B)` reaches its guard: consume-and-decide against the real atomics.
         state.consume_switch_stamp_and_should_bail(state.connection_generation.load(Ordering::SeqCst))
+    }
+
+    // ── CR-01 (Phase 28 review): the backend's own active-config pointer follows the walk ──
+    //
+    // Same shape as the FAB-R4 integration tests above and for the same reason: the defect was
+    // never in a predicate, it was in the WIRING (`respawn_sidecar` simply never wrote the
+    // pointer), so a vacuum test of a pure function could not have caught it. These drive the two
+    // REAL seams `respawn_sidecar` runs, in the order it runs them — the FAB-R1 ownership refuse
+    // (`lifecycle::respawn_may_store`) and then the pointer commit
+    // (`AppState::commit_live_config_path`) — against the real AppState.
+
+    /// Model the ownership-decision → child-store → pointer-commit sequence `respawn_sidecar`
+    /// performs for ONE candidate. Returns whether the respawn became the live session.
+    fn drive_respawn_pointer_commit(
+        state: &AppState,
+        captured_generation: u64,
+        candidate: &str,
+    ) -> bool {
+        // The FAB-R1 refuse, read exactly as production reads it.
+        if !crate::lifecycle::respawn_may_store(
+            captured_generation,
+            state.connection_generation.load(Ordering::SeqCst),
+            state.user_disconnect_requested.load(Ordering::SeqCst),
+        ) {
+            return false;
+        }
+        // … the child is stored here in production; the pointer commit rides with it.
+        state.commit_live_config_path(candidate);
+        true
+    }
+
+    #[test]
+    fn a_failover_walk_repoints_the_backend_config_pointer_to_the_candidate_that_won() {
+        // CR-01 regression. Walk A→C: the origin A gives up, the walk respawns candidate C and C
+        // connects. The backend pointer MUST read C afterwards, or the plate names A, the
+        // internet-lost respawn returns to A, the next walk's origin is A and the tray connects A.
+        let state = test_app_state();
+        *state.config_path.lock().unwrap() = Some("C:\\cfg\\A.toml".to_string());
+        let captured = state.connection_generation.load(Ordering::SeqCst);
+
+        // Candidate 0 (the origin) is retried first — a no-op rewrite of the same value.
+        assert!(drive_respawn_pointer_commit(&state, captured, "C:\\cfg\\A.toml"));
+        // Candidate 2 wins.
+        assert!(drive_respawn_pointer_commit(&state, captured, "C:\\cfg\\C.toml"));
+
+        assert_eq!(
+            state.config_path.lock().unwrap().as_deref(),
+            Some("C:\\cfg\\C.toml"),
+            "after a failover A→C the backend must believe it is on C, not on the dead origin",
+        );
+    }
+
+    #[test]
+    fn a_respawn_refused_by_the_generation_guard_leaves_the_pointer_alone() {
+        // The other half of the invariant, and the reason the commit sits AFTER the FAB-R1 refuse:
+        // a stale A-retry whose generation was bumped by a concurrent `vpn_connect(B)` kills its
+        // child and stores nothing — so it must not repoint the pointer at A either, or it would
+        // undo the write `vpn_connect(B)` just made and leave the backend naming A while B runs.
+        let state = test_app_state();
+        *state.config_path.lock().unwrap() = Some("C:\\cfg\\B.toml".to_string());
+        let captured = state.connection_generation.load(Ordering::SeqCst);
+        // A concurrent vpn_connect(B) bumped the generation mid-respawn.
+        state.connection_generation.fetch_add(1, Ordering::SeqCst);
+
+        assert!(!drive_respawn_pointer_commit(&state, captured, "C:\\cfg\\A.toml"));
+        assert_eq!(
+            state.config_path.lock().unwrap().as_deref(),
+            Some("C:\\cfg\\B.toml"),
+            "a refused (stale) respawn must never repoint the backend at the server it failed to store",
+        );
+    }
+
+    #[test]
+    fn a_respawn_refused_by_a_user_disconnect_leaves_the_pointer_alone() {
+        // Same rule, the other refuse reason (T-31 durable intent).
+        let state = test_app_state();
+        *state.config_path.lock().unwrap() = Some("C:\\cfg\\A.toml".to_string());
+        let captured = state.connection_generation.load(Ordering::SeqCst);
+        state.user_disconnect_requested.store(true, Ordering::SeqCst);
+
+        assert!(!drive_respawn_pointer_commit(&state, captured, "C:\\cfg\\C.toml"));
+        assert_eq!(
+            state.config_path.lock().unwrap().as_deref(),
+            Some("C:\\cfg\\A.toml"),
+        );
     }
 
     #[test]

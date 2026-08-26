@@ -34,6 +34,22 @@ use std::time::{Duration, Instant};
 /// the UI as «Попытка N/10».
 pub const RECONNECT_MAX_ATTEMPTS: u32 = 10;
 
+/// Reconnect attempts a SINGLE failover candidate gets before the walk moves to the next
+/// server in priority order (Phase 28 D-02; owner ruling 2026-08-22, `28-RESEARCH.md` OQ-2).
+///
+/// This deliberately OVERRIDES `RECONNECT_MAX_ATTEMPTS` on the failover path, and the owner
+/// accepted the trade knowingly. The 10-attempt budget above exists because «a rebooting server
+/// often does not come back within 3 tries»; with ONE attempt per candidate an ordinary server
+/// restart (updates, a manual reboot) is no longer survived — the app moves the user to the next
+/// server, and because there is NO automatic return (27 D-09) that move is permanent until the
+/// user goes back by hand. The owner was shown that consequence and chose speed of restored
+/// internet over staying put.
+///
+/// Do NOT silently «fix» this back. If real use shows people displaced by routine restarts, the
+/// remedy named in `28-CONTEXT.md` is the deferred auto-return, not a quiet raise of this number.
+/// The origin server is a candidate like any other — it gets exactly this budget too (OQ-2).
+pub const FAILOVER_ATTEMPTS_PER_CANDIDATE: u32 = 1;
+
 /// Wait between reconnect attempts. Sub-minute on purpose so a SINGLE attempt's
 /// inter-try gap stays short; the TOTAL budget is bounded by RECONNECT_MAX_ATTEMPTS
 /// (10) and is allowed to run a few minutes (user decision) — the user can «Отмена»
@@ -126,9 +142,16 @@ pub fn should_reconnect(was_intentional: bool, was_connected: bool) -> bool {
 /// Has the supervisor exhausted its bounded budget? (D-02)
 ///
 /// `attempt` is 1-based (the first try is attempt 1). Returns true once we have
-/// reached the cap, so the caller stops at attempt 3 and never starts a 4th.
-pub fn gave_up(attempt: u32) -> bool {
-    attempt >= RECONNECT_MAX_ATTEMPTS
+/// reached the cap, so the caller stops at the cap and never starts one more.
+///
+/// 28-02: `max_attempts` is a PARAMETER rather than the bare `RECONNECT_MAX_ATTEMPTS`, because
+/// the failover walk hands each candidate `FAILOVER_ATTEMPTS_PER_CANDIDATE` while the
+/// internet-lost recovery path keeps the full budget (D-01). Both callers must share ONE
+/// give-up rule so the «the last attempt never sleeps» property holds identically on each —
+/// on a 1-attempt candidate that means the walk moves to the next server immediately instead
+/// of burning an inter-attempt sleep it will never use.
+pub fn gave_up(attempt: u32, max_attempts: u32) -> bool {
+    attempt >= max_attempts
 }
 
 /// Session-generation guard (Codex HIGH race concern).
@@ -329,6 +352,296 @@ pub fn switch_disconnect_wins(
     }
 }
 
+// ─── Phase 28 (27 D-06 / D-08, 28 D-01 / D-02): the failover decision pair ───
+//
+// «Авто-режим» stops choosing a server by measured latency and starts switching when the
+// connection actually DROPS. The two decisions that steers — «is this drop a failover?» and
+// «which servers, in what order?» — live here as pure functions for the same reason as every
+// neighbour above: they can be exercised exhaustively by `cargo test` with no sidecar, no
+// manifest on disk and no `AppHandle`, leaving only the real A→B→C path to manual UAT.
+
+/// One failover candidate as the queue builder sees it: the three manifest facts the decision
+/// needs, copied out of `commands::manifest::ConfigEntry` (`id`, `path`, `order`).
+///
+/// Deliberately a local shape rather than the manifest type — the builder must stay free of the
+/// manifest module (and of `serde`, and of the filesystem) so it takes plain slices and returns
+/// owned config paths. The caller does the one lossy step, reading the manifest and projecting
+/// each entry onto this struct.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailoverCandidate {
+    /// `ConfigEntry.id` — the stable id the exclusion set is expressed in (27 D-08).
+    pub id: String,
+    /// `ConfigEntry.path` — the absolute `.toml` path a respawn is given.
+    pub path: String,
+    /// `ConfigEntry.order` — the priority the user arranged in «Авто-режим» (lower = earlier).
+    pub order: u32,
+}
+
+/// A stable identity key for a Windows config path — the ONLY form two paths may be compared in.
+///
+/// CR-02 (Phase 28 review). The queue used to de-duplicate by raw byte equality, and on Windows
+/// that is a lie the frontend had already been bitten by and fixed: `useConfigPingSource.ts` (the
+/// F2 defect, Phase 17) records that the ACTIVE path arrives from `tt_config_path` — written by
+/// the tray adopt / deeplink / legacy paths — in a DIFFERENT string form than the manifest's own
+/// `path` for the SAME file (`\` vs `/`, drive-letter case). `origin_path` here is
+/// `state.config_path`, i.e. whatever string `vpn_connect` was handed; the tail is always the
+/// Rust-written manifest form. So the two sides of the comparison genuinely disagree in the field.
+///
+/// What that cost: the origin was NOT filtered out of the tail, so it entered the queue twice —
+/// burning two of the walk's one-attempt slots (D-02) on the same dead server — and
+/// `failover_switch_target` then returned the origin's own path, in its other spelling, as a
+/// «switch», firing the «Переключено автоматически» plate for a move that never happened. That is
+/// exactly what `failover_connect_origin(0) → None` exists to prevent, defeated by a string form.
+///
+/// Deliberately byte-identical in behaviour to the frontend's `normalizePath`
+/// (`gui-pro/src/shared/utils/samePath.ts`): trim, `\` → `/`, lowercase. Both ends of the IPC must
+/// answer «same file?» the same way or the desync just moves. Like its frontend twin this is a
+/// PRESENTATION-layer identity key, never a security boundary — confinement to the portable data
+/// dir stays with `validate_app_path_canonical` (V12), which is unaffected.
+pub fn canonical_path_key(path: &str) -> String {
+    path.trim().replace('\\', "/").to_lowercase()
+}
+
+/// Which KIND of drop is this: the server went silent, or the user's own uplink is gone? (owner
+/// UAT 2026-08-26, test 1)
+///
+/// The answer decides everything downstream. `TUNNEL_LOST_REASON` is the ONLY reason
+/// `should_failover` accepts, so a drop classified as `INTERNET_LOST_REASON` never even builds a
+/// failover queue: it goes to the wait-for-the-uplink recovery, which hands the supervisor a
+/// ONE-entry queue and therefore the full `RECONNECT_MAX_ATTEMPTS` against the server that just
+/// died. That is exactly the failure the owner hit — «Попытка 1 из 10» on a dead server with
+/// «Авто-режим» on and a perfectly healthy Wi-Fi, and not one `[failover]` line in the log.
+///
+/// **Why the signal is the ADAPTER and not a gateway probe.** The classification used to call
+/// `check_adapter_online()`, which opens a TCP connection to `gateway:80`. Its own doc says it is
+/// for «adapter recovery — VPN is disconnected», and that is the context it is honest in. At THIS
+/// seam the core process is still alive: its WinTUN adapter, its routes and its fail-closed
+/// killswitch are all still installed, so the probe travels into the dead tunnel and fails
+/// UNCONDITIONALLY. It therefore reported «gateway unreachable» for every server-side drop, and
+/// the app concluded the user's own internet was gone. The real log says it in one line:
+///
+/// ```text
+/// [diagnose] drop verdict: adapter=present, gateway=unreachable — cause is LOCAL (PC / Wi-Fi …)
+/// ```
+///
+/// `adapter=present` and `gateway=unreachable` in the same breath IS the contradiction: a machine
+/// with a live physical adapter carrying a default gateway has not lost its uplink.
+///
+/// This is the same defect, at a third seam, that the recovery wait already fixed when it moved
+/// off `check_adapter_online()` and onto `find_physical_adapter()` for the «has the adapter come
+/// back?» question (see `memory/v3/status-lifecycle.md`), and the same signal the fast
+/// uplink-loss short-circuit has always used. All three seams now agree on one no-I/O fact,
+/// which is what stops them drifting apart again.
+///
+/// **What this trades.** A live adapter whose ROUTER is dead now reads as `tunnel-lost`, so the
+/// walk tries the other servers and fails them all before reporting `failover-exhausted`. That
+/// costs time on a fault no server could have fixed. It is the right side to err on: the opposite
+/// error — the one shipping today — makes «Авто-режим» do nothing at all on the single drop it
+/// exists for, which is a feature that silently does not work.
+///
+/// Pure, so the truth table is a unit test rather than a four-minute UAT.
+pub fn drop_is_tunnel_lost(physical_adapter_present: bool) -> bool {
+    physical_adapter_present
+}
+
+/// Is this drop a failover, or a plain reconnect? (28 D-01)
+///
+/// True on exactly one row: the tunnel went silent (`TUNNEL_LOST_REASON`) while the user's own
+/// uplink is still alive, the master switch is on, and at least one candidate remains BEYOND the
+/// origin. Everything else is false, by construction:
+///
+/// - `INTERNET_LOST_REASON` — the local uplink is gone, so NO server can help. Walking the queue
+///   would burn the whole list against a fault that is not the servers'; that drop keeps the
+///   wait-for-the-uplink recovery it ships with today, at the full `RECONNECT_MAX_ATTEMPTS`.
+/// - master off — the user turned «Авто-режим» off; nothing may move them.
+/// - `candidates_remaining == 0` — there is nowhere to fail over TO. An empty list must never be
+///   a failover: it is a plain reconnect of the one server the user is on, and it keeps the full
+///   budget. This is also what makes the failover-disabled path byte-for-byte today's behaviour.
+/// - anything unrecognised — default-deny, mirroring `is_terminal_reason`. A reason this
+///   predicate has never heard of must not silently move a user to another exit country.
+///
+/// `candidates_remaining` counts the servers AFTER the origin — i.e. `queue.len() - 1` for the
+/// list `failover_queue` built — because the origin's own retry happens either way.
+///
+/// Pure (no clock, no IO) so the truth table is unit-tested exhaustively; the real drop is UAT.
+pub fn should_failover(reason: &str, failover_enabled: bool, candidates_remaining: usize) -> bool {
+    failover_enabled
+        && candidates_remaining > 0
+        && reason == crate::connectivity::TUNNEL_LOST_REASON
+}
+
+/// Build the ordered failover queue: the origin first, then the remaining participating servers
+/// in ascending manifest order (28 D-02 + 27 D-08).
+///
+/// - **The origin leads, always, exactly once.** The server the user is ON gets its one attempt
+///   before the walk begins — even when its own id is in `excluded_ids`, because an opt-out means
+///   «do not fail over TO me», not «do not try to keep me connected». It is then filtered out of
+///   the tail so the walk can never spend two of its attempts on the same dead server.
+/// - **An excluded id contributes nothing** to the tail (27 D-08, the per-row switch).
+/// - **An excluded id matching no entry is inert** (T-28-10): ids are matched AGAINST the
+///   manifest, never used as a lookup key, so a hand-edited exclusion set naming a deleted config
+///   cannot steer the walk anywhere or raise an error.
+/// - **An unknown origin is still retried first.** A config removed from the list while it was
+///   connected must not be silently abandoned.
+/// - **An empty origin contributes no head** — an empty string is not a config path and must
+///   never reach `respawn_sidecar`.
+/// - **Ties keep manifest order** (the sort is stable), and a duplicated path yields once.
+/// - **Identity is `canonical_path_key`, never `==`** (CR-02). Both de-duplication steps compare
+///   normalized keys while the queue still carries the ORIGINAL strings, because `respawn_sidecar`
+///   must be handed a real path and the manifest form is the one the rest of Rust reads back. See
+///   `canonical_path_key` for the defect a byte comparison caused.
+///
+/// Takes plain slices and returns owned paths, so it needs no `AppHandle` and no manifest module.
+pub fn failover_queue(
+    entries: &[FailoverCandidate],
+    excluded_ids: &[String],
+    origin_path: &str,
+) -> Vec<String> {
+    let origin_key = canonical_path_key(origin_path);
+    let mut tail: Vec<&FailoverCandidate> = entries
+        .iter()
+        .filter(|entry| canonical_path_key(&entry.path) != origin_key)
+        .filter(|entry| !excluded_ids.iter().any(|excluded| excluded == &entry.id))
+        .collect();
+    // Stable so two rows the user dragged to the same rank stay in the order the list shows them.
+    tail.sort_by_key(|entry| entry.order);
+
+    let mut queue: Vec<String> = Vec::with_capacity(tail.len() + 1);
+    // Identity keys of what is already queued, parallel to `queue` — so the queue keeps the
+    // caller's original spellings while the «have I already got this server?» question is asked
+    // on the normalized form.
+    let mut seen: Vec<String> = Vec::with_capacity(tail.len() + 1);
+    if !origin_path.is_empty() {
+        queue.push(origin_path.to_string());
+        seen.push(origin_key);
+    }
+    for entry in tail {
+        // One attempt per SERVER, not per manifest row: a manifest carrying the same path twice
+        // (a legacy duplicate, or the same file spelled two ways) must not consume two candidates.
+        let key = canonical_path_key(&entry.path);
+        if !seen.iter().any(|existing| existing == &key) {
+            queue.push(entry.path.clone());
+            seen.push(key);
+        }
+    }
+    queue
+}
+
+/// May the walk advance to the NEXT candidate? (T-28-07 + FB-03)
+///
+/// Three facts, all re-proved per advance, because an advance connects to a DIFFERENT server —
+/// closer to a `vpn_connect` than to a retry:
+///
+/// - **`user_intent`** — the user asked to be disconnected (transient OR durable flag). Nothing may
+///   raise a tunnel behind their back.
+/// - **`still_ours`** — the live generation still equals the one captured AT THE DROP. Someone
+///   else's connect owns the session now. Note this compares against the FROZEN captured value on
+///   purpose; see `run_failover_walk` for why re-capturing would neuter `respawn_may_store`.
+/// - **`failover_enabled`** — FB-03 (Fable-5 Phase-28 review). `get_failover_settings()` was read
+///   ONCE, when the queue was built, and never again. So a user alarmed at the app hopping servers
+///   who opened «Настройки» and switched «Авто-режим» OFF mid-walk was ignored: the walk kept going
+///   for up to N × 55 s and could still move them to another exit country, immediately after they
+///   revoked consent for exactly that. (The frontend `locked` prop guards frontend switches only —
+///   a Rust walk never sets `isSwitching`, so the toggle was live and apparently disregarded.) The
+///   only escape was «Отключить», which is not an obvious answer to «stop moving me».
+///
+/// Pure, so the truth table is exhaustive here rather than in a four-minute UAT. Only ever consulted
+/// for `index > 0`, i.e. on a real multi-candidate walk — a one-entry recovery queue never advances,
+/// so re-reading the master switch cannot affect the internet-lost or sidecar-exit paths.
+pub fn failover_advance_allowed(
+    user_intent: bool,
+    still_ours: bool,
+    failover_enabled: bool,
+) -> bool {
+    !user_intent && still_ours && failover_enabled
+}
+
+/// Reconnect attempts the ORIGIN server gets once a real failover walk is under way.
+///
+/// Zero — owner ruling 2026-08-26 (UAT test 1), which REVERSES the 2026-08-22 D-02 ruling that
+/// gave the origin one attempt like every other candidate.
+///
+/// What the owner saw and why he changed his mind: a single attempt is not a moment. A dead
+/// server does not refuse the connection, it swallows it, so the attempt runs until the
+/// per-attempt ceiling expires — ~53 s in his log, three times over. His words: «проще было бы
+/// уже переключиться» — and a failover that is slower than doing it by hand is a failover
+/// nobody will leave switched on. With zero, the walk reaches the SECOND server immediately, and
+/// a healthy second server greens in seconds.
+///
+/// What this gives up, stated plainly: a server that merely rebooted is no longer waited for. The
+/// user is moved off it and (by the shipped rule the settings screen states) not moved back. The
+/// owner was told this is the cost and chose it: «лучше трогать».
+///
+/// This applies ONLY on a real walk. A one-entry queue — auto-mode off, one server, the
+/// internet-lost recovery, the sidecar-exit path — is not a failover and keeps the full
+/// `RECONNECT_MAX_ATTEMPTS`, so the reboot-survival guarantee is untouched everywhere it is the
+/// only thing that can help.
+pub const FAILOVER_ORIGIN_ATTEMPTS: u32 = 0;
+
+/// WHY a walk was started, which is the only thing that decides what the ORIGIN is worth trying.
+///
+/// The two causes look identical once the tunnel is down and are opposite in what they imply about
+/// the server. Collapsing them is how the origin ends up either uselessly retried or wrongly
+/// abandoned, so the cause travels with the walk rather than being re-guessed at the budget call.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WalkKind {
+    /// The tunnel died while the core process stayed alive — the server went silent. The origin is
+    /// known bad: it just failed, and nothing local changed that could make an immediate retry
+    /// behave differently.
+    ServerDrop,
+    /// The core PROCESS exited on this machine while the session was up. This says nothing about
+    /// the server: the tunnel died because the thing holding it died, and the far end is probably
+    /// still healthy. Owner ruling (28-UAT test 9): retry the origin fully FIRST, and only walk if
+    /// it truly will not come back.
+    LocalProcessDeath,
+}
+
+/// How many reconnect attempts the candidate at `index` of this queue gets.
+///
+/// A queue of ONE is not a failover at all — `should_failover` already refused it — so it keeps
+/// the full `RECONNECT_MAX_ATTEMPTS`: the internet-lost recovery path and the failover-disabled
+/// path both walk a one-entry queue and must behave byte-for-byte as they ship today,
+/// reboot-recovery guarantee intact (D-01). `index` and `kind` are ignored there — the only index
+/// such a queue has IS the origin, and it is not a walk.
+///
+/// On a real walk, every candidate PAST the origin gets `FAILOVER_ATTEMPTS_PER_CANDIDATE`
+/// regardless of cause. The origin is where the two causes diverge:
+///
+/// - `ServerDrop` — `FAILOVER_ORIGIN_ATTEMPTS` (zero). The server just went silent; spending a
+///   per-attempt ceiling on the corpse is the delay the owner rejected outright.
+/// - `LocalProcessDeath` — the FULL `RECONNECT_MAX_ATTEMPTS`. The process died locally, so the
+///   origin is the most likely server to work, and it is also the one the user chose. Only after
+///   it has genuinely refused to come back does the walk move on.
+///
+/// That second arm is the 28-UAT test 9 ruling, and it replaces a strictly worse pair of
+/// alternatives. Retrying the origin forever (what shipped) meant a crash that the origin could
+/// not recover from ended in a dead session with failover ON and other servers untried. Walking
+/// immediately would have thrown away the reboot-recovery guarantee and moved the user to another
+/// exit country over a local process crash. The hybrid keeps the guarantee and still has somewhere
+/// to go when it does not hold.
+///
+/// The origin deliberately KEEPS its slot in the queue rather than being filtered out of it. Index
+/// 0 means «the origin» to `notify::failover_connect_origin` (which returns `None` there, so a
+/// same-server landing is never announced as an automatic switch), to the stamp/release pair, and
+/// to `build_failover_queue`'s `queue.len() - 1` count of real candidates. Dropping the entry
+/// would have moved every one of those meanings by one and turned a budget change into a
+/// notification bug.
+///
+/// Expressed as a function rather than inline so «the recovery path still receives the full
+/// budget» is an assertion rather than a claim.
+pub fn per_candidate_attempt_budget(kind: WalkKind, queue_len: usize, index: usize) -> u32 {
+    if queue_len <= 1 {
+        return RECONNECT_MAX_ATTEMPTS;
+    }
+    if index > 0 {
+        return FAILOVER_ATTEMPTS_PER_CANDIDATE;
+    }
+    match kind {
+        WalkKind::ServerDrop => FAILOVER_ORIGIN_ATTEMPTS,
+        WalkKind::LocalProcessDeath => RECONNECT_MAX_ATTEMPTS,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,22 +657,32 @@ mod tests {
 
     #[test]
     fn attempts_bounded_to_max() {
-        // D-02: gave_up(attempt) is the give-up boundary (used to skip the sleep after the
-        // last attempt) — true AT and beyond RECONNECT_MAX_ATTEMPTS, false before it. The
-        // real loop runs `for attempt in 1..=RECONNECT_MAX_ATTEMPTS`. Asserted against the
-        // const (not a hard-coded number) so a future retune can't silently drift the test.
+        // D-02: gave_up(attempt, budget) is the give-up boundary (used to skip the sleep after
+        // the last attempt) — true AT and beyond the budget, false before it. The real loop runs
+        // `for attempt in 1..=budget`. Asserted against the const (not a hard-coded number) so a
+        // future retune can't silently drift the test.
+        //
+        // 28-02: the budget is now a PARAMETER rather than the bare const, because the failover
+        // walk gives each candidate its own (much smaller) budget while the internet-lost
+        // recovery path keeps RECONNECT_MAX_ATTEMPTS. Driving the loop off the parameter keeps
+        // this test honest for BOTH callers.
+        let budget = RECONNECT_MAX_ATTEMPTS;
         let mut yielded = Vec::new();
         let mut attempt: u32 = 1;
-        while !gave_up(attempt) {
+        while !gave_up(attempt, budget) {
             yielded.push(attempt);
             attempt += 1;
         }
         let expected: Vec<u32> = (1..RECONNECT_MAX_ATTEMPTS).collect();
         assert_eq!(yielded, expected);
-        assert!(!gave_up(RECONNECT_MAX_ATTEMPTS - 1));
-        assert!(gave_up(RECONNECT_MAX_ATTEMPTS)); // give up AT the cap
-        assert!(gave_up(RECONNECT_MAX_ATTEMPTS + 1)); // and anything beyond
+        assert!(!gave_up(RECONNECT_MAX_ATTEMPTS - 1, budget));
+        assert!(gave_up(RECONNECT_MAX_ATTEMPTS, budget)); // give up AT the cap
+        assert!(gave_up(RECONNECT_MAX_ATTEMPTS + 1, budget)); // and anything beyond
         assert_eq!(RECONNECT_MAX_ATTEMPTS, 10);
+
+        // The failover candidate's budget: attempt 1 IS the last attempt, so it never sleeps
+        // before moving on to the next server (D-02, owner ruling 2026-08-22).
+        assert!(gave_up(1, FAILOVER_ATTEMPTS_PER_CANDIDATE));
     }
 
     #[test]
@@ -384,6 +707,37 @@ mod tests {
         // finite and user-cancellable (D-02/D-05 «Отмена»).
         let worst_case = (RECONNECT_ATTEMPT_WINDOW + RECONNECT_INTERVAL) * RECONNECT_MAX_ATTEMPTS;
         assert!(worst_case <= Duration::from_secs(600));
+    }
+
+    #[test]
+    fn attempt_window_must_stay_above_the_traffic_readiness_cap() {
+        // D-03 TRIPWIRE (28-02). The relationship `RECONNECT_ATTEMPT_WINDOW` describes in prose
+        // is now asserted against the real constant instead of a comment that cannot be checked.
+        //
+        // A per-attempt ceiling AT or BELOW the traffic-readiness cap counts a still-warming
+        // respawn as a FAILURE, and the next attempt kills the warming child — which made
+        // auto-reconnect STRUCTURALLY unable to succeed on a slow-warmup protocol (http3 takes up
+        // to `sidecar::TRAFFIC_READINESS_CAP` = 45s to green). That is `3.8 F-2`, found by Fable.
+        //
+        // The failure mode is SILENT — it looks like «it just does not reconnect» — which is
+        // exactly how it survived the first time. A const-sanity test is how this codebase makes
+        // such a regression loud: lower the window to 40s and this goes red before any user sees
+        // a tunnel that will not come back.
+        assert!(
+            RECONNECT_ATTEMPT_WINDOW > crate::sidecar::TRAFFIC_READINESS_CAP,
+            "RECONNECT_ATTEMPT_WINDOW ({:?}) must EXCEED sidecar::TRAFFIC_READINESS_CAP ({:?}): a \
+             ceiling at or below the readiness cap counts a still-warming respawn as a failure and \
+             the next attempt kills it, so auto-reconnect becomes structurally unable to succeed \
+             on a slow-warmup protocol (3.8 F-2). Raise the window, do not lower it.",
+            RECONNECT_ATTEMPT_WINDOW,
+            crate::sidecar::TRAFFIC_READINESS_CAP,
+        );
+        // …and it still stays sub-minute, so one wedged-but-alive child cannot stall the bounded
+        // sequence. Both halves must hold at once; this is the narrow band the value lives in.
+        assert!(
+            RECONNECT_ATTEMPT_WINDOW < Duration::from_secs(60),
+            "the ceiling must stay sub-minute so a single hung try cannot stall the sequence",
+        );
     }
 
     #[test]
@@ -626,6 +980,309 @@ mod tests {
             "reason code must contain NO Cyrillic",
         );
         assert_ne!(RECOVERY_TIMEOUT_REASON, crate::connectivity::RECONNECT_GAVE_UP_REASON);
+    }
+
+    // ── Phase 28 (D-01 / D-02 / 27 D-08): the failover decision pair ─────────
+
+    /// Terse builder so a truth-table row stays one readable line.
+    fn candidate(id: &str, path: &str, order: u32) -> FailoverCandidate {
+        FailoverCandidate { id: id.to_string(), path: path.to_string(), order }
+    }
+
+    /// Three servers whose manifest order (0, 1, 2) is deliberately NOT their declaration
+    /// order — a queue builder that merely preserved input order would pass by accident.
+    fn three_servers() -> Vec<FailoverCandidate> {
+        vec![
+            candidate("c", "C.toml", 2),
+            candidate("a", "A.toml", 0),
+            candidate("b", "B.toml", 1),
+        ]
+    }
+
+    #[test]
+    fn should_failover_only_on_a_tunnel_lost_drop_with_the_master_on_and_a_candidate_left() {
+        use crate::connectivity::{INTERNET_LOST_REASON, TUNNEL_LOST_REASON};
+
+        // The ONE true row: the server went silent while the user's own uplink is alive, the
+        // master switch is on, and there is somewhere to go.
+        assert!(should_failover(TUNNEL_LOST_REASON, true, 1));
+        assert!(should_failover(TUNNEL_LOST_REASON, true, 7)); // more candidates → still true
+
+        // D-01: on an internet-lost drop the LOCAL uplink is gone, so NO server can help.
+        // Walking the queue would burn the whole list against a fault that is not the servers';
+        // that case keeps the wait-for-the-uplink recovery it ships with today.
+        assert!(!should_failover(INTERNET_LOST_REASON, true, 1));
+
+        // Master switch off → never a failover, whatever the drop was.
+        assert!(!should_failover(TUNNEL_LOST_REASON, false, 1));
+        assert!(!should_failover(INTERNET_LOST_REASON, false, 1));
+
+        // An EMPTY candidate list must NEVER be a failover: there is nothing to fail over TO, so
+        // this is a plain reconnect and keeps the full RECONNECT_MAX_ATTEMPTS budget. All four
+        // master × reason combinations are false once the list is empty.
+        assert!(!should_failover(TUNNEL_LOST_REASON, true, 0));
+        assert!(!should_failover(INTERNET_LOST_REASON, true, 0));
+        assert!(!should_failover(TUNNEL_LOST_REASON, false, 0));
+        assert!(!should_failover(INTERNET_LOST_REASON, false, 0));
+
+        // Default-deny on anything we do not recognise (mirrors `is_terminal_reason`): a reason
+        // this predicate has never heard of must not silently move the user to another country.
+        assert!(!should_failover(SIDECAR_EXIT_REASON, true, 3));
+        assert!(!should_failover(NO_INTERNET_REASON, true, 3));
+        assert!(!should_failover(RECOVERY_TIMEOUT_REASON, true, 3));
+        assert!(!should_failover("", true, 3));
+    }
+
+    #[test]
+    fn failover_queue_puts_the_origin_first_then_the_manifest_order() {
+        // D-02: the server the user is ON is retried FIRST (its one attempt), and only then does
+        // the walk begin — in ascending manifest order, which is the priority list the user sees
+        // in «Авто-режим», not the order the manifest happens to store rows in.
+        let queue = failover_queue(&three_servers(), &[], "B.toml");
+        assert_eq!(queue, ["B.toml", "A.toml", "C.toml"]);
+    }
+
+    #[test]
+    fn failover_queue_drops_excluded_ids_and_treats_an_unknown_id_as_inert() {
+        // 27 D-08: a per-row opt-out contributes NOTHING to the queue.
+        // T-28-10: an id matching no entry is INERT — never an error, never used as a lookup key,
+        // so a hand-edited exclusion set naming a deleted config cannot steer the walk anywhere.
+        let queue = failover_queue(
+            &three_servers(),
+            &["a".to_string(), "ghost-config-id".to_string()],
+            "B.toml",
+        );
+        assert_eq!(queue, ["B.toml", "C.toml"]);
+    }
+
+    #[test]
+    fn failover_queue_always_retries_the_origin_once_even_when_it_is_excluded() {
+        // An opt-out means «do not fail over TO me», not «do not try to keep me connected». The
+        // server the user chose is always retried once before the walk begins.
+        let queue = failover_queue(&three_servers(), &["b".to_string()], "B.toml");
+        assert_eq!(queue, ["B.toml", "A.toml", "C.toml"]);
+
+        // …and it appears EXACTLY once — never duplicated into the tail, which would silently
+        // spend two of the walk's attempts on the same dead server.
+        let plain = failover_queue(&three_servers(), &[], "B.toml");
+        assert_eq!(plain.iter().filter(|p| p.as_str() == "B.toml").count(), 1);
+    }
+
+    #[test]
+    fn failover_queue_edge_rows_never_produce_a_bogus_candidate() {
+        // No manifest entries at all → just the origin: a single-candidate queue, i.e. exactly
+        // today's behaviour.
+        assert_eq!(failover_queue(&[], &[], "B.toml"), ["B.toml"]);
+
+        // Every non-origin entry excluded → a single-candidate queue again, so `should_failover`
+        // sees zero remaining candidates and the recovery budget is kept.
+        let all_but_origin_out = failover_queue(
+            &three_servers(),
+            &["a".to_string(), "c".to_string()],
+            "B.toml",
+        );
+        assert_eq!(all_but_origin_out, ["B.toml"]);
+
+        // An origin the manifest does not know (a config removed from the list while it was
+        // connected) is STILL retried first — dropping it would silently abandon the server the
+        // user is actually on.
+        let unknown_origin = failover_queue(&three_servers(), &[], "Z.toml");
+        assert_eq!(unknown_origin, ["Z.toml", "A.toml", "B.toml", "C.toml"]);
+
+        // An EMPTY origin contributes no head: an empty string is not a config path and must
+        // never reach `respawn_sidecar`.
+        assert_eq!(failover_queue(&three_servers(), &[], ""), ["A.toml", "B.toml", "C.toml"]);
+
+        // Equal orders keep manifest order (stable sort), so two rows the user dragged to the
+        // same rank stay in the order the list shows them.
+        let ties = vec![candidate("x", "X.toml", 5), candidate("y", "Y.toml", 5)];
+        assert_eq!(failover_queue(&ties, &[], ""), ["X.toml", "Y.toml"]);
+
+        // A manifest carrying the same path twice yields it once — the walk spends one attempt
+        // per SERVER, not per row.
+        let dupes = vec![candidate("p", "P.toml", 0), candidate("p-again", "P.toml", 1)];
+        assert_eq!(failover_queue(&dupes, &[], ""), ["P.toml"]);
+    }
+
+    #[test]
+    fn a_queue_advance_needs_ownership_and_a_still_granted_permission() {
+        // The one true row: nobody disconnected, the session is still ours, and «Авто-режим» is
+        // still on.
+        assert!(failover_advance_allowed(false, true, true));
+
+        // FB-03 regression: the master switch flipped OFF mid-walk. `get_failover_settings` used
+        // to be read only at queue-build time, so a user alarmed at the app hopping servers who
+        // opened «Настройки» and switched auto-mode off was ignored — the walk kept going and
+        // could still move them to another exit country right after they revoked consent.
+        assert!(!failover_advance_allowed(false, true, false));
+
+        // The two ownership facts, unchanged (T-28-07).
+        assert!(!failover_advance_allowed(true, true, true)); // user asked to disconnect
+        assert!(!failover_advance_allowed(false, false, true)); // someone else owns the session
+
+        // Any combination of refusals still refuses — the gate is an AND, never a majority vote.
+        assert!(!failover_advance_allowed(true, false, false));
+        assert!(!failover_advance_allowed(true, true, false));
+        assert!(!failover_advance_allowed(false, false, false));
+        assert!(!failover_advance_allowed(true, false, true));
+    }
+
+    #[test]
+    fn canonical_path_key_matches_the_frontends_normalize_path() {
+        // CR-02. Both ends of the IPC must answer «same file?» identically, or the desync just
+        // moves: this is the Rust twin of `gui-pro/src/shared/utils/samePath.ts` `normalizePath`
+        // (trim, `\` → `/`, lowercase). Windows filesystems are case-insensitive, so lowercasing
+        // is the correct equality here.
+        assert_eq!(canonical_path_key("C:\\cfg\\A.toml"), "c:/cfg/a.toml");
+        assert_eq!(canonical_path_key("  c:/CFG/a.TOML  "), "c:/cfg/a.toml");
+        assert_eq!(
+            canonical_path_key("C:\\cfg\\A.toml"),
+            canonical_path_key("c:/cfg/a.toml"),
+            "the SAME file in the two spellings the field actually produces must be one key",
+        );
+        // Different files stay different — normalization must not collapse anything real.
+        assert_ne!(canonical_path_key("C:/cfg/a.toml"), canonical_path_key("C:/cfg/b.toml"));
+    }
+
+    #[test]
+    fn failover_queue_does_not_queue_the_origin_twice_when_the_manifest_spells_it_differently() {
+        // CR-02 regression — THE row the suite was missing, and the one the field hits.
+        //
+        // `origin_path` is `state.config_path`, the string `vpn_connect` was handed, which reaches
+        // it from `tt_config_path` (tray adopt / deeplink / legacy writers). The manifest entry for
+        // the SAME file is written by Rust in its own form. The frontend documented this exact
+        // divergence as the Phase-17 F2 defect; the Rust queue had no equivalent, so the origin
+        // entered the queue twice — spending two of the walk's one-attempt slots (D-02) on one
+        // dead server, and letting `failover_switch_target` report the origin as a «switch».
+        let manifest = vec![
+            candidate("a", "C:/cfg/a.toml", 0),
+            candidate("b", "C:/cfg/b.toml", 1),
+        ];
+        let queue = failover_queue(&manifest, &[], "C:\\cfg\\A.toml");
+        assert_eq!(
+            queue,
+            ["C:\\cfg\\A.toml", "C:/cfg/b.toml"],
+            "the origin must appear ONCE (in the caller's spelling) and never again from the manifest",
+        );
+
+        // The same claim stated as the invariant, so a future change that breaks it fails here
+        // rather than in a UAT four minutes into a killswitched walk.
+        let origin_hits = queue
+            .iter()
+            .filter(|p| canonical_path_key(p) == canonical_path_key("C:\\cfg\\A.toml"))
+            .count();
+        assert_eq!(origin_hits, 1);
+    }
+
+    #[test]
+    fn failover_queue_dedupes_manifest_rows_that_spell_the_same_file_differently() {
+        // The tail-side half of the same rule: two manifest rows pointing at one file (a legacy
+        // duplicate that survived a path rewrite) must yield one candidate, not two.
+        let dupes = vec![
+            candidate("p", "C:\\cfg\\P.toml", 0),
+            candidate("p-again", "c:/cfg/p.toml", 1),
+        ];
+        assert_eq!(failover_queue(&dupes, &[], ""), ["C:\\cfg\\P.toml"]);
+    }
+
+    #[test]
+    fn per_candidate_budget_skips_the_origin_on_a_walk_and_keeps_the_full_budget_off_it() {
+        // D-02 (owner ruling 2026-08-22, OQ-2 option-a): ONE attempt per candidate past the
+        // origin. The owner was shown that this stops surviving a routine server reboot and chose
+        // speed of restored internet over staying put; the remedy if that bites is the deferred
+        // auto-return (27 D-09), NOT a quiet raise of this number.
+        use WalkKind::{LocalProcessDeath, ServerDrop};
+
+        assert_eq!(FAILOVER_ATTEMPTS_PER_CANDIDATE, 1);
+        // Past the origin the cause is irrelevant — whatever killed the session, these servers are
+        // untried and each gets one shot.
+        for kind in [ServerDrop, LocalProcessDeath] {
+            assert_eq!(
+                per_candidate_attempt_budget(kind, 3, 1),
+                FAILOVER_ATTEMPTS_PER_CANDIDATE
+            );
+            assert_eq!(
+                per_candidate_attempt_budget(kind, 3, 2),
+                FAILOVER_ATTEMPTS_PER_CANDIDATE
+            );
+            assert_eq!(
+                per_candidate_attempt_budget(kind, 2, 1),
+                FAILOVER_ATTEMPTS_PER_CANDIDATE
+            );
+        }
+
+        // Product ruling 2026-08-26 (UAT test 1), reversing the 2026-08-22 call: on a SERVER DROP
+        // the ORIGIN gets NOTHING. A dead server swallows the connection rather than refusing it,
+        // so its one attempt cost the full per-attempt ceiling (~53s in his log) before the walk
+        // could reach a server that was actually up.
+        assert_eq!(FAILOVER_ORIGIN_ATTEMPTS, 0);
+        assert_eq!(per_candidate_attempt_budget(ServerDrop, 3, 0), FAILOVER_ORIGIN_ATTEMPTS);
+        assert_eq!(per_candidate_attempt_budget(ServerDrop, 2, 0), FAILOVER_ORIGIN_ATTEMPTS);
+        // …and a zero budget is a give-up on the FIRST attempt number, i.e. no respawn at all,
+        // which is what makes the walk reach index 1 immediately rather than after a ceiling.
+        assert!(gave_up(1, per_candidate_attempt_budget(ServerDrop, 3, 0)));
+
+        // A SINGLE-candidate queue is not a failover at all (`should_failover` says so), so it
+        // keeps the full reboot-surviving budget REGARDLESS of index OR cause: the internet-lost
+        // recovery path and the failover-disabled path stay byte-for-byte what ships today (D-01).
+        // This is the row that proves the origin skip cannot leak onto them.
+        for kind in [ServerDrop, LocalProcessDeath] {
+            assert_eq!(per_candidate_attempt_budget(kind, 1, 0), RECONNECT_MAX_ATTEMPTS);
+            assert_eq!(per_candidate_attempt_budget(kind, 0, 0), RECONNECT_MAX_ATTEMPTS);
+        }
+    }
+
+    /// Owner ruling 28-UAT test 9 — the hybrid, and the ONE row that separates the two causes.
+    ///
+    /// The core process dying on this machine says nothing about the server, so the origin is the
+    /// most likely thing to work AND the server the user picked. It therefore keeps the full budget
+    /// — which is also what preserves reboot recovery — and the walk exists only as the exit for
+    /// when that genuinely fails. Collapsing this back onto the ServerDrop rule would silently
+    /// reintroduce the behaviour the owner rejected: a crash the origin could not recover from
+    /// ending in a dead session with other servers untried.
+    #[test]
+    fn a_local_process_death_retries_the_origin_in_full_before_walking() {
+        // The origin: full budget, NOT the ServerDrop skip.
+        assert_eq!(
+            per_candidate_attempt_budget(WalkKind::LocalProcessDeath, 3, 0),
+            RECONNECT_MAX_ATTEMPTS
+        );
+        // …so it does NOT give up on attempt 1 — the walk cannot race past the origin here.
+        assert!(!gave_up(
+            1,
+            per_candidate_attempt_budget(WalkKind::LocalProcessDeath, 3, 0)
+        ));
+        // The two causes genuinely disagree at the origin, which is the whole point of the enum.
+        assert_ne!(
+            per_candidate_attempt_budget(WalkKind::LocalProcessDeath, 3, 0),
+            per_candidate_attempt_budget(WalkKind::ServerDrop, 3, 0)
+        );
+        // But the walk still HAS somewhere to go once the origin is exhausted — the failure mode
+        // that prompted the ruling was untried servers, not a wrong budget.
+        assert_eq!(
+            per_candidate_attempt_budget(WalkKind::LocalProcessDeath, 3, 1),
+            FAILOVER_ATTEMPTS_PER_CANDIDATE
+        );
+    }
+
+    #[test]
+    fn a_drop_with_a_live_adapter_is_a_tunnel_loss_not_an_internet_loss() {
+        // The UAT test 1 in one assertion. The classifier used to ask a gateway PROBE,
+        // which travels through the dead tunnel while the core still holds its fail-closed
+        // killswitch and therefore always failed — so a server-side drop on a healthy Wi-Fi was
+        // filed as `internet-lost`, which `should_failover` refuses, which meant «Авто-режим»
+        // never moved anybody.
+        assert!(drop_is_tunnel_lost(true));
+        assert!(!drop_is_tunnel_lost(false));
+
+        // And the row that matters end-to-end: adapter present + failover on + somewhere to go
+        // must now reach a real walk.
+        let reason = if drop_is_tunnel_lost(true) {
+            crate::connectivity::TUNNEL_LOST_REASON
+        } else {
+            crate::connectivity::INTERNET_LOST_REASON
+        };
+        assert!(should_failover(reason, true, 1));
     }
 }
 

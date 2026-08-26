@@ -467,7 +467,10 @@ export function ProcessPickerModal({
                           rather than a column of filenames. The Cpu glyph that used to sit here was
                           the same placeholder in every row, which told the user nothing.
                           Rows past the icon window keep an identical empty 24px box: same geometry,
-                          so nothing shifts when the scroll pulls their icons in. */}
+                          so nothing shifts when the scroll pulls their icons in. It copies the
+                          ProcessIcon plate exactly — muted fill PLUS the hairline — because the fill
+                          alone disappears against any surface of the same colour, and an empty slot
+                          that disappears reads as a missing icon rather than one still on its way. */}
                       {index < iconWindow ? (
                         <ProcessIcon name={proc.name} />
                       ) : (
@@ -478,6 +481,7 @@ export function ProcessPickerModal({
                             width: 24,
                             height: 24,
                             backgroundColor: "var(--color-bg-hover)",
+                            border: "1px solid var(--color-border)",
                           }}
                         />
                       )}

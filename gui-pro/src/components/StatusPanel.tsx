@@ -8,6 +8,7 @@ import { StatusBadge } from "../shared/ui/StatusBadge";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import { UptimeCounter } from "../shared/ui/UptimeCounter";
 import { statusBadgeVariant } from "../shared/lib/statusBadgeVariant";
+import { reconnectLabel } from "../shared/utils/reconnectLabel";
 
 interface StatusPanelProps {
   status: VpnStatus;
@@ -54,6 +55,36 @@ function StatusPanel({
 }: StatusPanelProps) {
   const { t } = useTranslation();
   const [errorDismissed, setErrorDismissed] = useState(false);
+
+  // Where a LIVE «Отмена» may be OFFERED — kept aligned with where the App's race-safe
+  // `handleUserCancel` actually WORKS, so this is never a dead button and never a hidden live one.
+  //
+  // `connecting` / `recovering`: the App's `reconnectResolve` latch is guaranteed null there, so
+  // the handler proceeds. Shown EVEN WHILE `connectPending` — a plain connect holds
+  // pendingConnectPath for the WHOLE connecting span, so gating on `!connectPending` would hide the
+  // cancel for the entire normal connect (the «нет кнопки отмены при обычном подключении» bug).
+  //
+  // `reconnecting` USED TO BE excluded outright as ambiguous: the status is set BOTH by the Rust
+  // auto-retry supervisor (where the cancel works) and by a FE save-and-reconnect whose teardown
+  // arms the shared latch (where it would be inert). Hiding it in both cases is what the owner hit
+  // in UAT (2026-08-26): ten attempts deep into an automatic reconnect, the ONLY way to stop was
+  // the tray menu — which does work, because it calls `tray_vpn_disconnect` directly. The two cases
+  // ARE distinguishable: a FE save-and-reconnect raises `pendingConnectPath` → `connectPending` for
+  // exactly its own span (`handleReconnectGuarded`, cleared in the same `finally`), while a backend
+  // auto-retry raises nothing on the frontend at all. So `reconnecting && !connectPending` is
+  // precisely «this reconnect is the backend's, and the cancel will land».
+  //
+  // `switching` hides it everywhere: a seamless A→B switch holds isSwitching across its `connecting`
+  // leg, during which the handler is inert by its own gate.
+  const showLiveCancel =
+    !switching &&
+    (status === "connecting" ||
+      status === "recovering" ||
+      (status === "reconnecting" && !connectPending));
+  // …and the inert spinner is the exact complement, so the two can never render together.
+  const showInertSpinner =
+    !showLiveCancel &&
+    (status === "disconnecting" || status === "reconnecting" || switching);
 
   useEffect(() => {
     // F2: reset the dismissal when the error MESSAGE changes, NOT on every status tick.
@@ -143,10 +174,13 @@ function StatusPanel({
               {statusDetail && <span className="truncate">{statusDetail}</span>}
               {status === "reconnecting" && reconnectProgress && (
                 <span className="tabular-nums">
-                  {t("status.reconnect_attempt", {
-                    attempt: reconnectProgress.attempt,
-                    max: reconnectProgress.max,
-                  })}
+                  {/* The sentence is chosen by `reconnectLabel`, shared with ConfigCard — see that
+                      file for why the same two integers need interpreting, and why the choice must
+                      not be inlined here (the two surfaces drifted apart once already). */}
+                  {(() => {
+                    const label = reconnectLabel(reconnectProgress);
+                    return t(label.key, label.vars);
+                  })()}
                 </span>
               )}
             </div>
@@ -167,36 +201,20 @@ function StatusPanel({
           )}
           {/* 02-20 SPEC §4 / BUG-A2 (17-uat): a LIVE «Отмена» (ENABLED) so the user can abort the
               wait. The action is the App's race-safe user cancel (onDisconnect → handleUserCancel →
-              vpn_disconnect), which tears a connecting/recovering attempt down.
-              BUG-A2: the live cancel shows for `connecting` / `recovering` — the states where the App's
-              `reconnectResolve` latch is GUARANTEED null, so handleUserCancel PROCEEDS. It shows EVEN
-              WHILE `connectPending` — a plain connect holds pendingConnectPath (→ connectPending) for
-              the WHOLE connecting span, so gating on `!connectPending` would HIDE the «Отмена» for the
-              entire normal connect (the exact "нет кнопки отмены при обычном подключении" bug). Since
-              the handler is safe during connecting/recovering, there is no reason to hide it. It is NOT
-              shown for:
-                - `reconnecting` — AMBIGUOUS: a FE save-and-reconnect teardown ARMS reconnectResolve →
-                  the cancel would be inert (a DEAD button); the backend auto-retry is safe but
-                  indistinguishable from status alone → falls to the inert spinner below;
-                - `switching` — a seamless A→B switch holds isSwitching across its `connecting` leg,
-                  during which handleUserCancel is inert (isSwitching gate), so a live cancel there would
-                  be dead. Mirrors ConfigCard's `!switching` gate.
-              This aligns the show-condition with the handler's works-condition — no dead button. */}
-          {(status === "connecting" || status === "recovering") &&
-            !switching && (
-              <Button variant="ghost" size="sm" onClick={onDisconnect}>
-                <Power className="w-3.5 h-3.5" />
-                {t("buttons.cancel")}
-              </Button>
-            )}
-          {/* INERT spinner (no live cancel), mutually exclusive with the live cancel above: the
-              non-cancelable teardown («Отключение»); the AMBIGUOUS `reconnecting` (BUG-A2 — may be an
-              armed-latch FE reconnect); and a seamless `switching` leg (handler inert). The F28
-              pre-`connecting` instant feedback is NOT here — it lives on the connect button's
-              `loading={connectPending}` for the error/disconnected status (below). */}
-          {(status === "disconnecting" ||
-            status === "reconnecting" ||
-            switching) && (
+              vpn_disconnect). `showLiveCancel` is computed above so the show-condition and the
+              inert spinner below are mutually exclusive BY CONSTRUCTION rather than by two
+              conditions a later edit could let overlap. */}
+          {showLiveCancel && (
+            <Button variant="ghost" size="sm" onClick={onDisconnect}>
+              <Power className="w-3.5 h-3.5" />
+              {t("buttons.cancel")}
+            </Button>
+          )}
+          {/* INERT spinner (no live cancel): the non-cancelable teardown («Отключение»), a
+              save-and-reconnect whose latch makes the handler inert, and a seamless `switching`
+              leg. The F28 pre-`connecting` instant feedback is NOT here — it lives on the connect
+              button's `loading={connectPending}` for the error/disconnected status (below). */}
+          {showInertSpinner && (
             <Button variant="ghost" size="sm" disabled loading>
               {statusLabel}
             </Button>

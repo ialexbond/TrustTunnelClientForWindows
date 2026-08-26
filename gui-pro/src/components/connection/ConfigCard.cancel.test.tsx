@@ -10,15 +10,20 @@ import type { VpnStatus } from "../../shared/types";
 // Phase 17 Wave 0 (17-01) — RED (GREEN by 17-07). BUG-A2 (17-uat) narrowed the live-cancel states.
 //
 // D-05 / BUG-A2: the Connection tab's lead card exposes a LIVE «Отмена» button ONLY for the states
-// where the App's race-safe cancel is GUARANTEED to work — `connecting` / `recovering` (where the
-// shared `reconnectResolve` latch is null). `reconnecting` is AMBIGUOUS (it is BOTH a backend
-// auto-retry — safe — AND a FE save-and-reconnect whose teardown ARMS the latch — the cancel would be
-// inert), so from status alone it cannot offer a working cancel and must render the INERT spinner —
-// never a live-but-dead button. It mirrors the SAME affordance StatusPanel offers (StatusPanel.tsx:169),
-// threading the reused race-safe `handleUserCancel` → `vpn_disconnect` (no new backend command).
+// where the App's race-safe cancel is GUARANTEED to work — the ones where the shared
+// `reconnectResolve` latch is null. It mirrors the SAME affordance StatusPanel offers, threading the
+// reused race-safe `handleUserCancel` → `vpn_disconnect` (no new backend command).
 //
-// The teardown itself («Отключение» / disconnecting) and `reconnecting` are NON-cancelable here — the
-// live button must be HIDDEN there (mirror StatusPanel). Semantic queries only (role/name) — never CSS.
+// Owner UAT 2026-08-26 widened that set. `reconnecting` used to be excluded outright as AMBIGUOUS
+// (it is raised BOTH by the backend auto-retry — where the cancel works — AND by a FE
+// save-and-reconnect whose teardown arms the latch, where it would be inert), so the card showed the
+// inert spinner in both cases and an automatic reconnect could only be stopped from the tray. The
+// two ARE distinguishable: a FE save-and-reconnect raises `connectPending` for exactly its own span;
+// a backend auto-retry raises nothing. So `reconnecting && !connectPending` now offers the live
+// cancel, and `reconnecting && connectPending` still shows the inert spinner.
+//
+// The teardown itself («Отключение» / disconnecting) stays NON-cancelable here — the live button
+// must be HIDDEN there (mirror StatusPanel). Semantic queries only (role/name) — never CSS.
 
 const CANCEL = i18n.t("buttons.cancel");
 
@@ -51,11 +56,23 @@ describe("ConfigCard — D-05/BUG-A2 cancel button on the lead card", () => {
     });
   }
 
-  // BUG-A2: `reconnecting` is AMBIGUOUS (a FE save-and-reconnect arms the shared latch → the cancel
-  // would be a dead no-op), so it renders the INERT spinner — NO live «Отмена». `disconnecting` (the
-  // non-cancelable teardown) is HIDDEN the same way (mirror StatusPanel). This is the regression guard
-  // that the show-condition never offers a live-but-dead cancel during an armed-latch FE reconnect.
-  for (const status of ["reconnecting", "disconnecting"] as VpnStatus[]) {
+  // Owner UAT 2026-08-26: a BACKEND auto-reconnect is cancelable, and hiding the button was the
+  // defect — ten attempts in, the tray menu was the only way out. `connectPending` absent is what
+  // says «this reconnect is not a FE save-and-reconnect», so the cancel here really does land.
+  it("renders a LIVE «Отмена» while a BACKEND auto-reconnect runs (status = reconnecting)", async () => {
+    const onDisconnect = vi.fn();
+    renderWithProviders(
+      <ConfigCard config={cfg} leadCard status="reconnecting" onDisconnect={onDisconnect} />,
+    );
+    const cancel = screen.getByRole("button", { name: CANCEL });
+    expect(cancel).toBeEnabled();
+    await userEvent.click(cancel);
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  // `disconnecting` is the non-cancelable teardown — HIDDEN the same way StatusPanel hides it. This
+  // is the regression guard that the show-condition never offers a live-but-dead cancel.
+  for (const status of ["disconnecting"] as VpnStatus[]) {
     it(`HIDES the live «Отмена» while status = ${status} (inert spinner instead)`, () => {
       renderWithProviders(
         <ConfigCard config={cfg} leadCard status={status} onDisconnect={vi.fn()} />,
