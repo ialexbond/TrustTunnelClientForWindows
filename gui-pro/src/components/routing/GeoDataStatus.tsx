@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Globe, Download, RefreshCw, Check, AlertCircle, PauseCircle } from "lucide-react";
-import { Card, Button, ProgressBar } from "../../shared/ui";
+import { Card, Button, PanelHeader, ProgressBar } from "../../shared/ui";
 import { onGeodataAutoUpdateChanged } from "../../shared/utils/geodataAutoUpdateSignal";
 import type { GeoDataStatus as GeoDataStatusType } from "./useRoutingState";
 
@@ -288,34 +288,24 @@ export function GeoDataStatusCard({ status, downloading, busy = false, onDownloa
 
   return (
     <Card padding="md">
-      {/* HEADER ROW — icon + title on the LEFT, status indicator on the RIGHT, one line.
-          Deliberately hand-built instead of `CardHeader`: that component stacks the title and the
-          description into one block and vertically CENTERS both the icon and the action against it.
-          With a description long enough to wrap — this card's is — the globe ends up floating in the
-          middle of the two-line block instead of beside the title, and the status text collides with
-          the wrapped description with no separation. The design showcase has specced this exact
-          layout since the design pass, in as many words: the icon never hangs between the title and
-          the description. */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <Globe className="w-4 h-4 shrink-0" style={{ color: "var(--color-accent-fg)" }} />
-          <span
-            className="text-sm font-semibold truncate"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            {t("routing.geodataTitle")}
-          </span>
-        </div>
-        {headerStatus}
-      </div>
+      {/* HEADER — chip + title on the LEFT, data-condition status on the RIGHT, description under
+          the title. This used to be hand-built, because the only shared header available was
+          `CardHeader`, which vertically CENTRES both the glyph and the action against the whole
+          title+description block: with a description long enough to wrap — this card's is — the
+          globe hung in the middle of the two lines and the status ran into the wrapped description.
+          `PanelHeader` (the «Настройки» card header) aligns both to the TITLE line instead, which is
+          exactly what this card was hand-built to achieve, so the hand-built copy is gone and the
+          whole Routing tab now shares one header with Settings. The specced rule is unchanged and
+          still holds: the icon never hangs between the title and the description. */}
+      <PanelHeader
+        icon={<Globe className="w-4 h-4" />}
+        title={t("routing.geodataTitle")}
+        description={t("routing.geodataDescription")}
+        action={headerStatus}
+      />
 
-      {/* Description — UNDER the header row, full width, free to wrap without hitting anything. */}
-      <p className="text-xs mt-2" style={{ color: "var(--color-text-muted)" }}>
-        {t("routing.geodataDescription")}
-      </p>
-
-      {/* Status details */}
-      <div className="space-y-2 mt-3 mb-3">
+      {/* Status details — PanelHeader already supplies the gap below the header, so no top margin. */}
+      <div className="space-y-2 mb-3">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
             <div

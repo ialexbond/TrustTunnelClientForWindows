@@ -76,6 +76,48 @@ export interface AdapterConflictEvent {
 }
 
 /**
+ * The `"vpn-flow"` event channel — Rust telling the window about a connect/disconnect the
+ * window did NOT initiate, so its active-config pointer can follow what Rust actually did.
+ *
+ * Phase 28 (28-03): this channel joins the typed mirror. It was the last Rust→webview channel
+ * steering app state from an inline `serde_json::json!` blob with the field names living only
+ * in string literals on both ends — exactly the drift PA-1 exists to stop.
+ */
+export const VPN_FLOW_EVENT = "vpn-flow" as const;
+
+/**
+ * Who performed the flow the window is being told about — a CLOSED union, because the receiver
+ * uses it as an authorization gate: an unrecognised origin early-returns and adopts nothing
+ * (T-28-11). Adding a producer means adding a member here, so a value typo is a compile error
+ * rather than a silent no-op that would leave the pointer stale.
+ *
+ * - `"tray"` — 3.6 F-TRAY: the tray executes connect/disconnect in Rust (so it works even if
+ *   the webview is wedged) and emits at the START of `tray_vpn_connect`/`tray_vpn_disconnect`.
+ * - `"failover"` — 28-03 / OQ-1: the Rust failover queue walk recovered on a candidate that is
+ *   NOT the origin server, so the user is on a different exit than the pointer names. Mirrors
+ *   `connectivity::FAILOVER_FLOW_ORIGIN`.
+ */
+export type VpnFlowOrigin = "tray" | "failover";
+
+/** What Rust did. `"connect"` carries a `configPath`; `"disconnect"` does not. */
+export type VpnFlowAction = "connect" | "disconnect";
+
+/**
+ * Mirrors the `vpn-flow` payload emitted by `tray.rs` (tray connect/disconnect) and
+ * `connectivity.rs` (the failover switch announcement).
+ *
+ * Every field is optional because the payload is built per-site and the receiver must survive
+ * a malformed/partial blob. D-29: it carries an origin, an action and a config PATH only —
+ * paths already cross this boundary via the config commands; no credential is ever added.
+ */
+export interface VpnFlowEvent {
+  action?: VpnFlowAction;
+  origin?: VpnFlowOrigin;
+  /** The config Rust connected. Present on `"connect"`; the pointer is adopted only with it. */
+  configPath?: string;
+}
+
+/**
  * Mirrors Rust `ConnectOutcome { spawned, reason }` (camelCase serde) — the resolved value
  * of `invoke("vpn_connect", …)` (NIT-1). `spawned: false` means the connect bailed to a
  * clean Disconnected WITHOUT a live session because a genuine disconnect/cancel superseded

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import type { VpnStatus } from "../shared/types";
 import { Card } from "../shared/ui/Card";
+import { PanelHeader } from "../shared/ui/PanelHeader";
 import { Button } from "../shared/ui/Button";
 import StatusPanel from "./StatusPanel";
 import { useRoutingState } from "./routing/useRoutingState";
@@ -106,12 +107,17 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
         {/* VPN Mode selector — canon: FIRST section (Phase-20 flagship order) */}
         <Card padding="md">
-          <div className="flex items-center gap-2 mb-1.5">
-            <Route className="w-4 h-4" style={{ color: "var(--color-accent-fg)" }} />
-            <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
-              {t("labels.vpn_mode")}
-            </span>
-          </div>
+          {/* Shared `PanelHeader` — same header as the «Настройки» cards, so the glyph is a tinted
+              chip on the title line instead of a bare accent icon. The card had no caption of its
+              own, only the per-mode help text under the buttons, which left the heading looking
+              unfinished; the description says what the card governs, the help text below still says
+              what the CURRENTLY selected mode does. Two levels, same split as Settings uses between
+              a card description and a row description. */}
+          <PanelHeader
+            icon={<Route className="w-4 h-4" />}
+            title={t("labels.vpn_mode")}
+            description={t("routing.vpnModeDescription")}
+          />
           <div className="grid grid-cols-2 gap-1.5">
             <Button
               variant={vpnMode === "general" ? "primary" : "secondary"}

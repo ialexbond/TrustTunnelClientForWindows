@@ -18,6 +18,9 @@ interface Props {
    * a mid-switch master-on / reorder could arm a competing switch (Pitfall 5). Pure pass-through.
    */
   isSwitching?: boolean;
+  /** Path of the config the tunnel runs through. Pure pass-through to AutoModeSettings, which needs
+   *  it to collapse same-server twins the same way «Подключение» does. */
+  activeConfigPath?: string;
 }
 
 export default function AppSettingsPanel({
@@ -27,6 +30,7 @@ export default function AppSettingsPanel({
   onLanguageChange,
   statusPanel,
   isSwitching = false,
+  activeConfigPath,
 }: Props) {
   const { t } = useTranslation();
   const pushSnack = useSnackBar();
@@ -35,16 +39,49 @@ export default function AppSettingsPanel({
     pushSnack(t("messages.settings_saved"));
   }, [t, pushSnack]);
 
+  /**
+   * The other half of the same contract: a section reports a write that did NOT persist.
+   *
+   * It takes the same slot as the confirmation — the shared snackbar — because a change and its
+   * refusal are the same event to the user and answering them in two different places would make
+   * the failure the easier one to miss. The primitive supplies the rest of the design's rule: an
+   * error is a `role="alert"` / `aria-live="assertive"` region (urgent, not queued behind the
+   * polite confirmation), it is held for 5s rather than 3s so there is time to read it, and it
+   * carries a close button so the user can put it away instead of waiting.
+   *
+   * T-28-20: the callback takes NO argument. There is nothing for a caller to pass, so a backend
+   * error string cannot reach the screen even by accident — the sentence rendered is always the
+   * localized one.
+   */
+  const showSaveFailed = useCallback(() => {
+    pushSnack(t("messages.settings_save_failed"), "error");
+  }, [t, pushSnack]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {statusPanel}
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-        <GeneralSection onSaved={showSaved} />
+        <GeneralSection onSaved={showSaved} onSaveFailed={showSaveFailed} />
         {/* 12-07: «Авто-режим» mounts right after «Основные», before «Внешний вид» (RESEARCH
             §Pattern 3). It groups all connection-automation prefs (auto-switch master + params +
             priority list, the MOVED startup auto-connect toggle, notifications). It owns its own
             useAppSettings/useConfigList — AppSettingsPanel only feeds onSaved, like the siblings. */}
-        <AutoModeSettings onSaved={showSaved} locked={isSwitching} />
+        {/* 28-06: «Внешний вид» and «Экспериментальные» apply their change in place (a theme, a
+            language, a window-local flag) — there is no write that can refuse, so handing them a
+            callback they could never fire would be a dead prop, and a dead prop reads as a wired
+            one.
+            WR-02 (Phase-28 review): «Авто-режим» is no longer in that group. The 28-06 note said
+            it «treats its one backend call, reorder_configs, as deliberately optimistic» — but
+            that stopped being its only backend call in this same phase. `set_failover_settings` is
+            the second, and it is the one the whole feature depends on: if it refuses, the master
+            toggle shows ON while `app_settings.json` reads OFF and the monitor never fires, with
+            nothing on screen saying why. */}
+        <AutoModeSettings
+          onSaved={showSaved}
+          onSaveFailed={showSaveFailed}
+          locked={isSwitching}
+          activeConfigPath={activeConfigPath}
+        />
         <AppearanceSection
           theme={theme}
           onThemeChange={(t) => { onThemeChange(t); showSaved(); }}

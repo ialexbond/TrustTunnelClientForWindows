@@ -18,10 +18,16 @@ import type { i18n as I18nType } from "i18next";
 //
 // Keep this list in sync with the backend reason codes (status-lifecycle.md §Reason-коды):
 // connect-timeout / reconnect-gave-up / recovery-timeout / no-internet / sidecar-exit /
-// disconnect-failed.
+// disconnect-failed / failover-exhausted.
 export const REASON_CODE_I18N: Record<string, string> = {
   "connect-timeout": "errors.connect_timeout",
   "reconnect-gave-up": "errors.reconnect_gave_up",
+  // Phase 28 (28-03, D-05): the failover walk made ONE pass over every participating server and
+  // none of them answered. Deliberately its OWN key, never a reuse of `reconnect-gave-up`: «этот
+  // сервер не вернулся» and «ни один из ваших серверов не ответил» are different facts, and 28-02
+  // minted `failover-exhausted` as a distinct code precisely so they cannot collapse into one
+  // message. The retry affordance is the app's EXISTING terminal-error retry — no new control.
+  "failover-exhausted": "errors.failover_exhausted",
   "recovery-timeout": "errors.recovery_timeout",
   "no-internet": "errors.no_internet",
   "sidecar-exit": "errors.sidecar_exit",

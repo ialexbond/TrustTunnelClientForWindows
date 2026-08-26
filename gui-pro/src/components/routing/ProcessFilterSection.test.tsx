@@ -87,6 +87,26 @@ describe("ProcessFilterSection", () => {
     expect(screen.getByText("Только через VPN")).toBeInTheDocument();
   });
 
+  // The mode row was rebuilt on SettingsRow + RowToggle so it matches the «Настройки» rows. That
+  // swap must not cost the switch its name: RowToggle keeps its label in another cell by default
+  // and therefore demands an explicit aria-label, so a careless port would leave the control
+  // anonymous to a screen reader while still looking right. The name also has to FOLLOW the mode,
+  // because the visible label does.
+  it("names the mode switch with the visible label, in both modes", () => {
+    const { unmount } = renderSection({ processMode: "exclude" });
+    expect(screen.getByRole("switch", { name: "Исключить из VPN" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    unmount();
+
+    renderSection({ processMode: "only" });
+    expect(screen.getByRole("switch", { name: "Только через VPN" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
   it("shows add process button", () => {
     renderSection();
     expect(screen.getByText("Добавить процесс")).toBeInTheDocument();

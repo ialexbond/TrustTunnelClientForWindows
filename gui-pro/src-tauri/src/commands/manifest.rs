@@ -1179,7 +1179,8 @@ fn list_configs_in_dir(dir: &Path) -> Result<Vec<ConfigSummary>, String> {
 /// (add/delete/duplicate/rename/set_last_used/reorder); the READ commands (`list_configs`,
 /// `migrate_configs`) keep their `Vec` return — their list IS consumed.
 #[tauri::command]
-pub fn add_config(path: String) -> Result<(), String> {
+pub fn add_config(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri::Emitter;
     validate_app_path(&path)?;
     // WR-01: hold the funnel lock across read→mutate→write so a concurrent mutation
     // cannot overwrite this add with a stale manifest copy (lost update).
@@ -1189,6 +1190,9 @@ pub fn add_config(path: String) -> Result<(), String> {
     prune_missing(&mut manifest); // IN-55: drop ghosts so order/dedup are truthful
     add_entry(&mut manifest, &path)?;
     write_manifest_atomic(&dir, &manifest)?;
+    // See `delete_config`: this write arms the PP-5 window that swallows the watcher echo, and the
+    // calling screen refreshes only its own list. Every other manifest reader needs telling.
+    app.emit("configs-changed", ()).ok();
     Ok(())
 }
 
@@ -1498,13 +1502,33 @@ fn sync_entry_name_in_dir(dir: &Path, path: &str) -> Result<(), String> {
 /// Delete a config: remove its manifest entry AND its on-disk `.toml` — but ONLY when the
 /// file is a manifest-tracked file inside the portable data dir (V12). Refuses to touch a
 /// path outside the data dir.
+///
+/// Takes `app` for the F5 reason `set_last_used` documents, and for a second one the owner found
+/// (28-UAT): the atomic write arms the PP-5 self-echo window, which suppresses the fs-watcher's
+/// `configs-changed`, and the deleting screen refreshes only ITS OWN list. Every other manifest
+/// reader in the window heard nothing — above all the «Порядок переключения» list on the Settings
+/// tab, because the tabs stay MOUNTED (IN-11) and never re-mount, so it kept showing a server the
+/// user had deleted. The explicit emit is what makes a deletion visible app-wide.
 #[tauri::command]
-pub fn delete_config(id: String) -> Result<(), String> {
+pub fn delete_config(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
     delete_config_in_dir(&dir, &id)?;
-    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+
+    // The manifest is the source of truth for WHICH configs exist, so anything keyed by config id
+    // and stored elsewhere has to follow it down. Read the survivors ONCE — still under the funnel
+    // lock, so `read_manifest` does not re-lock — and let the settings side drop what is gone.
+    // Best-effort: this must not fail a delete that already succeeded on disk.
+    if let Ok(manifest) = read_manifest(&dir) {
+        let live: Vec<String> = manifest.configs.iter().map(|c| c.id.clone()).collect();
+        crate::app_settings::prune_failover_exclusions(&live).ok();
+    }
+
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs. The emit
+    // is for every OTHER list in the window, which has no idea this happened.
+    app.emit("configs-changed", ()).ok();
     Ok(())
 }
 
@@ -1637,7 +1661,8 @@ fn delete_config_in_dir(dir: &Path, id: &str) -> Result<(), String> {
 /// Duplicate a config: copy its `.toml` to a unique filename in the data dir and append a
 /// «(копия)» entry. The active/last-used config is untouched.
 #[tauri::command]
-pub fn duplicate_config(id: String) -> Result<(), String> {
+pub fn duplicate_config(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
@@ -1685,7 +1710,9 @@ pub fn duplicate_config(id: String) -> Result<(), String> {
         copy: true, // B6 fix #5: card «Дублировать» is a deliberate copy — durably spare it from the sweep
     });
     write_manifest_atomic(&dir, &manifest)?;
-    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs. The emit
+    // is for the OTHER lists in the window (see `delete_config`).
+    app.emit("configs-changed", ()).ok();
     Ok(())
 }
 
@@ -2096,7 +2123,8 @@ pub fn import_config_under_lock(
 /// the username on every reload (11-UAT: name edits did not stick). Persisting into the `.toml`
 /// makes the rename the real config name, survive reload, and "reflect on the config".
 #[tauri::command]
-pub fn rename_config(id: String, name: String) -> Result<(), String> {
+pub fn rename_config(app: tauri::AppHandle, id: String, name: String) -> Result<(), String> {
+    use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
@@ -2142,7 +2170,10 @@ pub fn rename_config(id: String, name: String) -> Result<(), String> {
     // Keep the manifest label in sync as the fallback for an unreadable file.
     entry.name = name;
     write_manifest_atomic(&dir, &manifest)?;
-    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs. The emit
+    // is for the OTHER lists in the window: a rename must not leave the «Порядок переключения» row
+    // showing the old title (see `delete_config`).
+    app.emit("configs-changed", ()).ok();
     Ok(())
 }
 
@@ -3793,9 +3824,18 @@ included_routes = ["0.0.0.0/0"]
             &rest[..end]
         }
 
+        // 28-UAT (owner): the list is not the only thing reading the manifest, and the tabs stay
+        // MOUNTED (IN-11), so a mutation that tells nobody strands EVERY other list in the window —
+        // which is exactly how a deleted server kept its «Порядок переключения» row. Any command
+        // that changes what the manifest contains, or what a row says, belongs on this list. If you
+        // add a manifest mutator and this test does not mention it, that is the bug, not the test.
         for sig in [
             "pub fn set_last_used(app: tauri::AppHandle, id: String)",
             "pub fn reorder_configs(app: tauri::AppHandle, ids: Vec<String>)",
+            "pub fn delete_config(app: tauri::AppHandle, id: String)",
+            "pub fn add_config(app: tauri::AppHandle, path: String)",
+            "pub fn duplicate_config(app: tauri::AppHandle, id: String)",
+            "pub fn rename_config(app: tauri::AppHandle, id: String, name: String)",
         ] {
             let body = body_after(src, sig);
             assert!(

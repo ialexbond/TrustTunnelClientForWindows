@@ -16,6 +16,7 @@ import { isIpAddress } from "./plateDetails";
 import { InlineNameEdit } from "./InlineNameEdit";
 import type { VpnStatus, ReconnectProgress } from "../../shared/types";
 import type { ConfigSummary } from "../../shared/hooks/useConfigList";
+import { reconnectLabel } from "../../shared/utils/reconnectLabel";
 
 /**
  * `ConfigCard` (production, Phase 11 Plan 11-03) — one horizontal config card. It mirrors
@@ -463,10 +464,13 @@ function ConfigCardImpl({
                 min-height (3.75rem) keeps the card from growing/jumping between connected and reconnecting. */}
             {status === "reconnecting" && !switching && reconnectProgress && (
               <span className="min-w-0 select-none truncate text-xs tabular-nums text-[var(--color-text-muted)]">
-                {t("status.reconnect_attempt", {
-                  attempt: reconnectProgress.attempt,
-                  max: reconnectProgress.max,
-                })}
+                {/* Same sentence as the status line above it — both call `reconnectLabel`. This card
+                    used to hardcode «Попытка N из M», which is why it kept saying «Попытка 1 из 1»
+                    during a failover walk after StatusPanel had been taught better (28-UAT test 3). */}
+                {(() => {
+                  const label = reconnectLabel(reconnectProgress);
+                  return t(label.key, label.vars);
+                })()}
               </span>
             )}
           </div>
@@ -575,10 +579,22 @@ function ConfigCardImpl({
                   - `switching` — a seamless A→B switch is self-terminating (isSwitching held across its
                     `connecting` leg, during which handleUserCancel IS inert), so its controls are locked
                     to the inert spinner (never a live-but-dead cancel — Phase 14 D-12).
-                The inert-spinner branch below (isInFlight covers reconnecting + disconnecting; plus
-                switching + the pre-connecting connectPending window) is mutually exclusive with this one,
-                so the show-condition matches the handler's works-condition — no dead button. */}
-            {(status === "connecting" || status === "recovering") &&
+                A backend AUTO-reconnect now shows the live cancel too, and that is the UAT
+                fix (2026-08-26). `reconnecting` used to be excluded outright as ambiguous — the
+                status is raised BOTH by the Rust auto-retry supervisor (cancel works) and by a FE
+                save-and-reconnect whose teardown arms `reconnectResolve` (cancel inert) — so the
+                card hid the button in both cases. Ten attempts into an automatic reconnect the only
+                way to stop was the tray menu, which works because it calls `tray_vpn_disconnect`
+                directly. The two cases ARE distinguishable without new state: a FE
+                save-and-reconnect raises `pendingConnectPath` → `connectPending` for exactly its own
+                span (`handleReconnectGuarded`, cleared in the same `finally`), while a backend
+                auto-retry raises nothing on the frontend. `reconnecting && !connectPending` is
+                therefore precisely «this one is the backend's, and the cancel will land».
+                The inert-spinner branch below stays the exact complement, so the show-condition
+                still matches the handler's works-condition — no dead button, and no hidden live one. */}
+            {(status === "connecting" ||
+              status === "recovering" ||
+              (status === "reconnecting" && !connectPending)) &&
             !switching ? (
               <Button
                 variant="ghost"

@@ -765,14 +765,26 @@ pub fn start_monitor(
                 let loss_armed =
                     crate::lifecycle::tunnel_loss_armed(connected_secs_ago, first_probe_success);
                 if consecutive_failures >= MAX_FAILURES && was_online && loss_armed {
-                    // Secondary gate: is the LOCAL network still reachable? This does NOT
-                    // gate the offline decision (the tunnel probe already failed N times);
-                    // it only classifies the reason code so the UI can distinguish a
-                    // server-silent drop (gateway up, tunnel dead) from a whole-internet
-                    // outage (gateway also down). A reachable gateway can NOT mask a dead
-                    // tunnel — by this point we have already decided to go offline.
-                    let local_up = check_adapter_online().await;
-                    let reason = if local_up {
+                    // Classify the drop: server-silent, or the user's own uplink gone? This does
+                    // NOT gate the offline decision (the tunnel probe already failed N times) — it
+                    // picks the reason code, and the reason code decides whether «Авто-режим» may
+                    // move the user to another server at all (`lifecycle::should_failover` accepts
+                    // TUNNEL_LOST_REASON and nothing else).
+                    //
+                    // The signal is the PRESENCE OF A PHYSICAL ADAPTER, deliberately not a gateway
+                    // probe. `check_adapter_online()` opens a TCP connection to `gateway:80`; its
+                    // own doc says it is for «adapter recovery — VPN is disconnected». Here the core
+                    // process is still ALIVE, with its WinTUN adapter, its routes and its
+                    // fail-closed killswitch all installed, so that connection goes into the dead
+                    // tunnel and fails unconditionally. It reported «gateway unreachable» for EVERY
+                    // server-side drop — so every such drop was filed as `internet-lost`, took the
+                    // wait-for-the-uplink recovery, and got a ONE-entry supervisor queue: ten
+                    // attempts against the server that had just died, and no failover walk at all.
+                    // That is the UAT test 1 (2026-08-26), whose log carries the
+                    // contradiction in a single line: `adapter=present, gateway=unreachable`.
+                    // Rationale + the trade in `lifecycle::drop_is_tunnel_lost`.
+                    let adapter_present = find_physical_adapter().is_some();
+                    let reason = if crate::lifecycle::drop_is_tunnel_lost(adapter_present) {
                         TUNNEL_LOST_REASON
                     } else {
                         INTERNET_LOST_REASON
@@ -782,22 +794,37 @@ pub fn start_monitor(
                         "WARN",
                         &format!("[connectivity] Declaring offline after {MAX_FAILURES} failed tunnel probes (reason={reason})"),
                     );
-                    // 2026-06-11 (user-requested drop diagnostics): ONE verdict line
-                    // answering "did MY side break, or the path/server?" — the question a
-                    // post-mortem log read could not answer before. By this point the
-                    // tunnel probe failed MAX_FAILURES times; local_up says whether the
-                    // physical side (adapter + gateway) still works. Emitted on the
-                    // vpn-log channel too so it lands in the in-window panel next to the
-                    // sidecar lines, not only in the (opt-in) log file.
-                    let adapter_present = find_physical_adapter().is_some();
-                    let verdict = if local_up {
+                    // 2026-06-11 (user-requested drop diagnostics): ONE verdict line answering
+                    // "did MY side break, or the path/server?" — the question a post-mortem log
+                    // read could not answer before. Emitted on the vpn-log channel too so it lands
+                    // in the in-window panel next to the sidecar lines, not only in the (opt-in)
+                    // log file.
+                    //
+                    // The gateway probe still runs, but ONLY to enrich this line and only once the
+                    // decision above is already made — it is a useful post-mortem fact and a
+                    // misleading classifier, and this comment exists so the next reader does not
+                    // promote it back. It is skipped entirely when the adapter is missing: that
+                    // already settles the question, and probing a gateway that has no adapter to
+                    // leave through would just cost the connect timeout.
+                    let gateway_reachable = if adapter_present {
+                        check_adapter_online().await
+                    } else {
+                        false
+                    };
+                    let verdict = if !adapter_present {
+                        "[diagnose] drop verdict: adapter=missing — cause is LOCAL (PC / Wi-Fi / router side)"
+                            .to_string()
+                    } else if gateway_reachable {
                         format!(
                             "[diagnose] drop verdict: adapter=present, gateway=reachable, tunnel probes failed {MAX_FAILURES}x — cause is OUTSIDE this PC (ISP path or server)"
                         )
                     } else {
+                        // Adapter up, gateway silent. Treated as a server-side drop on purpose:
+                        // with the core still holding a fail-closed killswitch this is what a
+                        // healthy machine looks like from inside a dead tunnel, so the gateway
+                        // result says nothing about the uplink here.
                         format!(
-                            "[diagnose] drop verdict: adapter={}, gateway=unreachable — cause is LOCAL (PC / Wi-Fi / router side)",
-                            if adapter_present { "present" } else { "missing" }
+                            "[diagnose] drop verdict: adapter=present, gateway=unreachable (expected while the core still holds the killswitch), tunnel probes failed {MAX_FAILURES}x — treated as a server-side drop"
                         )
                     };
                     log_app("WARN", &verdict);
@@ -868,6 +895,36 @@ pub fn start_monitor(
 /// frontend, which maps this code to the localized message.
 pub const RECONNECT_GAVE_UP_REASON: &str = "reconnect-gave-up";
 
+/// Stable, secret-free ASCII reason code emitted when ONE pass through the participating
+/// failover servers finished and none of them answered (Phase 28 D-05).
+///
+/// A FIXED lowercase-kebab token — never Cyrillic, never a server name, never a config path, and
+/// never derived from anything the sidecar or the manifest prints (D-09/D-29). The frontend maps
+/// it to the localized «ни один сервер не отвечает» wording at its presentation boundary; the
+/// user never sees this string.
+///
+/// Reusing `RECONNECT_GAVE_UP_REASON` here is FORBIDDEN. That code means «this one server would
+/// not come back»; this one means «none of your servers answered». Collapsing the two into one
+/// message is exactly the loss of distinction 27 D-15 is fixing on the other side of the app, and
+/// it would leave a person unable to tell a broken server from a broken network. It follows
+/// `RECOVERY_TIMEOUT_REASON`'s precedent: a distinct code per distinct honest failure.
+///
+/// TRANSIENT, like every other drop code — a later attempt may succeed once a server returns, so
+/// it must never appear in `lifecycle::is_terminal_reason`.
+pub const FAILOVER_EXHAUSTED_REASON: &str = "failover-exhausted";
+
+/// Which give-up code does this walk deserve? (D-05)
+///
+/// Pure so the «a one-server queue still reports `reconnect-gave-up`» rule is an assertion rather
+/// than an if-statement buried in the supervisor's terminal arm.
+pub fn give_up_reason(queue_exhausted: bool) -> &'static str {
+    if queue_exhausted {
+        FAILOVER_EXHAUSTED_REASON
+    } else {
+        RECONNECT_GAVE_UP_REASON
+    }
+}
+
 /// Outcome of one run of the bounded reconnect loop (D-02 / D-04 / Codex HIGH).
 ///
 /// Returned by the pure-ish `run_reconnect_loop` core so the tests can assert the
@@ -893,7 +950,12 @@ pub enum SupervisorOutcome {
 /// a real sidecar (RESEARCH Wave 0 Gaps).
 ///
 /// Behavior (D-02 / D-04 / Gemini fast-fail / Codex HIGH):
-/// - Loops `attempt` over `1..=RECONNECT_MAX_ATTEMPTS` (no inline `3`).
+/// - Loops `attempt` over `1..=max_attempts` (no inline number, and no longer the bare const).
+///   28-02: the budget is a PER-CALL parameter because one failover candidate gets
+///   `lifecycle::FAILOVER_ATTEMPTS_PER_CANDIDATE` while the internet-lost recovery path and the
+///   failover-disabled path keep `RECONNECT_MAX_ATTEMPTS` (D-01). The const itself was NOT
+///   lowered: doing so would silently change the recovery path too, dropping the reboot-recovery
+///   guarantee on a drop where no other server can help anyway.
 /// - BEFORE each attempt re-checks intent + generation: if `user_disconnected()`
 ///   OR `!is_current_generation(captured_generation, live_generation())`, returns
 ///   `Aborted` immediately — a user disconnect or a manual reconnect that bumped
@@ -918,6 +980,7 @@ pub enum SupervisorOutcome {
 /// fast-fail test can prove the full window is skipped without real time passing.
 async fn run_reconnect_loop<TC, TCFut, UD, LG, RC, SL, SLFut>(
     captured_generation: u64,
+    max_attempts: u32,
     mut try_connect: TC,
     user_disconnected: UD,
     live_generation: LG,
@@ -933,7 +996,7 @@ where
     SL: FnMut() -> SLFut,
     SLFut: std::future::Future<Output = ()>,
 {
-    for attempt in 1..=crate::lifecycle::RECONNECT_MAX_ATTEMPTS {
+    for attempt in 1..=max_attempts {
         // D-04 + Codex HIGH: a user-initiated disconnect, or a generation that was
         // advanced by a manual reconnect / disconnect, means we no longer own this
         // session — abort before any respawn / status-write.
@@ -957,7 +1020,21 @@ where
             // Re-check intent NOW, after the success: if the user requested a
             // disconnect, the respawned-and-connected sidecar must NOT win — return
             // Aborted so the supervisor tears it down to a clean Disconnected.
-            if user_disconnected() {
+            //
+            // FB-01 (Fable-5 Phase-28 review): the SAME re-check must also ask the generation,
+            // and until now it did not — the pre-attempt guard above asked both facts, this one
+            // asked only intent. That asymmetry is reachable and it is not a disconnect race, it
+            // is a CONNECT race. The user watching «Переподключение…» clicks server B's card
+            // mid-walk; `vpn_connect(B)` bumps the generation, FAB-R1 correctly makes this walk's
+            // C-child refuse to store and die — but `respawn_and_wait` polls the SHARED status
+            // arc with no notion of WHOSE `Connected` it is watching, so it sees B come up and
+            // reports success. Without this clause the walk concluded «Recovered on candidate C»,
+            // emitted the failover `vpn-flow`, and the window adopted C while the tunnel ran B:
+            // Rust says B, the UI says C, the user is on B. The store was guarded by FAB-R1 and
+            // the CLASSIFICATION was left open; this closes it on the same two facts.
+            if user_disconnected()
+                || !crate::lifecycle::is_current_generation(captured_generation, live_generation())
+            {
                 return SupervisorOutcome::Aborted;
             }
             return SupervisorOutcome::Recovered;
@@ -984,13 +1061,156 @@ where
         // the inter-attempt sleep so 3 instant deaths don't waste ~1 minute (Gemini
         // fast-fail). Otherwise wait the snappy interval before the next try. The
         // last attempt never sleeps (we're about to give up).
-        let is_last = crate::lifecycle::gave_up(attempt);
+        let is_last = crate::lifecycle::gave_up(attempt, max_attempts);
         if !is_last && !crate::lifecycle::is_fast_fail(elapsed) {
             sleep_interval().await;
         }
     }
 
     SupervisorOutcome::GaveUp
+}
+
+/// What one walk over the failover queue ended up doing (Phase 28 D-02 / D-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FailoverWalkResult {
+    /// The terminal outcome of the LAST candidate the walk ran.
+    pub outcome: SupervisorOutcome,
+    /// Zero-based index of the candidate the walk stopped on — index 0 is the origin, so a
+    /// `Recovered` at index 0 means «the server the user chose came back», and any higher index
+    /// means the user was moved and the frontend has a switch to announce (27 D-04).
+    pub candidate_index: usize,
+    /// True only when EVERY candidate of a MULTI-candidate queue gave up — the D-05 exhaustion
+    /// that earns `FAILOVER_EXHAUSTED_REASON`. A one-entry queue giving up is an ordinary
+    /// reconnect give-up and stays false, so the two failures never collapse into one message.
+    pub queue_exhausted: bool,
+}
+
+/// The outer queue walk (Phase 28 D-02 / D-05 / D-06), factored as a pure-ish async core so it
+/// runs in unit tests against a scripted `run_one_candidate` — no sidecar, no network, no clock —
+/// exactly the way `run_reconnect_loop` is already tested.
+///
+/// Behaviour:
+/// - Runs candidates in order. `Recovered` and `Aborted` stop the walk immediately; `GaveUp`
+///   advances to the next server. When the list runs out the walk stops: ONE pass, never a silent
+///   second lap (D-05) — a quiet infinite retry leaves a person unable to tell a broken app from
+///   a broken network.
+/// - **Re-checks ownership on every ADVANCE**, via `advance_allowed`, not only on every attempt
+///   inside `run_reconnect_loop`. An advance connects to a DIFFERENT config, which is closer to a
+///   `vpn_connect` than to a retry, so a stale walk that kept going would spawn a sidecar for a
+///   session someone else already owns — the «застряло на Подключено» phantom class.
+/// - Offers **no teardown seam**: nothing in this signature can release the sidecar, so traffic
+///   cannot escape the tunnel between candidates (D-06 / T-28-05). The single teardown belongs to
+///   the caller's terminal arm, after the walk has returned.
+///
+/// The generation question this loop deliberately does NOT ask: whether an advance should
+/// RE-CAPTURE the session generation. It must not. `respawn_sidecar` never bumps
+/// `connection_generation` (it says so in its own doc comment — the supervisor owns the generation
+/// it captured at the drop), so the whole walk runs under ONE captured value. Re-capturing at each
+/// advance would make `lifecycle::respawn_may_store(captured, live, …)` read `captured == live`
+/// unconditionally and quietly neuter the FAB-R1 store guard — the walk would adopt a generation
+/// bumped by someone else's `vpn_connect(B)` and store a second live sidecar beside it, two cores
+/// fighting over the WinTUN adapter and the fail-closed killswitch. `respawn_may_store` is the
+/// predicate that proves it: it is only meaningful while `captured` stays frozen at the drop.
+/// `advance_allowed` therefore compares the live generation against that SAME frozen value.
+async fn run_failover_walk<RC, RCFut, AG>(
+    queue_len: usize,
+    mut run_one_candidate: RC,
+    advance_allowed: AG,
+) -> FailoverWalkResult
+where
+    RC: FnMut(usize) -> RCFut,
+    RCFut: std::future::Future<Output = SupervisorOutcome>,
+    AG: Fn() -> bool,
+{
+    let mut index = 0usize;
+    while index < queue_len {
+        // Every advance (index > 0) re-proves ownership before touching a different server.
+        if index > 0 && !advance_allowed() {
+            return FailoverWalkResult {
+                outcome: SupervisorOutcome::Aborted,
+                candidate_index: index - 1,
+                queue_exhausted: false,
+            };
+        }
+
+        let outcome = run_one_candidate(index).await;
+        match outcome {
+            SupervisorOutcome::Recovered | SupervisorOutcome::Aborted => {
+                return FailoverWalkResult {
+                    outcome,
+                    candidate_index: index,
+                    queue_exhausted: false,
+                };
+            }
+            // A GaveUp is per-CANDIDATE, including the terminal-reason short-circuit inside
+            // `run_reconnect_loop`: bad credentials in server A's config say nothing about
+            // server B, so a terminal failure ends that candidate, not the walk.
+            SupervisorOutcome::GaveUp => index += 1,
+        }
+    }
+
+    FailoverWalkResult {
+        outcome: SupervisorOutcome::GaveUp,
+        candidate_index: queue_len.saturating_sub(1),
+        // Only a real WALK can exhaust a queue. A one-entry queue (failover off, internet-lost
+        // recovery, a sidecar exit) gave up on one server and must keep saying so.
+        queue_exhausted: queue_len > 1,
+    }
+}
+
+/// The stable `origin` token the failover switch announcement carries on the EXISTING `vpn-flow`
+/// channel (28-03, `28-CONTEXT.md` OQ-1).
+///
+/// Mirrored by the `VpnFlowOrigin` union in `gui-pro/src/shared/ipc/events.ts`, whose receiver
+/// early-returns on anything it does not recognise — so this token IS the wire contract, and a
+/// drift on either end is a compile error there rather than a pointer that silently stops
+/// following the server the user is actually on. D-29: an origin token, never a server name.
+pub const FAILOVER_FLOW_ORIGIN: &str = "failover";
+
+/// Pure: which config path — if any — does THIS walk result oblige us to announce as a switch?
+///
+/// The FRONTEND-facing active-config pointer (`config.configPath` / `tt_config_path`) is
+/// frontend-owned — only `performSwitch` and the `vpn-flow` listener write it, and Rust never
+/// touches window storage (OQ-1). This function only states the fact: «you are now on this
+/// config».
+///
+/// CR-01 correction: that ownership rule was mistakenly read as «Rust must not update
+/// `state.config_path` either». It must. `state.config_path` is the BACKEND's own private record
+/// of the config the live sidecar was launched from, and five Rust consumers depend on it being
+/// true — it is now committed by `AppState::commit_live_config_path` inside `respawn_sidecar`,
+/// which is a different fact travelling a different path and no breach of OQ-1.
+///
+/// Three ways to get `None`, each for its own reason:
+/// - **Not `Recovered`.** An exhausted queue or an abort leaves the user on NO server, so there is
+///   no pointer to move; the exhaustion has its own terminal `Error` + `FAILOVER_EXHAUSTED_REASON`.
+/// - **`candidate_index == 0`.** Index 0 is the ORIGIN. A successful retry of the same server moved
+///   nobody — announcing it would re-point the app at the config it is already on and fire a
+///   «переключено автоматически» plate for a switch that never happened.
+/// - **An index past the end of the queue.** The index and the queue reach the terminal arm from
+///   two places; a mismatch degrades to «say nothing» rather than panicking a background task and
+///   leaving the user with no outcome at all.
+pub fn failover_switch_target<'a>(
+    walk: &FailoverWalkResult,
+    queue: &'a [String],
+) -> Option<&'a str> {
+    if walk.outcome != SupervisorOutcome::Recovered || walk.candidate_index == 0 {
+        return None;
+    }
+    let target = queue.get(walk.candidate_index)?;
+    // CR-02 belt: «index > 0» is a proxy for «a different server», and a proxy is only as good as
+    // the queue's own de-duplication. `failover_queue` now de-dupes on `canonical_path_key`, so the
+    // origin can no longer appear twice — but this function is the LAST gate before the app tells
+    // the user it moved them, and the cost of the proxy being wrong is a «Переключено
+    // автоматически» plate for a switch that never happened plus a pointer adoption that
+    // re-spells the very config the app is already on. Compare the winner against the origin
+    // (`queue[0]`) on the same identity key, so «did the user actually move?» is answered by the
+    // fact rather than by an index.
+    let origin = queue.first()?;
+    if crate::lifecycle::canonical_path_key(target) == crate::lifecycle::canonical_path_key(origin)
+    {
+        return None;
+    }
+    Some(target.as_str())
 }
 
 /// Canonical "declare offline + hand off to the reconnect supervisor" path,
@@ -1021,6 +1241,14 @@ fn declare_offline_and_handoff(
     app: &tauri::AppHandle,
     reason: crate::commands::vpn::InternetStatusReason,
 ) -> bool {
+    // The same drop classification, as the STABLE ASCII code the failover decision branches on
+    // (28 D-01). The enum and the code are two faces of one fact; deriving one from the other
+    // here keeps `should_failover` free of any Tauri type.
+    let reason_code = match reason {
+        crate::commands::vpn::InternetStatusReason::TunnelLost => TUNNEL_LOST_REASON,
+        crate::commands::vpn::InternetStatusReason::InternetLost => INTERNET_LOST_REASON,
+    };
+
     // Tell frontend: disconnect VPN, then we'll monitor adapter recovery. The
     // `disconnect` action drives the UI (e.g. the recovering label); the `reconnect`
     // recovery is DRIVEN IN RUST by the supervisor below. `reason` is a STABLE ASCII
@@ -1064,15 +1292,20 @@ fn declare_offline_and_handoff(
                     .lock()
                     .map(|g| g.clone())
                     .unwrap_or_else(|_| "info".to_string());
+                let queue = build_failover_queue(reason_code, &config_path);
                 log_app(
                     "INFO",
-                    "[connectivity] live-sidecar drop — starting reconnect supervisor",
+                    &format!(
+                        "[connectivity] live-sidecar drop — starting reconnect supervisor over {} candidate(s)",
+                        queue.len()
+                    ),
                 );
                 start_reconnect_supervisor(
                     app.clone(),
-                    config_path,
+                    queue,
                     log_level,
                     generation,
+                    crate::lifecycle::WalkKind::ServerDrop,
                 );
                 // The supervisor now owns recovery for this drop.
                 return true;
@@ -1081,6 +1314,63 @@ fn declare_offline_and_handoff(
     }
 
     false
+}
+
+/// The IO half of the failover queue build (Phase 28 D-01 / D-02 / 27 D-08): read the persisted
+/// failover settings and the manifest, project them onto `lifecycle::FailoverCandidate`, and let
+/// the two pure decisions in `lifecycle.rs` do the deciding.
+///
+/// Returns `[origin]` — byte-for-byte today's single-server behaviour — whenever this is not a
+/// failover: the master switch is off (27 D-06), the drop is an `internet-lost` where no other
+/// server can help (D-01), or every other participating server is excluded or absent. Only a
+/// genuine tunnel-lost drop with somewhere to go returns a longer list.
+///
+/// Both reads FAIL CLOSED, matching 28-01's deliberate asymmetry: `get_failover_settings` already
+/// reads OFF with nothing excluded when `app_settings.json` is missing or corrupt, and a manifest
+/// that will not parse yields no candidates rather than an error — an unreadable server list must
+/// never be a reason to move a person to an unknown exit country.
+pub(crate) fn build_failover_queue(reason_code: &str, origin_path: &str) -> Vec<String> {
+    let origin_only = || vec![origin_path.to_string()];
+
+    let failover = crate::app_settings::get_failover_settings();
+    if !failover.enabled {
+        return origin_only();
+    }
+
+    let entries: Vec<crate::lifecycle::FailoverCandidate> =
+        match crate::commands::manifest::read_manifest(&crate::ssh::portable_data_dir()) {
+            Ok(manifest) => manifest
+                .configs
+                .into_iter()
+                .map(|entry| crate::lifecycle::FailoverCandidate {
+                    id: entry.id,
+                    path: entry.path,
+                    order: entry.order,
+                })
+                .collect(),
+            Err(err) => {
+                // D-29: the manifest parse error carries no secret, but it can carry a path, so
+                // log the FACT and not the message — and fall back to the single-server queue.
+                log_app(
+                    "WARN",
+                    &format!(
+                        "[failover] manifest unreadable ({} chars of parse error) — failing closed to the current server only",
+                        err.len()
+                    ),
+                );
+                return origin_only();
+            }
+        };
+
+    let queue = crate::lifecycle::failover_queue(&entries, &failover.excluded_ids, origin_path);
+    // `candidates_remaining` counts the servers AFTER the origin — the origin's own retry happens
+    // either way, so a queue of one is not something to fail over with.
+    let remaining = queue.len().saturating_sub(1);
+    if crate::lifecycle::should_failover(reason_code, failover.enabled, remaining) {
+        queue
+    } else {
+        origin_only()
+    }
 }
 
 /// Legacy adapter-recovery wait — the fallback recovery path used when no Rust
@@ -1579,7 +1869,21 @@ fn handoff_reconnect_supervisor(app: &tauri::AppHandle) -> HandoffOutcome {
         "INFO",
         "[connectivity] adapter recovered — starting reconnect supervisor for the re-establish (02-20)",
     );
-    start_reconnect_supervisor(app.clone(), config_path, log_level, generation);
+    // 28-02: a single-candidate queue. This is the `internet-lost` recovery path — the uplink
+    // just came back and the SAME server must be brought up, with the full reboot-surviving
+    // budget (D-01). Failover deliberately does not apply here: no other server could have
+    // helped while the local uplink was gone.
+    // A ONE-entry queue, so `kind` cannot change a single budget here (`per_candidate_attempt_budget`
+    // short-circuits on `queue_len <= 1`). Passed honestly rather than defaulted: this path exists
+    // because the local uplink went away, which is a local cause, and a future reader must not have
+    // to reverse-engineer that from the queue length.
+    start_reconnect_supervisor(
+        app.clone(),
+        vec![config_path],
+        log_level,
+        generation,
+        crate::lifecycle::WalkKind::LocalProcessDeath,
+    );
     HandoffOutcome::Started
 }
 
@@ -1591,22 +1895,53 @@ fn handoff_reconnect_supervisor(app: &tauri::AppHandle) -> HandoffOutcome {
 /// - this module's `start_monitor` connectivity-loss path (the sidecar stayed
 ///   ALIVE but the tunnel is dead) — criterion 3 (Codex/Gemini HIGH).
 ///
-/// It retries exactly `RECONNECT_MAX_ATTEMPTS` times at a fixed snappy interval
-/// (no exponential backoff — D-02), emitting `VpnStatus::Reconnecting` per attempt
-/// through the SINGLE mutator `set_vpn_status` (D-03), fast-fails on instant deaths
-/// (Gemini), and is generation-guarded so a manual reconnect / disconnect that
-/// bumped `connection_generation` neutralizes a stale supervisor (Codex HIGH).
-/// After 3 failures it sets a terminal `VpnStatus::Error` carrying the STABLE
-/// secret-free reason code `RECONNECT_GAVE_UP_REASON` — never a Russian string.
+/// It retries at a fixed snappy interval (no exponential backoff — D-02), emitting
+/// `VpnStatus::Reconnecting` per attempt through the SINGLE mutator `set_vpn_status` (D-03),
+/// fast-fails on instant deaths (Gemini), and is generation-guarded so a manual reconnect /
+/// disconnect that bumped `connection_generation` neutralizes a stale supervisor (Codex HIGH).
+/// When the budget runs out it sets a terminal `VpnStatus::Error` carrying a STABLE secret-free
+/// reason code — never a Russian string.
+///
+/// **28-02 — `queue` replaces the single `config_path`.** The supervisor now walks a list of
+/// candidate config paths, origin first (`lifecycle::failover_queue`). A ONE-entry queue is the
+/// unchanged path: the same server, the full `RECONNECT_MAX_ATTEMPTS`, `RECONNECT_GAVE_UP_REASON`
+/// on give-up — byte-for-byte what shipped before, which is what every caller except the
+/// tunnel-lost handoff passes. A longer queue is a failover walk: one attempt per candidate
+/// (D-02), advancing on give-up, and `FAILOVER_EXHAUSTED_REASON` if the pass finds nobody (D-05).
+///
+/// Three properties the walk's SHAPE buys, each of which a different structure would lose:
+/// - **One guard for the whole walk.** `ReconnectInProgressGuard::try_claim` is claimed ONCE,
+///   before the outer loop, exactly where it was claimed before. Chaining a second
+///   `start_reconnect_supervisor` per candidate cannot work — its own CAS refuses while the first
+///   still holds the guard — and releasing the guard first opens a window for the sidecar
+///   `Terminated` arm to start a competing supervisor. One guard is the CR-02 single-owner
+///   property for free (T-28-06).
+/// - **No FULL teardown between candidates.** `teardown_session_sidecar` mid-walk would release the
+///   WinTUN adapter and the fail-closed killswitch with it, which is the leak D-06 exists to
+///   prevent, so it happens exactly once, after the terminal write (T-28-05) — the property
+///   `the_walk_offers_no_teardown_seam_between_candidates` guards.
+///
+///   This is NOT the same as «nothing happens between candidates», which is what this note used to
+///   say. `respawn_sidecar` performs a NARROW, deliberate teardown of its own before each spawn:
+///   restore the system DNS, drop the hosts block, and kill the previous core GRACEFULLY so it can
+///   run its own killswitch/route cleanup. That is not optional politeness — without the DNS
+///   restore the system still points at the dead core's proxy, the next candidate cannot resolve
+///   its own server address, and every candidate fails (28-UAT G-28-1d: a walk that visited every
+///   server and connected to none). The two are different things: the narrow one hands the OS back
+///   what the dying core held, the full one hands back the tunnel itself.
+/// - **Ownership re-checked on every advance**, not only every attempt — an advance connects to a
+///   DIFFERENT config, which is closer to a `vpn_connect` than to a retry (T-28-07). See
+///   `run_failover_walk`'s doc comment for why an advance must NOT re-capture the generation.
 ///
 /// `generation` is the `connection_generation` value captured by the trigger at the
 /// moment of the drop; the supervisor re-checks it before every respawn / status
-/// write via the loop's `live_generation` closure.
+/// write via the loop's `live_generation` closure, and holds it frozen across the whole walk.
 pub fn start_reconnect_supervisor(
     app: tauri::AppHandle,
-    config_path: String,
+    queue: Vec<String>,
     log_level: String,
     generation: u64,
+    kind: crate::lifecycle::WalkKind,
 ) {
     tauri::async_runtime::spawn(async move {
         log_app(
@@ -1655,105 +1990,328 @@ pub fn start_reconnect_supervisor(
             }
         };
 
-        // Injected predicates for the testable core.
-        let live_generation = {
-            let gen_arc = Arc::clone(&gen_arc);
-            move || gen_arc.load(Ordering::SeqCst)
-        };
-        // T-31: a user disconnect is observed via EITHER the transient `disconnecting`
-        // flag OR the DURABLE `user_disconnect_requested` flag. The transient one is
-        // cleared at the end of `vpn_disconnect` (WR-01), so a supervisor re-reading
-        // intent after the disconnect completed would miss it and let an in-flight
-        // respawn flip back to Connected (the double-press UAT bug). The durable flag
-        // persists until the next vpn_connect, so the OR sees the user's intent at
-        // every decision point — including the post-success re-check below.
         let user_disconnect_requested_arc = Arc::clone(&state.user_disconnect_requested);
-        let user_disconnected = {
-            let disc_arc = Arc::clone(&disc_arc);
-            let durable = Arc::clone(&user_disconnect_requested_arc);
-            move || {
-                *disc_arc.lock().unwrap_or_else(|e| e.into_inner())
-                    || durable.load(Ordering::SeqCst)
-            }
-        };
 
-        // Per-attempt Reconnecting status via the single mutator (D-03). The
-        // attempt count is non-secret (D-09), so the marker is safe to log/emit.
-        //
-        // 02-20 status-UX split: this is the SERVER-SILENT auto-retry path
-        // («Переподключение»), so each attempt routes through the per-attempt writer
-        // that surfaces «Попытка N/N» on the `"vpn-status"` event (attempt/max fields)
-        // for the UI — still the SINGLE status owner (D-01), just with the optional
-        // counter populated.
-        let on_reconnecting = {
-            let app = app.clone();
-            move |attempt: u32| {
-                let max = crate::lifecycle::RECONNECT_MAX_ATTEMPTS;
-                let marker = format!("reconnect attempt {attempt}/{max}");
-                log_app("INFO", &format!("[reconnect] {marker}"));
-                app.emit(
-                    "vpn-log",
-                    serde_json::json!({ "message": marker, "level": "info" }),
-                )
-                .ok();
-                if let Some(state) = app.try_state::<crate::commands::AppState>() {
-                    crate::commands::vpn::set_vpn_status_reconnecting_attempt(
-                        &app, &state, attempt, max,
-                    );
+        // 28-02: how many attempts a REAL candidate of this queue gets. A one-entry queue keeps
+        // the full reboot-surviving budget. Index 1 is asked because on a walk the budget is now
+        // index-dependent — the ORIGIN (index 0) gets none at all (owner ruling 2026-08-26) — and
+        // this value is what the log lines and the give-up marker below are about: they describe
+        // what each server the walk actually tries was given. The per-candidate budget used by the
+        // loop is computed INSIDE the closure, from that candidate's own index.
+        let per_candidate = crate::lifecycle::per_candidate_attempt_budget(kind, queue.len(), 1);
+        if queue.len() > 1 {
+            // What happens to the ORIGIN is the whole difference between the two causes, so the log
+            // says which one this walk is. Reading «the origin is skipped» on a line where it was in
+            // fact retried ten times is exactly the kind of drift that makes a log worse than none.
+            let origin_note = match kind {
+                crate::lifecycle::WalkKind::ServerDrop => {
+                    "the origin is skipped (it just went silent)"
                 }
-            }
-        };
+                crate::lifecycle::WalkKind::LocalProcessDeath => {
+                    "the origin is retried in full FIRST (local process death)"
+                }
+            };
+            log_app(
+                "INFO",
+                &format!(
+                    "[failover] walking {} candidates, {per_candidate} attempt(s) each; {origin_note} (owner ruling 2026-08-26)",
+                    queue.len()
+                ),
+            );
+        }
 
-        // The real respawn + wait-for-connected attempt. Returns (succeeded,
-        // elapsed, failure_reason): elapsed feeds the fast-fail decision so an
-        // instant death is counted without sleeping the full window; failure_reason
-        // is the specific Error this attempt landed (read from `last_error`) so the
-        // loop can short-circuit a terminal reason (02-10, T-10-03).
-        let try_connect = {
-            let app = app.clone();
-            let config_path = config_path.clone();
-            let log_level = log_level.clone();
-            let status_arc = Arc::clone(&status_arc);
-            let last_error_arc = Arc::clone(&last_error_arc);
-            move |_attempt: u32| {
+        // The outer queue walk. Each candidate runs the UNCHANGED bounded loop; the walk only
+        // decides whether to advance. `run_one_candidate` rebuilds the injected closures per
+        // candidate because `run_reconnect_loop` consumes them — they are Arc clones, so this is
+        // cheap, and it is what lets each candidate carry its own config path.
+        let walk = run_failover_walk(
+            queue.len(),
+            |index| {
+                let candidate = queue[index].clone();
+                // THIS candidate's attempt budget. Index-dependent since the 2026-08-26
+                // ruling: on a real walk the ORIGIN (index 0) gets zero, so the loop gives up on
+                // its first attempt number without respawning anything and the walk reaches the
+                // next server immediately instead of spending a ~55s ceiling on the corpse. A
+                // one-entry queue is not a walk and keeps the full budget at every index.
+                let candidate_budget =
+                    crate::lifecycle::per_candidate_attempt_budget(kind, queue.len(), index);
+                // Progress numbers for the UI, resolved HERE rather than inside the `async move`
+                // below: reading `queue` from inside that block would move the whole vector into
+                // the future, and the walk needs it again afterwards.
+                //
+                // The origin (index 0) is skipped and never respawns, so the servers a person
+                // actually sees tried are indices 1..len-1 — this candidate's place among them is
+                // `index`, out of `queue.len() - 1`.
+                // A walk, for LABELLING purposes, means «we have moved off the origin» — not merely
+                // «the queue has more than one entry». Index 0 is the origin: on a `ServerDrop` walk
+                // it never reaches this code (budget zero → the `1..=0` loop body never runs), but on
+                // a `LocalProcessDeath` walk it runs with the full budget, and there the honest
+                // sentence is «Попытка 3 из 10» about the SAME server — not «Переключение на «X»»
+                // naming the server the user is already on.
+                let walking = queue.len() > 1 && index > 0;
+                let walk_position = index as u32;
+                let walk_total = queue.len().saturating_sub(1) as u32;
+                // The candidate's DISPLAY NAME, read here for the same borrow reason as the numbers
+                // above. Resolved ONLY on a walk: on a plain reconnect the server has not changed, so
+                // naming it in the progress line would add a word and no information. `None` when the
+                // config is unreadable or unnamed — the frontend then falls back to a sentence that
+                // does not pretend to know (see `reconnectLabel.ts`). D-29: the display name only.
+                let candidate_name = if walking {
+                    crate::commands::manifest::current_display_name(&candidate)
+                } else {
+                    None
+                };
                 let app = app.clone();
-                let config_path = config_path.clone();
                 let log_level = log_level.clone();
                 let status_arc = Arc::clone(&status_arc);
                 let last_error_arc = Arc::clone(&last_error_arc);
+                let gen_arc = Arc::clone(&gen_arc);
+                let disc_arc = Arc::clone(&disc_arc);
+                let durable_arc = Arc::clone(&user_disconnect_requested_arc);
                 async move {
-                    let start = Instant::now();
-                    // FAB-R1: pass the supervisor's captured `generation` so the respawn
-                    // can re-check ownership before storing its child (a mid-respawn switch
-                    // bump makes this attempt stale).
-                    let ok =
-                        respawn_and_wait(&app, &config_path, &log_level, &status_arc, generation)
-                            .await;
-                    // On failure, read the specific Error reason the attempt landed so
-                    // the loop can short-circuit a terminal one. Only meaningful when
-                    // !ok; on success the reason is irrelevant (loop returns Recovered).
-                    let reason = if ok {
-                        None
-                    } else {
-                        last_error_arc.lock().unwrap_or_else(|e| e.into_inner()).clone()
+                    // 28-03 (D-04): a candidate past the origin is a real SWITCH — a different
+                    // server, so a different exit country and address. Stamp the pending connect
+                    // origin BEFORE the respawn so this candidate's `Connected` edge resolves to
+                    // the EXISTING `autoSwitched` plate instead of a generic «Подключено»; the
+                    // user's global notification toggle still gates it. Index 0 is the origin
+                    // server and leaves the stamp untouched — a successful retry moved nobody.
+                    //
+                    // Re-stamped PER CANDIDATE, not once per walk: a failed candidate's terminal
+                    // Error edge legitimately consumes the origin, so a single up-front stamp
+                    // would be spent by candidate #2's failure and #3's success would read Manual.
+                    crate::notify::stamp_failover_connect_origin(&app, index);
+
+                    // Injected predicates for the testable core, rebuilt for this candidate.
+                    let live_generation = {
+                        let gen_arc = Arc::clone(&gen_arc);
+                        move || gen_arc.load(Ordering::SeqCst)
                     };
-                    (ok, start.elapsed(), reason)
+                    // T-31: a user disconnect is observed via EITHER the transient `disconnecting`
+                    // flag OR the DURABLE `user_disconnect_requested` flag. The transient one is
+                    // cleared at the end of `vpn_disconnect` (WR-01), so a supervisor re-reading
+                    // intent after the disconnect completed would miss it and let an in-flight
+                    // respawn flip back to Connected (the double-press UAT bug). The durable flag
+                    // persists until the next vpn_connect, so the OR sees the user's intent at
+                    // every decision point — including the post-success re-check below.
+                    let user_disconnected = {
+                        let disc_arc = Arc::clone(&disc_arc);
+                        let durable = Arc::clone(&durable_arc);
+                        move || {
+                            *disc_arc.lock().unwrap_or_else(|e| e.into_inner())
+                                || durable.load(Ordering::SeqCst)
+                        }
+                    };
+
+                    // Progress for the UI via the single mutator (D-03). The counts are non-secret
+                    // (D-09), so the marker is safe to log/emit.
+                    //
+                    // WHAT THE TWO NUMBERS MEAN depends on which situation this is, and getting
+                    // that wrong is the UAT complaint (2026-08-26). On a plain reconnect of
+                    // ONE server they are the retry index — «Попытка 3 из 10», which is exactly what
+                    // a person wants to know. On a failover WALK every candidate gets a single
+                    // attempt, so the same fields rendered «Попытка 1 из 1» on server after server:
+                    // a counter that never moved, over a process the user could not see. On a walk
+                    // they now carry the QUEUE position instead — which server of how many — and
+                    // the `failover` flag tells the frontend which sentence to render.
+                    let on_reconnecting = {
+                        let app = app.clone();
+                        move |attempt: u32| {
+                            let (shown, total) = if walking {
+                                (walk_position, walk_total)
+                            } else {
+                                (attempt, candidate_budget)
+                            };
+                            let marker = if walking {
+                                match candidate_name.as_deref() {
+                                    Some(name) => {
+                                        format!("failover candidate {shown}/{total} -> {name}")
+                                    }
+                                    None => format!("failover candidate {shown}/{total}"),
+                                }
+                            } else {
+                                format!("reconnect attempt {shown}/{total}")
+                            };
+                            log_app("INFO", &format!("[reconnect] {marker}"));
+                            app.emit(
+                                "vpn-log",
+                                serde_json::json!({ "message": marker, "level": "info" }),
+                            )
+                            .ok();
+                            if let Some(state) = app.try_state::<crate::commands::AppState>() {
+                                crate::commands::vpn::set_vpn_status_reconnecting_attempt(
+                                    &app,
+                                    &state,
+                                    shown,
+                                    total,
+                                    walking,
+                                    candidate_name.clone(),
+                                );
+                            }
+                        }
+                    };
+
+                    // The real respawn + wait-for-connected attempt. Returns (succeeded,
+                    // elapsed, failure_reason): elapsed feeds the fast-fail decision so an
+                    // instant death is counted without sleeping the full window; failure_reason
+                    // is the specific Error this attempt landed (read from `last_error`) so the
+                    // loop can short-circuit a terminal reason (02-10, T-10-03).
+                    let try_connect = {
+                        let app = app.clone();
+                        let candidate = candidate.clone();
+                        let log_level = log_level.clone();
+                        let status_arc = Arc::clone(&status_arc);
+                        let last_error_arc = Arc::clone(&last_error_arc);
+                        move |_attempt: u32| {
+                            let app = app.clone();
+                            let candidate = candidate.clone();
+                            let log_level = log_level.clone();
+                            let status_arc = Arc::clone(&status_arc);
+                            let last_error_arc = Arc::clone(&last_error_arc);
+                            async move {
+                                let start = Instant::now();
+                                // FAB-R1: pass the supervisor's captured `generation` so the
+                                // respawn can re-check ownership before storing its child (a
+                                // mid-respawn switch bump makes this attempt stale). It stays the
+                                // generation captured AT THE DROP for every candidate — see
+                                // `run_failover_walk` for why an advance must not re-capture it.
+                                let ok = respawn_and_wait(
+                                    &app,
+                                    &candidate,
+                                    &log_level,
+                                    &status_arc,
+                                    generation,
+                                )
+                                .await;
+                                // On failure, read the specific Error reason the attempt landed so
+                                // the loop can short-circuit a terminal one. Only meaningful when
+                                // !ok; on success the reason is irrelevant (loop → Recovered).
+                                let reason = if ok {
+                                    None
+                                } else {
+                                    last_error_arc
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .clone()
+                                };
+                                (ok, start.elapsed(), reason)
+                            }
+                        }
+                    };
+
+                    let sleep_interval = || async {
+                        tokio::time::sleep(crate::lifecycle::RECONNECT_INTERVAL).await
+                    };
+                    run_reconnect_loop(
+                        generation,
+                        candidate_budget,
+                        try_connect,
+                        user_disconnected,
+                        live_generation,
+                        on_reconnecting,
+                        sleep_interval,
+                    )
+                    .await
                 }
-            }
-        };
-
-        let sleep_interval =
-            || async { tokio::time::sleep(crate::lifecycle::RECONNECT_INTERVAL).await };
-
-        let outcome = run_reconnect_loop(
-            generation,
-            try_connect,
-            user_disconnected,
-            live_generation,
-            on_reconnecting,
-            sleep_interval,
+            },
+            // T-28-07 + FB-03: the queue-advance gate. An advance spawns a sidecar for a
+            // DIFFERENT config, so it must re-prove — against the SAME frozen captured
+            // generation — that this walk still owns the session, AND that the user has not
+            // revoked the permission that authorized it in the first place. `get_failover_settings`
+            // is otherwise read only at queue-build time, so «Авто-режим» switched OFF mid-walk was
+            // silently ignored (FB-03). One small file read per advance, at most N-1 times per
+            // walk. The decision itself is the pure `lifecycle::failover_advance_allowed`.
+            || {
+                let user_intent = *disc_arc.lock().unwrap_or_else(|e| e.into_inner())
+                    || user_disconnect_requested_arc.load(Ordering::SeqCst);
+                let still_ours = crate::lifecycle::is_current_generation(
+                    generation,
+                    gen_arc.load(Ordering::SeqCst),
+                );
+                // Fails closed exactly like the build-time read: an unreadable/corrupt
+                // `app_settings.json` reads OFF, and OFF here simply stops the walk — the current
+                // candidate has already run and nothing is torn down mid-flight (D-06 intact).
+                let failover_enabled = crate::app_settings::get_failover_settings().enabled;
+                if !crate::lifecycle::failover_advance_allowed(
+                    user_intent,
+                    still_ours,
+                    failover_enabled,
+                ) {
+                    // D-29: which of the three facts refused, never a path or a server name.
+                    let why = if !failover_enabled && !user_intent && still_ours {
+                        "«Авто-режим» switched off mid-walk (FB-03)"
+                    } else {
+                        "the session is no longer ours (T-28-07)"
+                    };
+                    log_app("INFO", &format!("[failover] queue advance refused — {why}"));
+                    return false;
+                }
+                true
+            },
         )
         .await;
+
+        let outcome = walk.outcome;
+        if walk.queue_exhausted {
+            log_app(
+                "WARN",
+                &format!(
+                    "[failover] one pass over {} candidates finished with no answer (D-05)",
+                    queue.len()
+                ),
+            );
+        } else if let Some(switched_to) = failover_switch_target(&walk, &queue) {
+            // FB-01 belt-and-braces: re-verify ownership one last time IMMEDIATELY before the
+            // announcement. `run_reconnect_loop` now refuses to classify a success as `Recovered`
+            // once the generation moved, so an `Aborted`-shaped race should never reach here — but
+            // this emit is the moment the app tells the user (and the window's pointer) which
+            // server they are on, and a wrong answer here is invisible and permanent for the
+            // session. If someone else owns the session now, say nothing: their own connect path
+            // already moved the pointer.
+            let still_ours =
+                crate::lifecycle::is_current_generation(generation, gen_arc.load(Ordering::SeqCst));
+            if !still_ours {
+                log_app(
+                    "INFO",
+                    "[failover] switch announcement suppressed — the session is no longer ours (FB-01)",
+                );
+            }
+            if still_ours {
+                // Non-secret: the INDEX in the priority list, never the config path or server name
+                // (D-09/D-29). The user-facing announcement of the switch is the frontend's job.
+                log_app(
+                    "INFO",
+                    &format!(
+                        "[failover] recovered on candidate #{} of {} (D-04: the frontend announces the switch)",
+                        walk.candidate_index + 1,
+                        queue.len()
+                    ),
+                );
+                // 28-03 (OQ-1): tell the window WHICH config it is now on, so its frontend-owned
+                // active-config pointer follows the server Rust actually connected. Without this,
+                // Rust is on B while Routing/Settings/the status panel all still describe A, and
+                // the NEXT drop would restart its walk from the original origin
+                // (`App.tsx:790-803` documents this exact desync for the retired auto-switch
+                // engine).
+                //
+                // Deliberately the EXISTING `vpn-flow` channel with the same payload shape as the
+                // tray connect (`tray.rs`) — not a second channel, and not a Rust write into
+                // frontend storage. The switch travels the same direction every other status fact
+                // already travels, and the frontend keeps ownership of the pointer.
+                //
+                // D-29 / T-28-12: origin + action + the config PATH only. Paths already cross this
+                // boundary in both directions via the config commands and the tray connect; no
+                // credential is added. The log line above still carries only the index.
+                app.emit(
+                    "vpn-flow",
+                    serde_json::json!({
+                        "action": "connect",
+                        "origin": FAILOVER_FLOW_ORIGIN,
+                        "configPath": switched_to,
+                    }),
+                )
+                .ok();
+            }
+        }
 
         match outcome {
             SupervisorOutcome::Recovered => {
@@ -1778,6 +2336,21 @@ pub fn start_reconnect_supervisor(
                 //  - GENERATION ADVANCE from a manual RECONNECT (durable intent NOT set):
                 //    a NEW session owns the sidecar now. We must NOT touch it — leave the
                 //    status/sidecar to that new session (unchanged behavior).
+                //
+                // WR-05: before either branch, hand back the `AutoSwitch` this walk stamped for
+                // the candidate it was on. `maybe_fire` consumes the pending origin only on a
+                // terminal status edge, and the generation-advance branch below deliberately
+                // produces none — so the stamp survived the walk and the next TRAY connect, which
+                // stamps no origin of its own, was announced as «Переключено автоматически» for a
+                // connect the person made by hand. Window-driven manual connects were safe only
+                // because `App.tsx` stamps `manual` first. Done for BOTH abort causes: the
+                // user-disconnect branch usually spends the stamp through the `set_vpn_status`
+                // below, but only when that write is a genuine transition, so it is not a
+                // guarantee. `release_failover_connect_origin` is a compare-and-clear on the exact
+                // value this walk would have placed, so it cannot clobber an origin the new
+                // session already stamped for itself, and it touches neither the status nor the
+                // sidecar — the two things this arm must leave alone.
+                crate::notify::release_failover_connect_origin(&app, walk.candidate_index);
                 if user_disconnect_requested_arc.load(Ordering::SeqCst) {
                     if let Some(state) = app.try_state::<crate::commands::AppState>() {
                         log_app(
@@ -1815,11 +2388,19 @@ pub fn start_reconnect_supervisor(
                     );
                     return;
                 }
-                let marker = format!(
-                    "reconnect gave up after {}/{}",
-                    crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
-                    crate::lifecycle::RECONNECT_MAX_ATTEMPTS
-                );
+                // D-05: which honest failure was this? A multi-candidate pass that found nobody
+                // is «none of your servers answered»; a one-server queue is the unchanged «this
+                // server would not come back». Same guards above either way — only the code and
+                // the log line differ.
+                let reason = give_up_reason(walk.queue_exhausted);
+                let marker = if walk.queue_exhausted {
+                    format!(
+                        "failover exhausted: {} candidates, {per_candidate} attempt(s) each, none answered",
+                        queue.len()
+                    )
+                } else {
+                    format!("reconnect gave up after {per_candidate}/{per_candidate}")
+                };
                 log_app("WARN", &format!("[reconnect] {marker}"));
                 app.emit(
                     "vpn-log",
@@ -1834,7 +2415,7 @@ pub fn start_reconnect_supervisor(
                         &app,
                         &state,
                         VpnStatus::Error,
-                        Some(RECONNECT_GAVE_UP_REASON.to_string()),
+                        Some(reason.to_string()),
                     );
                 }
                 // R3 (UAT 65692c test 7): the last respawned sidecar is STILL ALIVE,
@@ -2789,7 +3370,8 @@ mod detection_cadence_tests {
 #[cfg(test)]
 mod reconnect_supervisor_tests {
     use super::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
     use std::time::Instant;
 
     /// A no-op async sleep so the loop's inter-attempt wait is observable in tests
@@ -2833,6 +3415,7 @@ mod reconnect_supervisor_tests {
         let sleeps = Cell::new(0u32);
         let outcome = run_reconnect_loop(
             7,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
             |_attempt| {
                 calls.set(calls.get() + 1);
                 async {
@@ -2866,6 +3449,7 @@ mod reconnect_supervisor_tests {
         let calls = Cell::new(0u32);
         let outcome = run_reconnect_loop(
             1,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
             |attempt| {
                 calls.set(calls.get() + 1);
                 async move {
@@ -2900,6 +3484,7 @@ mod reconnect_supervisor_tests {
         let calls = Cell::new(0u32);
         let outcome = run_reconnect_loop(
             1,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
             |_attempt| {
                 calls.set(calls.get() + 1);
                 // The attempt connects, but the user disconnected meanwhile.
@@ -2922,6 +3507,46 @@ mod reconnect_supervisor_tests {
     }
 
     #[tokio::test]
+    async fn a_manual_connect_during_an_in_flight_attempt_aborts_not_recovers() {
+        // FB-01 regression (Fable-5 Phase-28 review). A CONNECT race, not a disconnect race.
+        //
+        // The walk is inside `respawn_and_wait` on candidate C. The user — watching
+        // «Переподключение…» — clicks server B's card. `vpn_connect(B)` bumps the generation;
+        // FAB-R1 makes the walk's C-child refuse to store and die. But `respawn_and_wait` polls the
+        // SHARED status arc, so it observes B reaching Connected and reports success, and the user
+        // did not DISCONNECT (they connected), so the intent flag is clear.
+        //
+        // Pre-fix the loop returned Recovered at candidate C: the terminal arm emitted
+        // `vpn-flow { origin: "failover", configPath: C }` and the window adopted C while the
+        // tunnel actually ran B. The outcome must be Aborted.
+        let generation = Cell::new(7u64); // captured at the drop
+        let calls = Cell::new(0u32);
+        let outcome = run_reconnect_loop(
+            7,
+            crate::lifecycle::FAILOVER_ATTEMPTS_PER_CANDIDATE,
+            |_attempt| {
+                calls.set(calls.get() + 1);
+                // The user's vpn_connect(B) lands DURING the attempt and bumps the generation…
+                generation.set(8);
+                // …and the poll then observes B's Connected and calls the attempt a success.
+                async { (true, Duration::from_secs(2), None) }
+            },
+            || false, // no disconnect intent — the user CONNECTED, they did not disconnect
+            || generation.get(),
+            |_attempt| {},
+            || async { never_sleeps() },
+        )
+        .await;
+
+        assert_eq!(
+            outcome,
+            SupervisorOutcome::Aborted,
+            "someone else's connect must never be classified as this walk's own recovery",
+        );
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[tokio::test]
     async fn respects_disconnecting_flag() {
         // D-04: if the user-intent predicate is true at the first attempt, the loop
         // returns Aborted immediately and NEVER respawns or sets a status.
@@ -2929,6 +3554,7 @@ mod reconnect_supervisor_tests {
         let reconnecting = Cell::new(0u32);
         let outcome = run_reconnect_loop(
             1,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
             |_attempt| {
                 calls.set(calls.get() + 1);
                 async { (false, Duration::from_secs(10), None) }
@@ -2953,6 +3579,7 @@ mod reconnect_supervisor_tests {
         let calls = Cell::new(0u32);
         let outcome = run_reconnect_loop(
             5,                 // captured generation
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
             |_attempt| {
                 calls.set(calls.get() + 1);
                 async { (false, Duration::from_secs(10), None) }
@@ -2978,6 +3605,7 @@ mod reconnect_supervisor_tests {
         let start = Instant::now();
         let outcome = run_reconnect_loop(
             1,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
             |_attempt| async {
                 // Instant death: elapsed below FAST_FAIL_GRACE → fast-fail. Transient
                 // (None) so it is the fast-fail path under test, not the terminal one.
@@ -3016,6 +3644,7 @@ mod reconnect_supervisor_tests {
         let sleeps = Cell::new(0u32);
         let outcome = run_reconnect_loop(
             7,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
             |_attempt| {
                 calls.set(calls.get() + 1);
                 async {
@@ -3040,6 +3669,425 @@ mod reconnect_supervisor_tests {
         assert_eq!(outcome, SupervisorOutcome::GaveUp);
         assert_eq!(calls.get(), 1, "terminal reason must stop after the FIRST attempt");
         assert_eq!(sleeps.get(), 0, "no inter-attempt sleep on a terminal short-circuit");
+    }
+
+    // ── Phase 28 (D-02 / D-05 / D-06): the failover queue walk ──────────────
+    //
+    // Driven by a scripted `run_one_candidate` so the whole walk runs with NO sidecar and NO
+    // network — the same injected-closure technique `run_reconnect_loop` is already tested with.
+    // The real A→B→C path is manual UAT.
+
+    /// Build a scripted candidate runner plus the call log it writes into.
+    fn scripted(outcomes: &[SupervisorOutcome]) -> (Vec<SupervisorOutcome>, Rc<RefCell<Vec<usize>>>) {
+        (outcomes.to_vec(), Rc::new(RefCell::new(Vec::new())))
+    }
+
+    #[tokio::test]
+    async fn the_walk_advances_on_give_up_and_reports_the_candidate_that_won() {
+        // The headline row: server A goes silent, A's one attempt fails, B's fails, C answers.
+        // The walk must report C — the third candidate — and must have run all three in order.
+        let (script, seen) = scripted(&[
+            SupervisorOutcome::GaveUp,
+            SupervisorOutcome::GaveUp,
+            SupervisorOutcome::Recovered,
+        ]);
+        let log = Rc::clone(&seen);
+        let result = run_failover_walk(
+            3,
+            move |index| {
+                log.borrow_mut().push(index);
+                let outcome = script[index];
+                async move { outcome }
+            },
+            || true,
+        )
+        .await;
+
+        assert_eq!(result.outcome, SupervisorOutcome::Recovered);
+        assert_eq!(result.candidate_index, 2, "the THIRD candidate is the one that won");
+        assert!(!result.queue_exhausted, "a walk that recovered never exhausted the queue");
+        assert_eq!(*seen.borrow(), vec![0, 1, 2], "candidates tried in priority order");
+    }
+
+    #[tokio::test]
+    async fn the_walk_stops_immediately_when_the_origin_comes_back() {
+        // D-02: the origin gets its one attempt FIRST. If it answers, nobody is moved to another
+        // country — the walk must not touch candidate 2 at all.
+        let calls = Rc::new(RefCell::new(0u32));
+        let counter = Rc::clone(&calls);
+        let result = run_failover_walk(
+            3,
+            move |_index| {
+                *counter.borrow_mut() += 1;
+                async { SupervisorOutcome::Recovered }
+            },
+            || true,
+        )
+        .await;
+
+        assert_eq!(result.outcome, SupervisorOutcome::Recovered);
+        assert_eq!(result.candidate_index, 0, "the origin won — no failover happened");
+        assert_eq!(*calls.borrow(), 1, "no further candidate may be tried after a recovery");
+    }
+
+    #[tokio::test]
+    async fn the_walk_stops_on_abort_and_changes_nothing() {
+        // A user disconnect (or a manual reconnect that bumped the generation) mid-walk: the
+        // walk is stale, so it stops where it stands, reports Aborted, and leaves the session to
+        // whoever took it over. Aborted is NOT exhaustion — no terminal Error may be written.
+        let calls = Rc::new(RefCell::new(0u32));
+        let counter = Rc::clone(&calls);
+        let result = run_failover_walk(
+            3,
+            move |_index| {
+                *counter.borrow_mut() += 1;
+                async { SupervisorOutcome::Aborted }
+            },
+            || true,
+        )
+        .await;
+
+        assert_eq!(result.outcome, SupervisorOutcome::Aborted);
+        assert!(!result.queue_exhausted, "an abort must never be reported as an exhausted queue");
+        assert_eq!(*calls.borrow(), 1, "the walk stopped on the aborting candidate");
+    }
+
+    #[tokio::test]
+    async fn a_queue_advance_re_checks_ownership_before_touching_a_different_server() {
+        // T-28-07: an ADVANCE reconnects to a DIFFERENT config, which is closer to a
+        // `vpn_connect` than to a retry — so ownership is re-checked on every advance, not only
+        // on every attempt inside `run_reconnect_loop`. Here the first candidate gives up and the
+        // advance gate refuses (a switch/disconnect landed): the walk must abort WITHOUT starting
+        // candidate 2 on a session it no longer owns («застряло на Подключено» phantom class).
+        let calls = Rc::new(RefCell::new(0u32));
+        let counter = Rc::clone(&calls);
+        let result = run_failover_walk(
+            3,
+            move |_index| {
+                *counter.borrow_mut() += 1;
+                async { SupervisorOutcome::GaveUp }
+            },
+            || false, // ownership lost between candidate 1 and candidate 2
+        )
+        .await;
+
+        assert_eq!(result.outcome, SupervisorOutcome::Aborted);
+        assert!(!result.queue_exhausted);
+        assert_eq!(*calls.borrow(), 1, "a stale walk must not connect to the next server");
+    }
+
+    #[tokio::test]
+    async fn an_aborted_walk_gives_back_the_auto_switch_stamp_of_the_candidate_it_ran() {
+        // WR-05, the walk-side half. This pins the INPUT the abort arm feeds the release: which
+        // candidate the walk stopped on, and therefore whose stamp is still armed.
+        //
+        // The scenario is the real one. Candidate #1 (the origin) gives up, so the walk advances to
+        // candidate #2 and stamps `AutoSwitch` before respawning it — that respawn IS a switch. The
+        // attempt on #2 is then aborted because the generation moved: a new session owns the
+        // sidecar. The abort arm leaves the status and the sidecar to that session, so no terminal
+        // edge ever reaches `maybe_fire` and nothing consumes the stamp. Before WR-05 it stayed
+        // armed and the next TRAY connect — which stamps no origin of its own — was announced as
+        // «Переключено автоматически» for a connect the person made by hand.
+        let slot = std::sync::Mutex::new(crate::notify::ConnectOrigin::Manual);
+
+        let result = run_failover_walk(
+            3,
+            |index| {
+                // Exactly what `respawn_sidecar`'s caller does before each candidate.
+                crate::notify::stamp_failover_origin_in(&slot, index);
+                async move {
+                    if index == 0 {
+                        SupervisorOutcome::GaveUp
+                    } else {
+                        SupervisorOutcome::Aborted
+                    }
+                }
+            },
+            || true,
+        )
+        .await;
+
+        assert_eq!(result.outcome, SupervisorOutcome::Aborted);
+        assert_eq!(
+            result.candidate_index, 1,
+            "the walk stopped on candidate #2 — the one whose stamp is live",
+        );
+        assert_eq!(
+            *slot.lock().unwrap(),
+            crate::notify::ConnectOrigin::AutoSwitch,
+            "the walk left its stamp behind: no terminal edge spent it",
+        );
+
+        // What the `SupervisorOutcome::Aborted` arm now does, before it decides anything about the
+        // status or the sidecar.
+        crate::notify::release_failover_origin_in(&slot, result.candidate_index);
+
+        assert_eq!(
+            crate::notify::decide_notification(
+                VpnStatus::Connecting,
+                VpnStatus::Connected,
+                *slot.lock().unwrap(),
+                true,
+                false,
+                false,
+            ),
+            Some(crate::notify::NotifyKind::Connected),
+            "the next tray connect must read «Подключено», not «Переключено автоматически»",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_full_pass_with_no_answer_reports_an_exhausted_queue() {
+        // D-05: ONE pass. Every participating server gave up → the queue is exhausted, which is a
+        // DIFFERENT fact from «this one server would not come back».
+        let calls = Rc::new(RefCell::new(0u32));
+        let counter = Rc::clone(&calls);
+        let result = run_failover_walk(
+            3,
+            move |_index| {
+                *counter.borrow_mut() += 1;
+                async { SupervisorOutcome::GaveUp }
+            },
+            || true,
+        )
+        .await;
+
+        assert_eq!(result.outcome, SupervisorOutcome::GaveUp);
+        assert!(result.queue_exhausted, "all three candidates gave up → exhausted");
+        assert_eq!(*calls.borrow(), 3, "exactly ONE pass — no silent second lap (D-05)");
+        assert_eq!(result.candidate_index, 2);
+    }
+
+    #[tokio::test]
+    async fn a_single_candidate_queue_that_gives_up_is_not_an_exhausted_queue() {
+        // The failover-disabled path and the internet-lost recovery path both walk a
+        // one-entry queue. Their give-up must stay `reconnect-gave-up`: «this server would not
+        // come back» and «none of your servers answered» must not collapse into one message.
+        let result = run_failover_walk(1, |_index| async { SupervisorOutcome::GaveUp }, || true).await;
+
+        assert_eq!(result.outcome, SupervisorOutcome::GaveUp);
+        assert!(
+            !result.queue_exhausted,
+            "a one-server queue gave up; it did not exhaust a list of servers",
+        );
+        assert_eq!(give_up_reason(result.queue_exhausted), RECONNECT_GAVE_UP_REASON);
+    }
+
+    #[test]
+    fn the_exhausted_queue_reason_is_distinct_stable_ascii() {
+        // D-09/D-29 + T-28-08: a FIXED lowercase-ASCII kebab token — never Cyrillic, never a
+        // server name or a config path, localized only at the frontend presentation boundary.
+        assert_eq!(FAILOVER_EXHAUSTED_REASON, "failover-exhausted");
+        assert!(FAILOVER_EXHAUSTED_REASON.is_ascii(), "reason code must be ASCII");
+        assert!(
+            !FAILOVER_EXHAUSTED_REASON
+                .chars()
+                .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)),
+            "reason code must contain NO Cyrillic",
+        );
+        assert!(
+            FAILOVER_EXHAUSTED_REASON
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '-'),
+            "reason code must be a plain lowercase-kebab token — no digits, no server text",
+        );
+        // Reusing `reconnect-gave-up` is forbidden: it would make «this one server would not come
+        // back» and «none of your servers answered» the same message to the user, which is the
+        // exact collapse 27 D-15 is fixing on the other side of the app.
+        assert_ne!(FAILOVER_EXHAUSTED_REASON, RECONNECT_GAVE_UP_REASON);
+        assert_ne!(FAILOVER_EXHAUSTED_REASON, crate::lifecycle::RECOVERY_TIMEOUT_REASON);
+        // …and it is TRANSIENT: a later attempt (or a server coming back) may succeed, so it must
+        // never short-circuit a future reconnect loop.
+        assert!(!crate::lifecycle::is_terminal_reason(FAILOVER_EXHAUSTED_REASON));
+    }
+
+    #[test]
+    fn the_give_up_reason_selector_separates_the_two_failures() {
+        assert_eq!(give_up_reason(true), FAILOVER_EXHAUSTED_REASON);
+        assert_eq!(give_up_reason(false), RECONNECT_GAVE_UP_REASON);
+    }
+
+    // ─── 28-03: the OQ-1 switch announcement ───
+
+    fn queue_of(paths: &[&str]) -> Vec<String> {
+        paths.iter().map(|p| (*p).to_string()).collect()
+    }
+
+    #[test]
+    fn a_recovery_on_a_later_candidate_is_a_switch_to_announce() {
+        // The whole point of OQ-1: Rust connected to a DIFFERENT server than the one the app's
+        // pointer names. The winning path is what the window needs to adopt.
+        let queue = queue_of(&["/a.toml", "/b.toml", "/c.toml"]);
+        let walk = FailoverWalkResult {
+            outcome: SupervisorOutcome::Recovered,
+            candidate_index: 2,
+            queue_exhausted: false,
+        };
+        assert_eq!(failover_switch_target(&walk, &queue), Some("/c.toml"));
+    }
+
+    #[test]
+    fn a_recovery_on_the_origin_is_not_a_switch() {
+        // A successful RETRY of the same server moved nobody. Announcing it would re-point the
+        // app at the config it is already on and fire a «переключено автоматически» plate for a
+        // switch that never happened.
+        let queue = queue_of(&["/a.toml", "/b.toml"]);
+        let walk = FailoverWalkResult {
+            outcome: SupervisorOutcome::Recovered,
+            candidate_index: 0,
+            queue_exhausted: false,
+        };
+        assert_eq!(failover_switch_target(&walk, &queue), None);
+    }
+
+    #[test]
+    fn a_walk_that_did_not_recover_announces_nothing() {
+        // Neither an exhausted queue nor an abort leaves the user ON a server, so there is no
+        // pointer to move. The exhaustion has its own terminal Error + reason code (D-05).
+        let queue = queue_of(&["/a.toml", "/b.toml", "/c.toml"]);
+        for outcome in [SupervisorOutcome::GaveUp, SupervisorOutcome::Aborted] {
+            let walk = FailoverWalkResult {
+                outcome,
+                candidate_index: 2,
+                queue_exhausted: outcome == SupervisorOutcome::GaveUp,
+            };
+            assert_eq!(
+                failover_switch_target(&walk, &queue),
+                None,
+                "{outcome:?} must not announce a switch",
+            );
+        }
+    }
+
+    #[test]
+    fn a_win_on_the_origin_in_another_spelling_is_not_a_switch() {
+        // CR-02 belt. `failover_queue` now de-dupes on the canonical key so this queue should be
+        // unreachable — but this function is the LAST gate before the app tells the user it moved
+        // them. A candidate that IS the origin in a different string form must never announce a
+        // switch, or the user gets a «Переключено автоматически» plate for a move that never
+        // happened and the window re-adopts the config it is already on in the other spelling
+        // (which then propagates back into `tt_config_path`, keeping the mismatch alive).
+        let queue = queue_of(&["C:\\cfg\\A.toml", "c:/cfg/a.toml"]);
+        let walk = FailoverWalkResult {
+            outcome: SupervisorOutcome::Recovered,
+            candidate_index: 1,
+            queue_exhausted: false,
+        };
+        assert_eq!(failover_switch_target(&walk, &queue), None);
+
+        // …while a genuinely different server at the same index still announces normally.
+        let real = queue_of(&["C:\\cfg\\A.toml", "c:/cfg/b.toml"]);
+        assert_eq!(failover_switch_target(&walk, &real), Some("c:/cfg/b.toml"));
+    }
+
+    #[test]
+    fn an_index_past_the_queue_announces_nothing_instead_of_panicking() {
+        // Defensive: the index and the queue arrive from two places. A mismatch must degrade to
+        // «no announcement» — an out-of-bounds index in a background task would panic the walk's
+        // terminal arm and the user would never learn the outcome at all.
+        let queue = queue_of(&["/a.toml"]);
+        let walk = FailoverWalkResult {
+            outcome: SupervisorOutcome::Recovered,
+            candidate_index: 7,
+            queue_exhausted: false,
+        };
+        assert_eq!(failover_switch_target(&walk, &queue), None);
+    }
+
+    #[test]
+    fn the_failover_flow_origin_is_a_stable_token_distinct_from_the_tray() {
+        // The receiving side early-returns on an unrecognised origin, so this token IS the wire
+        // contract; `shared/ipc/events.ts` mirrors it as a closed union. D-29: an origin token,
+        // never a server name.
+        assert_eq!(FAILOVER_FLOW_ORIGIN, "failover");
+        assert_ne!(FAILOVER_FLOW_ORIGIN, "tray");
+        assert!(
+            FAILOVER_FLOW_ORIGIN
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '-'),
+            "origin token must be a plain lowercase-kebab ASCII token",
+        );
+    }
+
+    #[tokio::test]
+    async fn the_walk_offers_no_teardown_seam_between_candidates() {
+        // D-06 / T-28-05 (safety invariant): traffic stays BLOCKED for the whole sequence. The
+        // sidecar is torn down exactly ONCE, at the end, never between candidates — a mid-walk
+        // teardown releases the WinTUN adapter and the fail-closed killswitch with it, which is
+        // precisely the leak D-06 exists to prevent.
+        //
+        // Modelled as the production shape: `teardowns` is bumped ONLY where the caller does it —
+        // in the terminal arm AFTER the walk returns. Each candidate records the count it can see
+        // when it starts, so any teardown that had leaked into the loop body would show up as a
+        // non-zero observation.
+        let teardowns = Rc::new(RefCell::new(0u32));
+        let observed_mid_walk = Rc::new(RefCell::new(Vec::<u32>::new()));
+        let seen = Rc::clone(&observed_mid_walk);
+        let counter = Rc::clone(&teardowns);
+        let result = run_failover_walk(
+            3,
+            move |_index| {
+                seen.borrow_mut().push(*counter.borrow());
+                async { SupervisorOutcome::GaveUp }
+            },
+            || true,
+        )
+        .await;
+
+        assert_eq!(
+            *observed_mid_walk.borrow(),
+            vec![0, 0, 0],
+            "no candidate may start after a teardown — traffic must stay blocked mid-walk (D-06)",
+        );
+
+        // The caller's SINGLE end-of-walk teardown, on the terminal arm.
+        if matches!(result.outcome, SupervisorOutcome::GaveUp) {
+            *teardowns.borrow_mut() += 1;
+        }
+        assert_eq!(*teardowns.borrow(), 1, "exactly one teardown across a three-candidate walk");
+    }
+
+    #[tokio::test]
+    async fn the_per_attempt_outcome_is_event_driven_not_clock_driven() {
+        // D-03 (the landmine): the attempt ends as soon as the OUTCOME is known — it is never
+        // capped by a flat per-attempt timer. Drive `try_connect` with an elapsed time PAST
+        // FAST_FAIL_GRACE (so it is not a fast-fail) but well under RECONNECT_ATTEMPT_WINDOW, and
+        // report SUCCESS: the loop must neither wait out the ceiling nor count that success as a
+        // failure. A ceiling-driven loop would do both — which is how auto-reconnect once became
+        // structurally unable to succeed on a slow-warmup protocol (3.8 F-2).
+        let mid_flight = crate::lifecycle::FAST_FAIL_GRACE + Duration::from_secs(1);
+        assert!(
+            mid_flight < crate::lifecycle::RECONNECT_ATTEMPT_WINDOW,
+            "the fixture must sit strictly between the grace and the ceiling",
+        );
+
+        let sleeps = Cell::new(0u32);
+        let start = Instant::now();
+        let outcome = run_reconnect_loop(
+            1,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+            |_attempt| async move { (true, mid_flight, None) },
+            || false,
+            || 1,
+            |_attempt| {},
+            || {
+                sleeps.set(sleeps.get() + 1);
+                async { tokio::time::sleep(crate::lifecycle::RECONNECT_ATTEMPT_WINDOW).await }
+            },
+        )
+        .await;
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            outcome,
+            SupervisorOutcome::Recovered,
+            "a connect that took longer than the fast-fail grace is a SUCCESS, not a failure",
+        );
+        assert_eq!(sleeps.get(), 0, "a successful attempt must not sleep at all");
+        assert!(
+            elapsed < crate::lifecycle::RECONNECT_ATTEMPT_WINDOW,
+            "the outcome is decided by the event, never by the ceiling (elapsed={elapsed:?})",
+        );
     }
 
     #[test]

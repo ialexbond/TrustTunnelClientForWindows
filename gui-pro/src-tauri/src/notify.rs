@@ -104,6 +104,95 @@ pub enum ConnectOrigin {
     AutoConnectLaunch,
 }
 
+/// Pure (28-03 / D-04): does the failover walk's candidate at `candidate_index` count as an
+/// automatic SWITCH, and if so under which origin?
+///
+/// `None` for index 0 — the ORIGIN server — and that `None` is load-bearing: it means «leave the
+/// pending origin exactly as you found it». Returning `ConnectOrigin::Manual` there would CLOBBER
+/// an `AutoConnectLaunch` that a launch auto-connect stamped moments earlier, mislabelling its
+/// plate as an ordinary manual connect. A retry of the same server moved nobody, so it has nothing
+/// to announce.
+///
+/// Every later candidate is a genuine switch — a different server means a different exit country
+/// and address — and D-04 says announce every one of them. The kind itself is not new: the
+/// `autoSwitched` copy has existed in Russian and English since Phase 13, so this only supplies
+/// the missing WHY that `VpnStatus` alone cannot express (Pitfall 2).
+pub fn failover_connect_origin(candidate_index: usize) -> Option<ConnectOrigin> {
+    (candidate_index > 0).then_some(ConnectOrigin::AutoSwitch)
+}
+
+/// Stamp `AppState.pending_connect_origin` so the candidate about to be respawned announces itself
+/// as an automatic switch (28-03 / D-04). A no-op for the origin server.
+///
+/// Written directly on the state field rather than through the `set_pending_connect_origin`
+/// command: `AppState` owns the field, the walk runs window-independently in Rust, and the
+/// frontend hook that used to stamp it is being retired in 28-09. Re-stamped per candidate rather
+/// than once per walk, because a failed candidate's terminal `Error` edge legitimately CONSUMES
+/// the origin (`origin_consumed_on`) — a single up-front stamp would be spent by candidate #2's
+/// failure and candidate #3's success would then read `Manual`.
+///
+/// `maybe_fire` reads AND consumes it on the terminal edge, so a walk that finds nobody cannot
+/// leak a stale `AutoSwitch` into the user's next manual connect (CR-01). D-29: a small enum, no
+/// config content, no log line.
+pub fn stamp_failover_connect_origin(app: &tauri::AppHandle, candidate_index: usize) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    stamp_failover_origin_in(&state.pending_connect_origin, candidate_index);
+}
+
+/// WR-05 (Phase-28 verification): give a failover stamp BACK when the walk that placed it ends
+/// without a terminal status edge to spend it.
+///
+/// The bug this closes. `maybe_fire` consumes the pending origin only on a terminal status
+/// transition (`origin_consumed_on`). A walk aborted by a GENERATION ADVANCE deliberately touches
+/// neither the status nor the sidecar — it leaves both to the new session that now owns them — so
+/// nothing ever consumes the `AutoSwitch` this walk stamped for the candidate it was respawning,
+/// and it stays ARMED. The next TRAY connect stamps no origin of its own (only the window path
+/// calls `set_pending_connect_origin(Manual)` first), so it reads the leftover stamp and gets
+/// announced as «Переключено автоматически» — the app claiming it moved the user's exit country
+/// when the user moved it by hand. That is the exact converse of D-04: announce every automatic
+/// switch, and announce NOTHING ELSE as automatic.
+///
+/// Why it is a compare-and-clear and not a plain reset. The abort happens precisely because
+/// somebody else now owns the session, and that somebody may already have stamped an origin of
+/// their own (a launch auto-connect's `AutoConnectLaunch`, say). Clearing unconditionally would
+/// mislabel THEIR connect instead — the same class of lie, pointed the other way, and the reason
+/// `failover_connect_origin` returns `None` rather than `Manual` for the origin server. So this
+/// takes back only a stamp identical to the one this walk would have placed, and only when the
+/// walk actually reached a candidate that places one (index > 0).
+pub fn release_failover_connect_origin(app: &tauri::AppHandle, candidate_index: usize) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    release_failover_origin_in(&state.pending_connect_origin, candidate_index);
+}
+
+/// Slot-level core of the stamp. Takes the mutex rather than the `AppHandle` so the stamp/release
+/// pair is unit-testable without a live Tauri app, the way every other decision in this module is.
+pub(crate) fn stamp_failover_origin_in(slot: &std::sync::Mutex<ConnectOrigin>, candidate_index: usize) {
+    let Some(origin) = failover_connect_origin(candidate_index) else {
+        return;
+    };
+    // Poison-recovering the lock mirrors `set_pending_connect_origin`, so a prior panic on a
+    // holder can never wedge the stamp and silently downgrade every later switch to «Подключено».
+    let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = origin;
+}
+
+/// Slot-level core of the release — see `release_failover_connect_origin` for the why.
+pub(crate) fn release_failover_origin_in(slot: &std::sync::Mutex<ConnectOrigin>, candidate_index: usize) {
+    let Some(stamped) = failover_connect_origin(candidate_index) else {
+        // The walk never stamped anything (index 0 is the origin server), so whatever sits in the
+        // slot belongs to somebody else and is not ours to take back.
+        return;
+    };
+    let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if *guard == stamped {
+        *guard = ConnectOrigin::Manual;
+    }
+}
+
 /// Pure decider: given a status transition, the connect origin, the master gate, and whether a
 /// compound switch/reconnect teardown is in flight, return the notification kind that should fire —
 /// or `None` when nothing should.
@@ -248,29 +337,75 @@ fn origin_ping_consumed_on(prev: VpnStatus, next: VpnStatus, switch_teardown_pen
     origin_consumed_on(prev, next) && !(next == VpnStatus::Disconnected && switch_teardown_pending)
 }
 
-/// Part A (visibility gate) — pure predicate: should the DESKTOP plate actually fire, given the
-/// main window's current visibility?
+/// Owner ruling (28-UAT test 3): «уведомления об ошибке подключения должны уходить после того, как
+/// пользователь успешно подключился».
 ///
-/// The owner rule: the custom desktop notification plate exists to inform the user when the app is
-/// NOT in front of them (minimized, hidden-to-tray, or closed-to-tray). When the main window IS
-/// visible on screen and not minimized, the user is looking at the app and the in-app FE snackbar
-/// already reports the same transition — a second desktop plate would be redundant noise. So the
-/// plate fires ONLY when the main window is hidden OR minimized:
-///   - visible AND not minimized → `false` (suppress — the FE snackbar covers it),
+/// A `connectionError` plate is STICKY by policy (`plateLifetime`, D-02): it carries no auto-dismiss
+/// timer and waits to be acknowledged. That is right while the failure is still the truth, and wrong
+/// the instant a connection succeeds — the plate then asserts something false, and there is nothing
+/// left to acknowledge.
+///
+/// Normally the success plate REPLACES it (D-03, latest-wins staging). But a replacement only happens
+/// when a plate actually FIRES, and both gates above can stop that. The attention gate makes it
+/// routine rather than exotic: walking back to the app and reconnecting is precisely the sequence
+/// that focuses the main window, so precisely the sequence that suppresses the plate which would
+/// have cleared the error. The stale error then outlives the problem indefinitely.
+///
+/// So every path that leaves `maybe_fire` WITHOUT showing a plate hides the plate window on a
+/// successful connect. Hiding an already-hidden window is a no-op, so this is safe to call blindly.
+/// The paths that DO fire skip it: their own emit + `show()` replaces the content anyway, and a
+/// hide/show pair would flicker.
+///
+/// Scoped to `Connected` on purpose. Any plate still on screen at that moment describes a state the
+/// app has just left, so clearing it is right regardless of its kind — but a broader trigger (say,
+/// every transition) would cut short plates that are legitimately mid-lifetime.
+fn dismiss_plate_on_success(app: &tauri::AppHandle, next: VpnStatus) {
+    if next != VpnStatus::Connected {
+        return;
+    }
+    if let Some(win) = app.get_webview_window("notification") {
+        let _ = win.hide();
+    }
+}
+
+/// Part A (attention gate) — pure predicate: should the DESKTOP plate actually fire, given what the
+/// main window is currently doing?
+///
+/// The owner rule: the custom desktop plate exists to inform the user when they are NOT looking at
+/// the app. The plate fires unless the main window is genuinely the thing the user is working in —
+/// visible, not minimized, AND holding keyboard focus.
+///
+/// WHAT THIS USED TO BE, AND WHY IT CHANGED (owner ruling, 28-UAT test 2). The gate used to read
+/// VISIBILITY only: `!main_visible || main_minimized`. That equated "the window is on screen" with
+/// "the user is reading it", which is false the moment the window sits behind something else. The
+/// owner's words: «даже если она развёрнута, но пользователь находится в проводнике — всё равно
+/// должно выходить уведомление». A restored-but-background window let a switch or a drop announce
+/// itself into an in-app snackbar nobody was looking at, while the desktop plate — the one surface
+/// that WOULD have been seen — was suppressed precisely when it was needed. Focus is the honest
+/// signal for "the user is here"; visibility never was.
+///
+/// Why all three bits are still read rather than focus alone: focus subsumes the other two in
+/// practice (a hidden or minimized window cannot hold focus), but the platform is free to disagree
+/// during transitions, and each read can fail independently. Keeping the conjunction means ANY bit
+/// reading "not in front" fires the plate, which is the fire-safe direction — a redundant plate is
+/// noise, a swallowed one is a missed drop.
+///
+///   - visible AND not minimized AND focused → `false` (suppress — the user is in the app, so the
+///     in-app FE snackbar covers it),
+///   - not focused → `true` (background window, another app in front — this is the new case),
 ///   - hidden (any reason) → `true`,
-///   - minimized → `true` (a minimized window is not "in front of the user" either).
+///   - minimized → `true`.
 ///
-/// This is the ONLY visibility policy Part A adds; it lives here (not in `decide_notification`,
-/// which stays a PURE status/origin/gate decider with no window concept) so it is unit-testable
-/// without a live window, mirroring the other pure predicates in this module. `maybe_fire` reads the
-/// live main-window visibility and calls this to decide whether to run the plate-fire tail. It gates
-/// ONLY the plate fire — every one-shot consume/reset step in `maybe_fire` (origin, ping,
-/// switch-pending clear) runs REGARDLESS of visibility, exactly like the notifications-off path still
-/// consumes.
-fn should_fire_when(main_visible: bool, main_minimized: bool) -> bool {
-    // Fire unless the window is genuinely in front of the user (visible AND not minimized).
-    // De Morgan of `!(main_visible && !main_minimized)`: hidden OR minimized → fire.
-    !main_visible || main_minimized
+/// This is the ONLY window policy Part A adds; it lives here (not in `decide_notification`, which
+/// stays a PURE status/origin/gate decider with no window concept) so it is unit-testable without a
+/// live window, mirroring the other pure predicates in this module. `maybe_fire` reads the live
+/// main-window bits and calls this to decide whether to run the plate-fire tail. It gates ONLY the
+/// plate fire — every one-shot consume/reset step in `maybe_fire` (origin, ping, switch-pending
+/// clear) runs REGARDLESS of it, exactly like the notifications-off path still consumes.
+fn should_fire_when(main_visible: bool, main_minimized: bool, main_focused: bool) -> bool {
+    // Fire unless the window is genuinely in front of the user AND has focus.
+    // De Morgan of `!(main_visible && !main_minimized && main_focused)`.
+    !main_visible || main_minimized || !main_focused
 }
 
 /// Pure predicate: does THIS transition CLEAR the `switch_or_reconnect_pending` intent?
@@ -679,34 +814,52 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
         suppress_intermediate_disconnected,
         cancel_pending,
     ) else {
+        // No plate for this transition (including the notifications-off path). If the transition was
+        // a successful connect, any plate still up is stale — most importantly a STICKY error one.
+        dismiss_plate_on_success(app, next);
         return;
     };
 
-    // Part A (visibility gate): fire the DESKTOP plate ONLY when the main window is NOT in front of
-    // the user (minimized / hidden-to-tray / closed-to-tray). When it is visible-and-not-minimized
-    // the user is looking at the app and the FE snackbar already reports this transition, so a second
-    // desktop plate is redundant — suppress it. CRITICAL: this gate is placed AFTER `decide_notification`
+    // Part A (attention gate): fire the DESKTOP plate ONLY when the user is NOT working in the main
+    // window. A FOCUSED main window means the user is in the app and the FE snackbar already reports
+    // this transition, so a second desktop plate is redundant — suppress it. A background window,
+    // however visible, is not the user's attention and DOES get the plate (owner ruling, 28-UAT test
+    // 2 — see `should_fire_when`). CRITICAL: this gate is placed AFTER `decide_notification`
     // AND after ALL the one-shot consume/reset steps above (pending_connect_origin, pending_connect_ping,
     // switch_or_reconnect_pending clear) — those ran unconditionally and MUST NOT be skipped by
-    // visibility (exactly like the notifications-off path in `decide_notification` still lets them run).
+    // the gate (exactly like the notifications-off path in `decide_notification` still lets them run).
     // Only the plate FIRE itself is gated here.
     //
-    // Lookup miss → default to FIRING (`main_hidden = true`): AppState/window may be absent in a unit
+    // FB-02 (Fable-5 Phase-28 review): the gate's premise — «the FE snackbar already reports this
+    // transition» — was FALSE for `AutoSwitched` when the failover walk started firing it. The
+    // walk's `vpn-flow` adoption branch only re-pointed frontend state and pushed nothing, and no
+    // in-window surface rendered the autoSwitched copy, so a user looking at the app watched the
+    // hero card silently morph into a different server — a different exit country — with no
+    // explanation. The premise is restored rather than the gate weakened: `App.tsx`'s adoption
+    // branch now pushes a localized snackbar for `origin: "failover"`, so the two surfaces are
+    // complementary again (notification when the window is away, snackbar when it is in front) and
+    // D-04 «announce EVERY automatic switch» holds either way.
+    //
+    // Lookup miss → default to FIRING (`main_away = true`): AppState/window may be absent in a unit
     // test (the maybe_fire path uses no real window) or during a narrow startup window — never silently
-    // swallow a notification on a lookup miss. `is_visible()` / `is_minimized()` unwrap to the
-    // fire-safe side (visible-unknown → true so `should_fire_when` does not suppress on a read error;
-    // minimized-unknown → false). The pure `should_fire_when(visible, minimized)` owns the policy
-    // (visible AND not-minimized → suppress; hidden OR minimized → fire) so it is unit-tested without a
-    // live window; here we only read the two live bits and negate to the "should this fire?" answer.
-    let main_hidden = match app.get_webview_window("main") {
-        Some(w) => {
-            should_fire_when(w.is_visible().unwrap_or(true), w.is_minimized().unwrap_or(false))
-        }
+    // swallow a notification on a lookup miss. Each read unwraps to the FIRE-SAFE side, and that side
+    // differs per bit because each one's "in front of the user" value differs: visible-unknown → true,
+    // minimized-unknown → false, focused-unknown → FALSE (an unknown focus must FIRE, not suppress).
+    // The pure `should_fire_when` owns the policy; here we only read the three live bits.
+    let main_away = match app.get_webview_window("main") {
+        Some(w) => should_fire_when(
+            w.is_visible().unwrap_or(true),
+            w.is_minimized().unwrap_or(false),
+            w.is_focused().unwrap_or(false),
+        ),
         None => true, // lookup miss → default to FIRING (never silently swallow a notification).
     };
-    // Only fire the plate when the main window is hidden/minimized (or a lookup miss). A visible-and-
-    // not-minimized main window skips the fire — but NOT the consume/reset logic above.
-    if !main_hidden {
+    // Only fire the plate when the user is NOT working in the main window (background, hidden,
+    // minimized, or a lookup miss). A focused main window skips the fire — but NOT the consume/reset
+    // logic above, and not the stale-plate cleanup: this is THE path where a sticky error would
+    // otherwise survive a successful reconnect (the user came back, focused the window, reconnected).
+    if !main_away {
+        dismiss_plate_on_success(app, next);
         return;
     }
 
@@ -951,17 +1104,20 @@ pub fn fire_superseded_error_plate(app: &tauri::AppHandle, config_name: &str) {
         return;
     }
 
-    // Visibility gate (mirror maybe_fire): fire ONLY when the main window is NOT in front of the user
-    // (hidden / minimized / lookup miss). A visible-and-not-minimized window is covered by the FE
-    // snackbar, so a desktop plate would be redundant. Lookup miss → fire (never silently swallow).
-    let main_hidden = match app.get_webview_window("main") {
+    // Attention gate (mirror maybe_fire): fire ONLY when the user is NOT working in the main window
+    // (background / hidden / minimized / lookup miss). A FOCUSED window is covered by the FE snackbar,
+    // so a desktop plate would be redundant. Lookup miss → fire (never silently swallow). Must stay
+    // equivalent to the maybe_fire gate — two gates that drift give one surface a plate the other
+    // suppresses.
+    let main_away = match app.get_webview_window("main") {
         Some(w) => should_fire_when(
             w.is_visible().unwrap_or(true),
             w.is_minimized().unwrap_or(false),
+            w.is_focused().unwrap_or(false),
         ),
         None => true,
     };
-    if !main_hidden {
+    if !main_away {
         return;
     }
 
@@ -1178,26 +1334,50 @@ mod tests {
     }
 
     #[test]
-    fn should_fire_when_gates_the_plate_on_main_window_visibility() {
-        // Part A (visibility gate): the DESKTOP plate fires ONLY when the main window is NOT in front
-        // of the user. `should_fire_when(main_visible, main_minimized)` is the pure policy `maybe_fire`
-        // consults after the decider + all the one-shot consumes: a plate is redundant when the window
-        // is visible-and-not-minimized (the FE snackbar already reports the transition), so suppress
-        // ONLY that case; a hidden window (any reason) OR a minimized window still fires.
+    fn should_fire_when_suppresses_the_plate_only_for_a_focused_main_window() {
+        // Part A (attention gate): the DESKTOP plate fires unless the user is actually working in the
+        // main window. `should_fire_when(visible, minimized, focused)` is the pure policy `maybe_fire`
+        // consults after the decider + all the one-shot consumes. The ONE suppressing combination is
+        // visible + not-minimized + FOCUSED — there the FE snackbar already reports the transition to
+        // a user who is looking at it. Every other combination fires.
         //
-        // visible + not minimized → the user is looking at the app → SUPPRESS (false).
-        assert!(!should_fire_when(true, false), "a visible, non-minimized main window suppresses the plate");
-        // hidden (not visible) → the user is not looking at the app → FIRE.
-        assert!(should_fire_when(false, false), "a hidden main window fires the plate");
+        // The single suppressing case: the user is in the app.
+        assert!(
+            !should_fire_when(true, false, true),
+            "a visible, non-minimized, FOCUSED main window suppresses the plate"
+        );
+        // hidden → the user is not looking at the app → FIRE.
+        assert!(should_fire_when(false, false, false), "a hidden main window fires the plate");
         // minimized (even if the OS still reports it 'visible') → not in front of the user → FIRE.
-        assert!(should_fire_when(true, true), "a minimized main window fires the plate");
+        assert!(should_fire_when(true, true, false), "a minimized main window fires the plate");
         // hidden AND minimized (belt and suspenders) → FIRE.
-        assert!(should_fire_when(false, true), "a hidden+minimized main window fires the plate");
-        // NOTE: a REAL visible main window suppresses the plate (the `true,false` case above); the
-        // full maybe_fire integration (reading the live window + the lookup-miss → fire default) is
-        // exercised in-app, since maybe_fire needs a live AppHandle/window the unit layer lacks. The
-        // one-shot consumes in maybe_fire are proven independent of this gate by the origin/ping
-        // consume tests, which model the exact peek→consume rule maybe_fire runs BEFORE this gate.
+        assert!(should_fire_when(false, true, false), "a hidden+minimized main window fires the plate");
+        // Defensive: the platform claiming focus on a window it also calls hidden/minimized must NOT
+        // resurrect the old visibility-only suppression — any "not in front" bit still fires.
+        assert!(
+            should_fire_when(false, false, true),
+            "a hidden window claiming focus still fires the plate"
+        );
+        assert!(
+            should_fire_when(true, true, true),
+            "a minimized window claiming focus still fires the plate"
+        );
+    }
+
+    #[test]
+    fn a_visible_but_unfocused_main_window_still_fires_the_plate() {
+        // The owner ruling this gate was rewritten for (28-UAT test 2): «даже если она развёрнута,
+        // но пользователь находится в проводнике — всё равно должно выходить уведомление».
+        //
+        // This is the case the OLD visibility-only gate got wrong, and it is the whole point of the
+        // change, so it gets its own test rather than living as one more line in the table above —
+        // a future simplification back to `!visible || minimized` must fail HERE, with this name.
+        // The window is on screen and not minimized (the old gate's "suppress" shape) but another
+        // app holds focus, so the in-app snackbar reaches nobody and the desktop plate must fire.
+        assert!(
+            should_fire_when(true, false, false),
+            "a restored-but-background main window must still fire the desktop plate"
+        );
     }
 
     #[test]
@@ -1932,6 +2112,165 @@ mod tests {
             decide_notification(VpnStatus::Connecting, VpnStatus::Connected, origin, true, false, false),
             Some(NotifyKind::Connected),
         );
+    }
+
+    // ─── 28-03 / D-04: the Rust failover walk announces its switch through THIS notification ───
+
+    #[test]
+    fn only_a_candidate_past_the_origin_stamps_the_auto_switch_origin() {
+        // Index 0 IS the origin server. A successful retry of the same server moved nobody, so it
+        // must leave the pending origin ALONE — returning `Manual` instead of `None` would clobber
+        // an `AutoConnectLaunch` a launch auto-connect had just stamped, mislabelling its plate.
+        assert_eq!(failover_connect_origin(0), None);
+        // Every later candidate is a genuine switch: a different server, a different exit country
+        // and address. D-04 says announce EVERY one of them.
+        assert_eq!(failover_connect_origin(1), Some(ConnectOrigin::AutoSwitch));
+        assert_eq!(failover_connect_origin(7), Some(ConnectOrigin::AutoSwitch));
+    }
+
+    #[test]
+    fn a_failover_to_another_server_resolves_to_the_auto_switched_plate() {
+        // The walk stamps the origin BEFORE respawning the candidate; the candidate's success
+        // arrives as Reconnecting → Connected (the supervisor's own per-attempt status), which the
+        // decider maps by origin. This is the whole of D-04's wiring: no second notification was
+        // designed — `autoSwitched` already exists with Russian and English copy.
+        let origin = failover_connect_origin(2).expect("candidate #3 is a switch");
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Reconnecting,
+                VpnStatus::Connected,
+                origin,
+                true,
+                false,
+                false,
+            ),
+            Some(NotifyKind::AutoSwitched),
+        );
+    }
+
+    // ─── WR-05: the honesty half of D-04 — nothing else is announced as automatic ───
+
+    #[test]
+    fn a_walk_aborted_by_a_generation_advance_leaves_no_stamp_for_the_next_connect() {
+        // The failure this pins. The walk reaches candidate #2 and stamps `AutoSwitch` before
+        // respawning it. A generation advance then aborts the walk: that arm leaves the status and
+        // the sidecar to the session that now owns them, so there is NO terminal status edge and
+        // `maybe_fire` never runs — the stamp stays armed. The next TRAY connect stamps no origin
+        // of its own (only the window path calls `set_pending_connect_origin(Manual)` first), so
+        // before WR-05 it read the leftover stamp and the user was told the app had switched
+        // servers for them when they had pressed connect by hand.
+        let slot = std::sync::Mutex::new(ConnectOrigin::Manual);
+
+        stamp_failover_origin_in(&slot, 1);
+        assert_eq!(
+            *slot.lock().unwrap(),
+            ConnectOrigin::AutoSwitch,
+            "candidate #2 is a genuine switch and must be stamped as one",
+        );
+
+        // The abort arm hands the stamp back. Nothing about the status or the sidecar changes.
+        release_failover_origin_in(&slot, 1);
+
+        let origin = *slot.lock().unwrap();
+        assert_eq!(
+            origin,
+            ConnectOrigin::Manual,
+            "an abort with no terminal edge must not leave a live AutoSwitch behind",
+        );
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Connecting,
+                VpnStatus::Connected,
+                origin,
+                true,
+                false,
+                false,
+            ),
+            Some(NotifyKind::Connected),
+            "a hand-made tray connect must read «Подключено», never «Переключено автоматически»",
+        );
+    }
+
+    #[test]
+    fn releasing_never_takes_back_an_origin_the_walk_did_not_stamp() {
+        // The converse hazard, and the reason the release is a compare-and-clear. An abort happens
+        // BECAUSE somebody else owns the session now, and that somebody may already have stamped
+        // their own origin — a launch auto-connect's `AutoConnectLaunch`, say. Clearing blindly
+        // would mislabel THEIR connect as an ordinary one: the same lie, pointed the other way.
+        let slot = std::sync::Mutex::new(ConnectOrigin::AutoConnectLaunch);
+        release_failover_origin_in(&slot, 3);
+        assert_eq!(*slot.lock().unwrap(), ConnectOrigin::AutoConnectLaunch);
+
+        // Index 0 is the ORIGIN server: the walk never stamped anything there, so whatever sits in
+        // the slot belongs to somebody else and is not ours to take back — the same load-bearing
+        // `None` that `failover_connect_origin` returns.
+        let slot = std::sync::Mutex::new(ConnectOrigin::AutoSwitch);
+        release_failover_origin_in(&slot, 0);
+        assert_eq!(*slot.lock().unwrap(), ConnectOrigin::AutoSwitch);
+    }
+
+    #[test]
+    fn a_same_server_recovery_still_reads_as_a_plain_connect() {
+        // The origin was never stamped (index 0 → None), so the pending origin is still whatever
+        // it was — `Manual` on an ordinary drop — and the plate says «Подключено», not
+        // «Переключено автоматически». Claiming a switch that never happened would tell the user
+        // their exit country changed when it did not.
+        assert!(failover_connect_origin(0).is_none());
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Reconnecting,
+                VpnStatus::Connected,
+                ConnectOrigin::Manual,
+                true,
+                false,
+                false,
+            ),
+            Some(NotifyKind::Connected),
+        );
+    }
+
+    #[test]
+    fn the_global_notification_toggle_still_gates_a_failover_switch() {
+        // D-04 respects the user's own switch: with notifications off, an automatic switch fires
+        // nothing at all. The master gate dominates every origin.
+        let origin = failover_connect_origin(1).expect("candidate #2 is a switch");
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Reconnecting,
+                VpnStatus::Connected,
+                origin,
+                false,
+                false,
+                false,
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn a_failover_origin_is_consumed_on_the_terminal_edge() {
+        // CR-01 on the failover path: the walk's stamp is a ONE-SHOT. Whether the candidate
+        // connected or the whole queue died, the origin must be spent — a leaked AutoSwitch would
+        // make the user's NEXT manual connect claim «Переключено автоматически».
+        for (prev, next) in [
+            (VpnStatus::Reconnecting, VpnStatus::Connected),
+            (VpnStatus::Reconnecting, VpnStatus::Error),
+            (VpnStatus::Reconnecting, VpnStatus::Disconnected),
+        ] {
+            let mut origin = failover_connect_origin(1).expect("candidate #2 is a switch");
+            if origin_consumed_on(prev, next) {
+                origin = ConnectOrigin::Manual;
+            }
+            assert_eq!(
+                origin,
+                ConnectOrigin::Manual,
+                "{prev:?} → {next:?} must spend the failover origin",
+            );
+        }
+
+        // …but an in-flight edge does NOT spend it: the walk emits a Reconnecting per attempt, and
+        // consuming there would leave the destination Connected reading Manual.
+        assert!(!origin_consumed_on(VpnStatus::Connected, VpnStatus::Reconnecting));
     }
 
     #[test]

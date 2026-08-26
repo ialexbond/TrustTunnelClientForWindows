@@ -462,23 +462,32 @@ pub async fn ping_config_endpoint(
     }
 
     // D-04 (17-02): the truthful steady-state measurement (discard-first warm-up + min-of-2) so
-    // the first «Обновить пинг» after idle is not cold-inflated. The same honest number feeds
-    // both the displayed card pill and the frozen pre-connect band the auto-switch reads (PA-2).
+    // the first «Обновить пинг» after idle is not cold-inflated. The same honest number feeds both
+    // the displayed card pill and the frozen pre-connect band the cards fall back to while the
+    // tunnel is up (PA-2) — one measurement, so the pill and the frozen band can never disagree.
     Ok(probe_tcp_steady_state(&host, port, timeout_ms).await)
 }
 
 // ─── Tunnel-latency probe (F23) — REMOVED (F11, 17-review) ───────────────────
 //
 // `probe_tunnel_latency` (F23), its `TUNNEL_REFERENCE_HOSTS` table and the `best_reference_rtt`
-// helper were DELETED here. PA-2 (17-02) removed the through-tunnel probe from the auto-switch
-// decision — the engine now evaluates the ACTIVE config's already-frozen pre-connect reading (a
-// direct RTT), never a live through-tunnel probe (F26 caught that reading dishonestly: 14 ms
-// through the tunnel while the direct RTT was ~69 ms). The command had ZERO frontend callers yet
-// stayed registered in lib.rs, so any webview `invoke("probe_tunnel_latency")` could still fire
-// outbound TCP probes to hardcoded hosts. F11 completes the dead-contract sweep the PA-4 scope
-// missed, mirroring the earlier `check_vpn_status` removal. The FE-side retirement comments
-// (useAutoSwitch.ts / useConfigPingSource.ts / App.tsx) are kept — they document WHY there is no
-// live tunnel ping — and the useAutoSwitch test still asserts the tick never invokes it.
+// helper were DELETED here, and NOTHING should reintroduce them.
+//
+// The reason is a property of this process, not of any one caller: a latency probe started from the
+// app cannot be made to travel through the tunnel. The prebuilt C++ core owns routing and the
+// killswitch and exposes no in-tunnel RTT, so depending on the user's split-tunnel mode a probe to a
+// reference host either rides the tunnel or goes straight out to the internet — and the app cannot
+// tell which. F26 caught exactly that: connected, the probe read 14 ms while the server's DIRECT
+// pre-connect RTT was ~69 ms. A through-tunnel path is bounded BELOW by the client→server leg, so
+// 14 < 69 is proof the probe bypassed the tunnel. There is no honest live tunnel number to show, so
+// the app shows the frozen pre-connect band instead (`useConfigPingSource`).
+//
+// The command had ZERO frontend callers yet stayed registered in lib.rs, so any webview
+// `invoke("probe_tunnel_latency")` could still fire outbound TCP probes to hardcoded hosts. F11
+// completes the dead-contract sweep the PA-4 scope missed, mirroring the earlier `check_vpn_status`
+// removal. (Plan 28-09: this note used to add that a frontend test asserted the auto-switch tick
+// never invoked the probe. That engine and its test suite are deleted — failover is decided in Rust
+// on a real loss of the tunnel — so the clause was dropped rather than left citing absent evidence.)
 
 // ═══════════════════════════════════════════════════════════════
 //   Tests

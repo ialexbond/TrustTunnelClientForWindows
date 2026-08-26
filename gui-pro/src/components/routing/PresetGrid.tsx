@@ -14,10 +14,11 @@ import {
   EyeOff,
   Check,
   Plus,
-  Route,
+  MousePointerClick,
   type LucideIcon,
 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
+import { PanelHeader } from "../../shared/ui/PanelHeader";
 import type { RoutingRules, RouteAction, RuleEntryType } from "./useRoutingState";
 
 // ═══════════════════════════════════════════════════════
@@ -281,22 +282,23 @@ export function PresetGrid({ rules, onAdd, ensureGroupCache, geodataDownloaded, 
     // Wrapped in a Card (canon parity, audit P-4): presets sit in the same padded panel as the
     // VPN-Mode and GeoData cards, not floating card-less on the page.
     <Card padding="md">
-      <div className="flex items-baseline justify-between px-0.5">
-        <div className="flex items-center gap-2">
-          <Route className="h-4 w-4 shrink-0" style={{ color: "var(--color-accent-fg)" }} />
-          <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
-            {t("routing.presets.title")}
+      {/* Shared `PanelHeader` — the same header the «Настройки» cards use, so this card's glyph is
+          a tinted chip on the title line rather than a bare accent icon. The section note moved into
+          the header's own `description` slot (it was a separate <p> under a hand-built row) and the
+          one-click hint into its `action` slot, so both keep their exact words and their exact
+          relationship to the title. Note: a preset is an EXPLICIT route for its category,
+          independent of the VPN mode. */}
+      <PanelHeader
+        icon={<MousePointerClick className="h-4 w-4" />}
+        title={t("routing.presets.title")}
+        description={t("routing.presets.note")}
+        action={
+          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            {t("routing.presets.hint")}
           </span>
-        </div>
-        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-          {t("routing.presets.hint")}
-        </span>
-      </div>
-      {/* Section note: a preset is an EXPLICIT route for its category, independent of the VPN mode. */}
-      <p className="mt-2 px-0.5 text-xs" style={{ color: "var(--color-text-muted)" }}>
-        {t("routing.presets.note")}
-      </p>
-      <div className="mt-2 grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+        }
+      />
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
         {visibleTiles.map((tile) => (
           <PresetTileButton
             key={tile.id}

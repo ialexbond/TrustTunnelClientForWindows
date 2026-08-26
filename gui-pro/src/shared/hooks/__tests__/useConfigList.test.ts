@@ -108,4 +108,120 @@ describe("useConfigList", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.configs).toEqual([]);
   });
+
+  /**
+   * 27 D-15 — THE ERROR CHANNEL.
+   *
+   * Until now a failed read and an empty manifest were the SAME value to the app: the catch cleared
+   * the list and said nothing, so the tab drew «серверов пока нет» over a failure. That is a lie —
+   * the servers exist, they just could not be read — and it is why the `load-failed` state the
+   * Phase-27 design draws was unreachable in the app.
+   *
+   * The channel is deliberately asymmetric between the two legs, and that asymmetry is the point:
+   * `reload()` is the leg that already clears the list, so it may report the failure; `refresh()`
+   * keeps the previous list on a transient failure (IN-29 / N2), and an error set there would paint
+   * «не удалось прочитать» over a list that is on screen and perfectly good.
+   */
+  describe("error channel (27 D-15)", () => {
+    it("starts clean", async () => {
+      vi.mocked(invoke).mockResolvedValue([cfgDe]);
+      const { result } = renderHook(() => useConfigList());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.error).toBe(false);
+    });
+
+    it("reload: a rejected read sets the error AND clears the list", async () => {
+      vi.mocked(invoke).mockRejectedValue(new Error("read failed"));
+      const { result } = renderHook(() => useConfigList());
+
+      await waitFor(() => expect(result.current.error).toBe(true));
+      expect(result.current.configs).toEqual([]);
+    });
+
+    it("reload: a later success clears the error", async () => {
+      vi.mocked(invoke).mockRejectedValue(new Error("read failed"));
+      const { result } = renderHook(() => useConfigList());
+      await waitFor(() => expect(result.current.error).toBe(true));
+
+      vi.mocked(invoke).mockResolvedValue([cfgDe, cfgNl]);
+      await act(async () => {
+        await result.current.reload();
+      });
+
+      expect(result.current.error).toBe(false);
+      expect(result.current.configs).toEqual([cfgDe, cfgNl]);
+    });
+
+    it("refresh: a rejected read sets NO error and keeps the list", async () => {
+      vi.mocked(invoke).mockResolvedValue([cfgDe, cfgNl]);
+      const { result } = renderHook(() => useConfigList());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      vi.mocked(invoke).mockRejectedValue(new Error("transient"));
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      // A good rendered list must never be painted over by a background re-read that blipped.
+      expect(result.current.error).toBe(false);
+      expect(result.current.configs).toEqual([cfgDe, cfgNl]);
+    });
+
+    it("refresh: a success clears an error left by a failed reload", async () => {
+      vi.mocked(invoke).mockRejectedValue(new Error("read failed"));
+      const { result } = renderHook(() => useConfigList());
+      await waitFor(() => expect(result.current.error).toBe(true));
+
+      vi.mocked(invoke).mockResolvedValue([cfgDe]);
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      // The list HAS just been read successfully, so there is nothing left to report.
+      expect(result.current.error).toBe(false);
+      expect(result.current.configs).toEqual([cfgDe]);
+    });
+
+    // D-05 / EW-02: the field says THAT the read failed, never WHY. A raw backend string rendered
+    // verbatim is the information-disclosure path `ServerUnavailablePlate` already refuses; a
+    // boolean makes it structurally impossible rather than a rule someone has to remember.
+    it("carries no backend message — the channel is a flag, not a string", async () => {
+      vi.mocked(invoke).mockRejectedValue(new Error("EACCES C:/Users/secret/configs.json"));
+      const { result } = renderHook(() => useConfigList());
+      await waitFor(() => expect(result.current.error).toBe(true));
+
+      expect(typeof result.current.error).toBe("boolean");
+      expect(JSON.stringify(result.current.error)).not.toMatch(/EACCES|secret/);
+    });
+
+    it("does not re-enter the skeleton on a failed reload after the first load", async () => {
+      vi.mocked(invoke).mockResolvedValue([cfgDe]);
+      const { result } = renderHook(() => useConfigList());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      vi.mocked(invoke).mockRejectedValue(new Error("read failed"));
+      await act(async () => {
+        await result.current.reload();
+      });
+
+      // hasLoadedRef (IN-47) is untouched: the error state must not resurrect the scroll-reset
+      // vector the first-load-only skeleton rule was built to close.
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBe(true);
+    });
+
+    it("keeps the rest of the returned shape under its existing names", async () => {
+      vi.mocked(invoke).mockResolvedValue([cfgDe]);
+      const { result } = renderHook(() => useConfigList());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(Object.keys(result.current).sort()).toEqual([
+        "configs",
+        "error",
+        "loading",
+        "refresh",
+        "reload",
+      ]);
+    });
+  });
 });

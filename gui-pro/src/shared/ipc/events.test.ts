@@ -15,17 +15,38 @@ import { describe, it, expect } from "vitest";
 // F10/F15 (Fable-5 review): `action`/`reason` are closed literal unions of the ACTUAL Rust codes
 // ("disconnect"/"give_up"; "tunnel-lost"/"internet-lost"), so a typo'd code here is a tsc error.
 // `"reconnect"` is gone — PA-4 removed every Rust producer of it, so it never arrives on the wire.
-import type { InternetStatusEvent, AdapterConflictEvent } from "./events";
+import type { InternetStatusEvent, AdapterConflictEvent, VpnFlowEvent } from "./events";
 // A VALUE import so the RED is a genuine runtime module-resolution failure (a bare
 // `import type` is erased by esbuild and would spuriously pass). 17-04 exports these two
 // event-channel name constants from `shared/ipc/events.ts` — the exact channel strings the
 // typed listeners subscribe to (`"internet-status"` / `"vpn-adapter-conflict"`).
-import { INTERNET_STATUS_EVENT, ADAPTER_CONFLICT_EVENT } from "./events";
+import { INTERNET_STATUS_EVENT, ADAPTER_CONFLICT_EVENT, VPN_FLOW_EVENT } from "./events";
 
 describe("shared/ipc/events — PA-1 typed payload contract (RED until 17-04)", () => {
   it("exports the event-channel name constants the typed listeners subscribe to", () => {
     expect(INTERNET_STATUS_EVENT).toBe("internet-status");
     expect(ADAPTER_CONFLICT_EVENT).toBe("vpn-adapter-conflict");
+    // Phase 28 (28-03): `vpn-flow` joins the typed mirror. It was the last Rust→webview channel
+    // steering app state from an inline `serde_json::json!` blob with the field names living only
+    // in string literals on both ends — the exact drift PA-1 exists to stop.
+    expect(VPN_FLOW_EVENT).toBe("vpn-flow");
+  });
+
+  it("VpnFlowEvent closes the origin union over the two origins the window adopts from", () => {
+    // T-28-11: the window ADOPTS its active-config pointer from this payload, so the origin is a
+    // closed union — an unrecognised value is a tsc error on the sender side and an early return
+    // on the receiver side. `tray` is the Phase-3.6 precedent; `failover` is the 28-02 queue walk
+    // announcing that it moved the user to a different server (OQ-1).
+    const tray: VpnFlowEvent = { action: "connect", origin: "tray", configPath: "/a.toml" };
+    const failover: VpnFlowEvent = { action: "connect", origin: "failover", configPath: "/b.toml" };
+    expect(tray.origin).toBe("tray");
+    expect(failover.origin).toBe("failover");
+    expect(failover.configPath).toBe("/b.toml");
+
+    // The tray disconnect carries no path (there is nothing to point at).
+    const disconnect: VpnFlowEvent = { action: "disconnect", origin: "tray" };
+    expect(disconnect.action).toBe("disconnect");
+    expect(disconnect.configPath).toBeUndefined();
   });
 
   it("InternetStatusEvent parses the online/action/reason shape the Rust emit produces", () => {

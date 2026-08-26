@@ -96,15 +96,16 @@ describe("useConfigPingSource — D-02 active card frozen while connected (RED u
   });
 });
 
-// ── F2 (17-REVIEW): path-form mismatch must NOT kill auto-switch ──────────────────────────────
+// ── F2 (17-REVIEW): a path-form mismatch must NOT hide a measurement we already have ──────────
 //
 // The freeze cache is written under the manifest `c.path` form; `activeReading` used to index it with
 // the raw `activeConfigPath` prop (from localStorage `tt_config_path`), which arrives in a DIFFERENT
 // string form (`\` vs `/`, drive-letter case) for the SAME file on tray-adopt / deeplink / legacy paths.
-// The raw lookup returned `undefined` → `no-data` every tick → useAutoSwitch reset its breach counter and
-// returned BEFORE decideAutoSwitch → auto-switch silently dead while the UI claimed armed. The fix keys
-// the lookup off the RESOLVED `activeConfig.path`, normalized at every write + read.
-describe("useConfigPingSource — F2 path-form divergence resolves activeReading (auto-switch stays armed)", () => {
+// The raw lookup returned `undefined` → a `no-data` verdict for a config whose good band was sitting in
+// the cache the whole time. The fix keys the lookup off the RESOLVED `activeConfig.path`, normalized at
+// every write + read. (This regression originally surfaced as a silently disarmed frontend auto-switch
+// engine; that engine was deleted in 28-09, and these cases now guard the reading itself.)
+describe("useConfigPingSource — F2 path-form divergence resolves activeReading", () => {
   const WIN_CONFIGS: ConfigSummary[] = [
     // Manifest path form: forward slashes, lowercase drive letter (Rust list_configs form).
     { id: "a", name: "A", host: "a.win", display_host: "a.win", user: "ua", path: "c:/x/a.toml", order: 0, last_used: true },
@@ -136,8 +137,9 @@ describe("useConfigPingSource — F2 path-form divergence resolves activeReading
     liveMap = {};
     rerender({ status: "connected" });
 
-    // F2: activeReading is the frozen 70 ms — NOT no-data. A no-data here would make useAutoSwitch reset
-    // and return every tick, killing the engine for the session.
+    // F2: activeReading is the frozen 70 ms — NOT no-data. A no-data here would report the connected
+    // server as unmeasured for the whole session, while its honest band sat in the cache under the
+    // other path form.
     expect(result.current.activeReading).toEqual({ status: "ok", ms: 70 });
     expect(result.current.activeReading.status).not.toBe("no-data");
 

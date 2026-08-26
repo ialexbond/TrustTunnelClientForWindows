@@ -24,6 +24,27 @@ interface ProcessIconProps {
  *                      would introduce a second visual idiom right next to real application
  *                      artwork. Protected, elevated and hand-typed entries land here by design.
  *
+ * ONLY TWO OF THE THREE STATES DRAW A TILE. The muted plate (and the rounded clip that goes with it)
+ * belongs to the states that have nothing of their own to show. A resolved icon gets neither, and
+ * that is the fix for what the plate actually did: Windows artwork carries its own silhouette and
+ * its own transparent margin, so the plate showed THROUGH that margin as a grey square the real icon
+ * appeared to be stuck onto, and the rounded clip shaved the corners off square icons. The plate
+ * stays exactly where it earns its keep — under the Skeleton, which needs a ground to be visible at
+ * all, and under the fallback glyph, where the plate IS the placeholder for a program with no icon.
+ * (Owner's call, 2026-08-26: «если есть иконка — нашу заглушку убирать».)
+ *
+ * THE PLATE CARRIES A HAIRLINE, and that is not decoration. The saved list stripes its rows with the
+ * SAME muted token the plate is filled with, so on every other row the plate had exactly the colour
+ * of the surface behind it and vanished — the fallback glyph floated with no slot around it, and the
+ * picker's not-yet-requested rows (which draw the same plate with nothing inside) read as an empty
+ * gap rather than a slot waiting for its icon. A fill alone cannot survive a background that happens
+ * to match it; the border can, because it is drawn ON TOP of whatever is behind. It is the app's own
+ * hairline token, so nothing new is introduced.
+ *
+ * The wrapper keeps its width and height in every state regardless — the border sits inside the box
+ * (the global border-box rule), so neither dropping the plate nor adding the hairline moves anything:
+ * a row still never reflows when an icon lands.
+ *
  * WHERE THE VALUE COMES FROM. The component no longer fetches for itself. It declares the name it
  * needs to the shared session cache (`useProcessIcons`) and renders whatever that cache currently
  * knows. The rendered contract above is unchanged — only the plumbing moved. It had to move: this
@@ -39,16 +60,23 @@ export function ProcessIcon({ name, size = 24 }: ProcessIconProps) {
   const state =
     icon === undefined ? "pending" : icon === null ? "unavailable" : "resolved";
 
+  // The tile belongs to the two states that draw nothing of their own — see the note above.
+  const hasTile = state !== "resolved";
+
   return (
     <span
       // data-process-icon is the state hook the tests query: jsdom loads no Tailwind, so asserting
       // on appearance would prove nothing, but which BRANCH rendered is a real, checkable fact.
       data-process-icon={state}
-      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-md)]"
+      className={`inline-flex shrink-0 items-center justify-center${
+        hasTile ? " overflow-hidden rounded-[var(--radius-md)]" : ""
+      }`}
       style={{
         width: size,
         height: size,
-        backgroundColor: "var(--color-bg-hover)",
+        backgroundColor: hasTile ? "var(--color-bg-hover)" : "transparent",
+        // Keeps the slot legible where the row behind it shares the plate's colour — see above.
+        border: hasTile ? "1px solid var(--color-border)" : "none",
       }}
     >
       {icon === undefined ? (

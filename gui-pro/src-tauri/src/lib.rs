@@ -1,4 +1,5 @@
 mod app_settings;
+mod autostart;
 mod commands;
 mod connectivity;
 mod diagnostics;
@@ -94,10 +95,11 @@ fn mark_tray_hint_shown() {
 /// this, so a dismiss neither restores the window nor navigates.
 #[tauri::command]
 fn restore_main_window(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        w.show().ok();
-        w.set_focus().ok();
-    }
+    // Shared restore path (tray::restore_main_window_to_front): show + unminimize + focus. The old
+    // show()+set_focus() pair left a MINIMIZED window minimized — on Windows such a window still
+    // reports is_visible() == true, so nothing here noticed — and the plate click appeared to do
+    // nothing but blink the taskbar button.
+    tray::restore_main_window_to_front(&app);
     if let Some(p) = app.get_webview_window("notification") {
         p.hide().ok();
     }
@@ -117,11 +119,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Second instance launched — focus existing window
-            if let Some(w) = app.get_webview_window("main") {
-                w.show().ok();
-                w.set_focus().ok();
-            }
+            // Second instance launched — bring the existing window to the user. Shared restore
+            // path: show + unminimize + focus. Launching the app again while it sat minimized must
+            // produce a window on screen, not a second no-op (a minimized Windows window reports
+            // is_visible() == true, so a bare show() is a no-op for it).
+            tray::restore_main_window_to_front(app);
             // Check if second instance was launched with a deep-link URL
             if let Some(url) = args.iter().find(|a| a.starts_with("trusttunnel://") || a.starts_with("tt://")) {
                 app.emit("deep-link-url", serde_json::json!({ "url": url })).ok();
@@ -273,6 +275,13 @@ pub fn run() {
             // `spawn_stale_staged_config_sweep`); it must not sit in front of the window.
             commands::config::spawn_stale_staged_config_sweep();
 
+            // Owner bug 2026-08-26: an installer run (upgrade / uninstall-first reinstall) deletes
+            // the HKCU Run autostart value, silently undoing the user's «Запуск вместе с системой»
+            // choice. The choice now persists in app_settings.json; put the Run entry back when it
+            // was wiped while that choice says ON. Sub-millisecond (one file read + one registry
+            // probe), so it runs inline like the sweeps above.
+            autostart::reconcile_autostart_on_startup(app.handle());
+
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {
                 // Force decorations off (window-state plugin may restore old value)
@@ -284,7 +293,10 @@ pub fn run() {
                     .map(|p| p.exists())
                     .unwrap_or(false);
                 if !start_minimized {
-                    window.show().ok();
+                    // Same shared restore path as every other reveal route, so a launch can never
+                    // produce a window that is "shown" but minimized (the window-state plugin does
+                    // not persist MINIMIZED today, but nothing here should depend on that).
+                    tray::restore_main_window_to_front(app.handle());
                 }
             }
 
@@ -313,12 +325,10 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
-                        "show" => {
-                            if let Some(w) = app.get_webview_window("main") {
-                                w.show().ok();
-                                w.set_focus().ok();
-                            }
-                        }
+                        // Shared restore path — show + unminimize + focus (see
+                        // tray::restore_main_window_to_front): «Показать» must always land a
+                        // window the user can actually see, never a still-minimized one.
+                        "show" => tray::restore_main_window_to_front(app),
                         "connect" => {
                             tray::tray_vpn_connect(app.clone());
                         }
@@ -339,12 +349,13 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    // Left click Up → toggle main window visibility
-                    // (Telegram-style). Проверяем только visible,
-                    // игнорируем focus — клик по tray иконке сам по
-                    // себе забирает focus у main window, и проверка
-                    // focused ломала toggle-логику (всегда false →
-                    // всегда show, никогда hide).
+                    // Left click Up → toggle the main window (Telegram-style):
+                    // hidden OR minimized → restore to the front; genuinely on
+                    // screen → hide to the tray. The predicate reads visible +
+                    // minimized and deliberately IGNORES focus — clicking the
+                    // tray icon itself takes focus off the main window, so a
+                    // focused check was always false and broke the toggle
+                    // (always show, never hide). See tray::decide_tray_click.
                     //
                     // Right click — native menu показывается OS автоматом
                     // (потому что `.menu(&tray_menu)` задано выше).
@@ -356,11 +367,23 @@ pub fn run() {
                     } = event
                     {
                         if let Some(w) = tray.app_handle().get_webview_window("main") {
-                            if w.is_visible().unwrap_or(false) {
-                                let _ = w.hide();
-                            } else {
-                                let _ = w.show();
-                                let _ = w.set_focus();
+                            // A MINIMIZED Windows window still reports is_visible() == true, so
+                            // visibility alone cannot tell "on screen" from "minimized" — the
+                            // decision needs both flags. tray::decide_tray_click owns it (and
+                            // documents why focus stays out of the predicate).
+                            //
+                            // unwrap_or fallbacks: if a flag cannot be read, treat the window as
+                            // hidden and not minimized → restore. Showing a window the user asked
+                            // for is the safe failure; hiding one they wanted to see is not.
+                            let visible = w.is_visible().unwrap_or(false);
+                            let minimized = w.is_minimized().unwrap_or(false);
+                            match tray::decide_tray_click(visible, minimized) {
+                                tray::TrayClick::HideToTray => {
+                                    let _ = w.hide();
+                                }
+                                tray::TrayClick::RestoreToFront => {
+                                    tray::restore_main_window_to_front(tray.app_handle())
+                                }
                             }
                         }
                     }
@@ -854,6 +877,14 @@ pub fn run() {
             // window open.
             app_settings::get_geodata_auto_update,
             app_settings::set_geodata_auto_update,
+            app_settings::get_failover_settings,
+            app_settings::set_failover_settings,
+            // Owner bug 2026-08-26 — autostart moved behind plain commands (see autostart.rs):
+            // the registry write and the persisted choice now travel together, and the row became
+            // mockable through `invoke` like every other settings row (the 28-06 harness trap is
+            // structurally gone for it).
+            autostart::get_autostart,
+            autostart::set_autostart,
             routing_rules::load_routing_rules,
             routing_rules::save_routing_rules,
             routing_rules::export_routing_rules,

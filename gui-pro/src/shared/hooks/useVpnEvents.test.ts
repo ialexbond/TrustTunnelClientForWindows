@@ -364,6 +364,10 @@ describe("useVpnEvents", () => {
   it("surfaces the per-attempt «Попытка N/3» counter from a reconnecting vpn-status payload", async () => {
     // 02-20: a server-lost auto-retry event carries attempt/max. They must be stored
     // (via setReconnectProgress) so StatusPanel can render «Попытка N/3».
+    //
+    // `failover` normalizes to FALSE when the backend omits it: a plain retry of one server does
+    // not send the key at all (it is `skip_serializing_if` Rust-side), and the UI must read that
+    // absence as «these are retries» rather than as «unknown».
     const setReconnectProgress = vi.fn();
     const { params } = makeParams();
 
@@ -376,7 +380,76 @@ describe("useVpnEvents", () => {
       emitEvent("vpn-status", { status: "reconnecting" as VpnStatus, error: null, attempt: 2, max: 3 });
     });
 
-    expect(setReconnectProgress).toHaveBeenCalledWith({ attempt: 2, max: 3 });
+    // `server` is null on a plain reconnect: the server has not changed, so naming it would add
+    // a word and no information (see reconnectLabel.ts).
+    expect(setReconnectProgress).toHaveBeenCalledWith({
+      attempt: 2,
+      max: 3,
+      failover: false,
+      server: null,
+    });
+  });
+
+  it("marks the counter as a QUEUE position when the walk sets failover", async () => {
+    // Owner UAT 2026-08-26. On a failover walk the same two numbers mean «which server of how
+    // many», and the backend says so with `failover: true`. Carrying it is what lets StatusPanel
+    // render «Пробуем сервер 2 из 4» instead of a «Попытка 1 из 1» that never moved.
+    const setReconnectProgress = vi.fn();
+    const { params } = makeParams();
+
+    await act(async () => {
+      renderHook(() => useVpnEvents({ ...params, setReconnectProgress }));
+    });
+    setReconnectProgress.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", {
+        status: "reconnecting" as VpnStatus,
+        error: null,
+        attempt: 2,
+        max: 4,
+        failover: true,
+      });
+    });
+
+    expect(setReconnectProgress).toHaveBeenCalledWith({
+      attempt: 2,
+      max: 4,
+      failover: true,
+      server: null,
+    });
+  });
+
+  it("carries the candidate's name so the user can see WHICH server is being tried", async () => {
+    // The second half of the same owner complaint (28-UAT test 3): «не видно, к какому серверу он
+    // пытается подключиться». The backend resolves the display name of the candidate it is about to
+    // spawn; this hook is the only thing standing between that field and the two surfaces that
+    // render it, so a silent drop here would put «Переключение на другой сервер» back on screen.
+    const setReconnectProgress = vi.fn();
+    const { params } = makeParams();
+
+    await act(async () => {
+      renderHook(() => useVpnEvents({ ...params, setReconnectProgress }));
+    });
+    setReconnectProgress.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", {
+        status: "reconnecting" as VpnStatus,
+        error: null,
+        attempt: 2,
+        max: 4,
+        failover: true,
+        server: "NL Hip Hosting",
+      });
+    });
+
+    expect(setReconnectProgress).toHaveBeenCalledWith({
+      attempt: 2,
+      max: 4,
+      failover: true,
+      server: "NL Hip Hosting",
+    });
   });
 
   it("clears the attempt counter when status leaves reconnecting", async () => {

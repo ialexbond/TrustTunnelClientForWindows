@@ -209,6 +209,57 @@ pub fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
     }
 }
 
+/// What a left-click on the tray icon should do to the main window.
+///
+/// Split out of the event handler as a plain enum + pure function so the DECISION can be unit
+/// tested: the live handler only ever runs inside a real `TrayIconEvent`, which no test can build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayClick {
+    /// The window is genuinely on screen — tuck it away to the tray.
+    HideToTray,
+    /// The window is hidden OR shown-but-minimized — bring it back to the front.
+    RestoreToFront,
+}
+
+/// Decide what a tray left-click means, from the two window flags Windows reports.
+///
+/// WHY `is_visible` ALONE IS NOT ENOUGH. On Windows a MINIMIZED window still reports
+/// `is_visible() == true` — the taskbar button IS its visible form. The old predicate tested
+/// visibility only, so starting from a minimized window the first tray click took the hide branch
+/// (the window vanished as if closed) and the second took a bare `show()`, which made it visible
+/// again WITHOUT clearing the minimized flag — it came back still minimized. Testing minimized too
+/// makes the click behave the way a Windows tray app is expected to: hidden or minimized → restore
+/// to the front; genuinely on screen → hide to the tray.
+///
+/// DELIBERATELY NOT IN THE PREDICATE: focus. An earlier version also required the window to be
+/// focused, which broke the toggle outright — clicking the tray icon itself takes focus off the
+/// main window, so the focused test was always false and the click always showed, never hid. Do
+/// not reintroduce it.
+pub fn decide_tray_click(is_visible: bool, is_minimized: bool) -> TrayClick {
+    if is_visible && !is_minimized {
+        TrayClick::HideToTray
+    } else {
+        TrayClick::RestoreToFront
+    }
+}
+
+/// Bring the main window to the user: visible, un-minimized and focused.
+///
+/// THE single restore path — every route that reveals the main window (tray left-click, the native
+/// tray menu's «Показать», the custom tray-menu window's `show` action, the notification plate's
+/// body click, a second app instance, the deep-link that rides with it) calls this, so no route can
+/// hand the user a window that is "shown" but still minimized. `unminimize()` is exactly the step
+/// that was missing everywhere: `show()` only flips visibility and leaves a minimized window
+/// minimized. Order matters — show first (a hidden window must be on screen before restoring it
+/// means anything), then unminimize, then focus last so it lands in front of whatever else is open.
+/// Every call is best-effort (`.ok()`): a window-manager refusal must never abort the caller.
+pub fn restore_main_window_to_front(app: &tauri::AppHandle) {
+    let Some(w) = app.get_webview_window("main") else { return; };
+    w.show().ok();
+    w.unminimize().ok();
+    w.set_focus().ok();
+}
+
 /// Connect VPN from tray menu (no frontend involvement).
 pub fn tray_vpn_connect(app: tauri::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return; };
@@ -264,10 +315,10 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         // учётных данных, никакого пути к конфигу (граница threat-model).
         // Зеркалит форму emit'а `deep-link-url` из lib.rs:66.
         app.emit("tray-navigate", serde_json::json!({ "target": "install" })).ok();
-        if let Some(w) = app.get_webview_window("main") {
-            w.show().ok();
-            w.set_focus().ok();
-        }
+        // Shared restore path: show + unminimize + focus. A bare show() would leave a minimized
+        // window minimized (on Windows it still reports itself visible), so the user would get the
+        // navigation event on a window they still cannot see.
+        restore_main_window_to_front(&app);
         return;
     };
 
@@ -650,12 +701,9 @@ pub fn tray_menu_action(app: tauri::AppHandle, action: String) {
     match action.as_str() {
         "connect" => tray_vpn_connect(app.clone()),
         "disconnect" => tray_vpn_disconnect(app.clone()),
-        "show" => {
-            if let Some(w) = app.get_webview_window("main") {
-                w.show().ok();
-                w.set_focus().ok();
-            }
-        }
+        // Shared restore path — show + unminimize + focus, so «Показать» from the custom tray
+        // menu can never hand back a window that is visible but still minimized.
+        "show" => restore_main_window_to_front(&app),
         "quit" => {
             if let Some(state) = app.try_state::<AppState>() {
                 // R4: signal shutdown (intent + generation bump) before the kill so a
@@ -897,6 +945,51 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Tray left-click decision — the fix for "a second tray click brings the window back still
+    // minimized". The live handler lives inside a `TrayIconEvent` that no test can build, so the
+    // decision was extracted into `decide_tray_click` and the four flag combinations are pinned
+    // here. The handler is now a thin caller of this function.
+
+    #[test]
+    fn a_tray_click_hides_a_window_that_is_genuinely_on_screen() {
+        // The only state that should hide: really on screen (visible, not minimized).
+        assert_eq!(decide_tray_click(true, false), TrayClick::HideToTray);
+    }
+
+    #[test]
+    fn a_tray_click_restores_a_hidden_window() {
+        // Hidden in the tray → the click brings it back.
+        assert_eq!(decide_tray_click(false, false), TrayClick::RestoreToFront);
+    }
+
+    #[test]
+    fn a_tray_click_restores_a_minimized_window_instead_of_hiding_it() {
+        // THE reported bug. On Windows a minimized window still reports is_visible() == true, so
+        // the old visibility-only predicate hid it here — the window vanished as if closed and the
+        // user needed a SECOND click to get it back (still minimized). Minimized must restore.
+        assert_eq!(decide_tray_click(true, true), TrayClick::RestoreToFront);
+    }
+
+    #[test]
+    fn a_tray_click_restores_a_window_that_is_both_hidden_and_minimized() {
+        // Hidden while minimized (hide() from the minimized state) — the state the second click
+        // used to land in. It must restore, and the restore path unminimizes as well as shows.
+        assert_eq!(decide_tray_click(false, true), TrayClick::RestoreToFront);
+    }
+
+    #[test]
+    fn only_a_window_on_screen_is_ever_hidden_by_a_tray_click() {
+        // Whole truth table in one guard: hide is reachable from exactly one input combination.
+        for (visible, minimized) in [(true, false), (true, true), (false, false), (false, true)] {
+            let expected = if visible && !minimized {
+                TrayClick::HideToTray
+            } else {
+                TrayClick::RestoreToFront
+            };
+            assert_eq!(decide_tray_click(visible, minimized), expected, "visible={visible} minimized={minimized}");
+        }
+    }
 
     // Phase 19 (19-01, Bug 1 / D-04) — lock the status→tray-icon bucket mapping that the
     // gray-on-acknowledge chain depends on. When the desktop error plate's × acknowledges

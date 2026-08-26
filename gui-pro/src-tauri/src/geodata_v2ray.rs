@@ -1415,12 +1415,39 @@ mod tests {
                 "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             );
             // One request, one response, then the thread ends — no runtime, no test server crate.
+            //
+            // The read/close dance below is load-bearing, not ceremony. The first version read ONCE
+            // into a 1KiB buffer, wrote the response and dropped the stream immediately. Dropping a
+            // Windows socket that still holds unread bytes in its receive buffer sends an RST, and
+            // reqwest surfaced that as `os error 10053` («программа на вашем хост-компьютере
+            // разорвала установленное подключение») — a SendRequest/connection error, NOT a redirect
+            // error. The connection died before the client ever evaluated the `Location` header, so
+            // the assertion below failed while proving nothing about the redirect policy it exists to
+            // guard. Whether the single read happened to drain the whole request was a race with how
+            // reqwest chunked its header write, which is why this test failed intermittently.
+            //
+            // So: read until the header terminator (the client sends no body), answer, then shut the
+            // write half down and drain to EOF before dropping. A clean FIN instead of an RST lets the
+            // client actually parse the 302 and run it past the policy.
             let server = std::thread::spawn(move || {
                 if let Ok((mut stream, _)) = listener.accept() {
+                    let mut request = Vec::new();
                     let mut buf = [0u8; 1024];
-                    let _ = stream.read(&mut buf);
+                    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match stream.read(&mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => request.extend_from_slice(&buf[..n]),
+                        }
+                    }
                     let _ = stream.write_all(response.as_bytes());
                     let _ = stream.flush();
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
+                    // Drain whatever the client still had in flight so the drop below cannot RST.
+                    while let Ok(n) = stream.read(&mut buf) {
+                        if n == 0 {
+                            break;
+                        }
+                    }
                 }
             });
 
@@ -1431,10 +1458,20 @@ mod tests {
                 .await
                 .expect_err("an off-policy redirect must never be followed");
 
+            // Two facts, because `is_redirect()` alone would also be satisfied by a policy that
+            // errored for the wrong reason, and because a transport failure (see the server comment
+            // above) must be told apart from a genuine refusal rather than silently counted as one.
             assert!(
                 err.is_redirect(),
                 "the refusal must come from the redirect policy, not from the network \
                  (a default-policy client would have followed {location}): {err}"
+            );
+            // The hop was refused, not followed: the error still carries the ORIGINAL loopback URL.
+            // Had reqwest followed it, the URL here would be the off-policy {location}.
+            assert_eq!(
+                err.url().map(|u| u.host_str().unwrap_or_default().to_string()),
+                Some("127.0.0.1".to_string()),
+                "the error must still point at the original URL — a followed hop would report {location}: {err}"
             );
             let _ = server.join();
         }

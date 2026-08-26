@@ -1,9 +1,10 @@
 // Phase 13 / Plan 13-02 (Wave 1) — GREEN fake-timer tests for the plate-lifetime timer policy.
 //
 // The 3 `it` names are inherited VERBATIM from the Wave-0 (13-01) `it.todo` scaffold. They drive
-// the PURE `plateLifetime` policy through a tiny timeout harness with `vi.useFakeTimers()` +
-// `advanceTimersByTime`, exactly like src/shared/hooks/useAutoSwitch.test.ts drives its interval
-// ticks deterministically without a real backend — proving:
+// the PURE `plateLifetime` policy through the tiny `makePlateTimer` harness below: `vi.useFakeTimers()`
+// installs a controllable clock, the harness arms a real `setTimeout` from the policy's value, and
+// `advanceTimersByTime` steps the clock past (or short of) the auto-dismiss band. No backend and no
+// wall-clock waiting are involved, so each assertion is deterministic — proving:
 //   - D-02: `connectionError` is sticky (no dismiss ever fires),
 //   - D-02: success/neutral kinds auto-dismiss inside the 4–5s band,
 //   - D-03: applying a NEW kind's policy restarts the timer from the fresh value (the reducer/reset

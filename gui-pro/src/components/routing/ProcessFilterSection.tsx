@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Filter, AppWindow, Loader2 } from "lucide-react";
-import { Card, CardHeader, Toggle, Button } from "../../shared/ui";
+import { Card, PanelHeader, RowToggle, SettingsRow, Button } from "../../shared/ui";
 import { IconButton } from "../../shared/ui/IconButton";
 import { ProcessIcon } from "./ProcessIcon";
 import { useProcessIcons } from "./useProcessIcons";
@@ -38,6 +38,11 @@ export function ProcessFilterSection({
   const { t } = useTranslation();
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  // One binding, two uses: the row's visible label AND the switch's accessible name. Naming it once
+  // is what keeps those two from drifting apart when the mode flips the wording.
+  const modeLabel =
+    processMode === "exclude" ? t("routing.processExcludeMode") : t("routing.processOnlyMode");
+
   // Declare the saved names to the shared icon cache up front. Each row's ProcessIcon would declare
   // itself anyway, so this is not what makes the icons appear — it is what makes them appear in ONE
   // batched command instead of relying on the debounce to happen to catch every row's own request.
@@ -70,27 +75,46 @@ export function ProcessFilterSection({
   return (
     <>
       <Card padding="md">
-        <CardHeader
+        {/* `PanelHeader`, not `CardHeader` — the same header the «Настройки» cards use. CardHeader
+            centres its glyph against the title+description block, so on this card (which has a
+            description) the filter glyph floated BETWEEN the two lines, bare and unframed, reading
+            as a stray square rather than as the section's mark. PanelHeader puts it in the tinted
+            chip on the title line. CardHeader itself is untouched — a dozen dashboard / log-panel /
+            server call sites still render it and must keep their current look. */}
+        <PanelHeader
+          icon={<Filter className="w-4 h-4" />}
           title={t("routing.processFilterTitle")}
           description={t("routing.processFilterDescription")}
-          icon={<Filter className="w-4 h-4" />}
         />
 
-        {/* Mode toggle */}
-        <Toggle
-          value={processMode === "only"}
-          onChange={(val) => onModeChange(val ? "only" : "exclude")}
-          label={
-            processMode === "exclude"
-              ? t("routing.processExcludeMode")
-              : t("routing.processOnlyMode")
-          }
+        {/* Mode toggle — built from `SettingsRow` + `RowToggle`, the exact pair every «Настройки»
+            row is made of, replacing a raw `Toggle` that rendered its own label, description and
+            icon. Two things the owner reported come out of that swap:
+              · the glyph no longer floats between the label and the description. A raw Toggle
+                centres its icon against the two-line text block; `iconAlign="label"` puts it on the
+                label line. It is opt-in because the Settings rows that DO share an icon column want
+                the centred version and must not move.
+              · the label is now 14px/500 over a 12px muted description — the two-level hierarchy
+                the Settings rows use — instead of two near-equal 12px lines.
+            Behaviour is unchanged: same role="switch", same checked value, same handler, and the
+            visible label is still the switch's accessible name (RowToggle requires it explicitly
+            because its label normally lives in another cell; here it is the row's own label). */}
+        <SettingsRow
+          icon={<AppWindow className="w-3.5 h-3.5" />}
+          iconAlign="label"
+          label={modeLabel}
           description={
             processMode === "exclude"
               ? t("routing.processExcludeDescription")
               : t("routing.processOnlyDescription")
           }
-          icon={<AppWindow className="w-3.5 h-3.5" />}
+          control={
+            <RowToggle
+              checked={processMode === "only"}
+              onChange={(val) => onModeChange(val ? "only" : "exclude")}
+              aria-label={modeLabel}
+            />
+          }
         />
 
         {/* Process list */}

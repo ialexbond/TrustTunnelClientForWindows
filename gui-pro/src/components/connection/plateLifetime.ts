@@ -1,11 +1,12 @@
 // Phase 13 / Plan 13-02 (Wave 1) — the pure timer policy for the connection notification plate.
 //
 // `plateLifetime(kind)` returns WHETHER a kind sticks and, if not, HOW LONG it lives before auto-
-// dismiss. It is a PURE function (no timers, no state) — mirroring the `decideAutoSwitch` shape —
-// so the whole D-02/D-03 policy is unit-testable with `vi.useFakeTimers` at the call site exactly
-// like `useAutoSwitch.test.ts`. The actual `setTimeout`/`clearTimeout` (and the D-03 replace-resets-
-// timer behaviour) lands at the Wave-2 `notification.tsx` call site, which clears the running
-// timeout and restarts it from the new kind's policy on every fresh `notify-plate`.
+// dismiss. It is a PURE function — no timers, no state, no React — following the same shape as the
+// repo's other decision modules (`statusBadgeVariant.ts`, `configPingToReading.ts`): one exported
+// function, inputs in, verdict out. That is what makes the whole D-02/D-03 policy unit-testable
+// with `vi.useFakeTimers` at the call site. The actual `setTimeout`/`clearTimeout` (and the D-03
+// replace-resets-timer behaviour) lands at the Wave-2 `notification.tsx` call site, which clears
+// the running timeout and restarts it from the new kind's policy on every fresh `notify-plate`.
 import type { NotifyKind } from "./notificationCopy";
 
 /** The lifetime decision for one plate render. `sticky` kinds carry no `autoDismissMs` (they wait
