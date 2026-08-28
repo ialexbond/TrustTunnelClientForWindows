@@ -263,6 +263,26 @@
   --color-warning-fg: var(--color-warning-400);
   --color-danger-fg: var(--color-danger-400);
 
+  /* Text rendered ON AN ACCENT TINT (accent-tint-06…20) — the middle step between
+     --color-accent-fg (accent text on a PLAIN surface) and --color-on-accent (text on a
+     SOLID accent fill). A tint is same-hue and only slightly lifts the surface, so it eats
+     contrast from BOTH sides: the background moves toward the text while the text stays put.
+     THEME-SCOPED for the same reason the -fg pair is; must clear WCAG 4.5:1 at SMALL sizes
+     (a tinted badge is typically 11–12px, and 11px bold is NOT WCAG "large text" — large
+     needs >=24px, or >=18.66px bold — so 3:1 never applies to it).
+
+     MEASURED in the live Storybook (headless Chrome over CDP, transitions disabled) on the
+     About hero's PRO badge — tint-10 composited over --color-bg-elevated:
+       dark   accent-300 #80b3b0 = 6.21:1  (accent-400, the old value, gave 4.11 — FAIL)
+       light  accent-600 #236260 = 4.98:1  (accent-500, the old value, gave 3.58 — FAIL)
+     The same pair over the flatter --color-bg-surface measures 6.66 / 5.44, so the margin
+     above 4.5 holds on both surface steps the tint is used on.
+     --color-accent-fg was tried first and rejected: it clears light but leaves dark at 4.41,
+     failing by 0.09. --color-accent-hover happens to hold this exact pair today, but it is a
+     HOVER-STATE token — binding static badge text to it would make any future hover re-tune
+     silently change resting text (naming canon, design-system/naming.md). */
+  --color-accent-on-tint: var(--color-accent-300);
+
   /* Text rendered ON an accent fill (primary button / chip / segmented control).
      THEME-SCOPED on purpose: no single value clears WCAG 4.5:1 on BOTH themed
      accent fills. On the dark-theme teal (#4d9490 = accent-400) dark text wins —
@@ -411,6 +431,11 @@
   --color-accent-fg: var(--color-accent-600);
   --color-warning-fg: var(--color-warning-600);
   --color-danger-fg: var(--color-danger-600);
+
+  /* Text ON AN ACCENT TINT — THEME-SCOPED (see the dark block for the full rationale and the
+     measured table). The light theme needs the DARKER accent-600: measured 4.98:1 on the
+     composited tint, where accent-500 (--color-accent-interactive) reached only 3.58:1. */
+  --color-accent-on-tint: var(--color-accent-600);
 
   /* Text rendered ON an accent fill — THEME-SCOPED (see the dark block for the
      rationale). The light-theme teal (#2d7a76 = accent-500) is dark enough that

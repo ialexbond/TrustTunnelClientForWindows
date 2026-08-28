@@ -20,6 +20,27 @@ describe("TitleBar", () => {
     expect(screen.getByText("PRO")).toBeInTheDocument();
   });
 
+  // Бейдж окрашен токеном «текст на тинте». Интерактивным акцентом он мерился
+  // 4.14:1 в светлой теме при пороге 4.5:1 (12px bold — не «крупный текст» по
+  // WCAG), с --color-accent-on-tint стало 5.76:1. Тот же дефект и та же правка,
+  // что на бейдже «О программе» (AboutHero).
+  it("PRO badge использует токен текста на тинте, а не интерактивный акцент", () => {
+    render(<TitleBar />);
+    const badge = screen.getByText("PRO");
+    expect(badge.getAttribute("style")).toContain("var(--color-accent-on-tint)");
+    expect(badge.getAttribute("style")).not.toContain("var(--color-accent-interactive)");
+    // Заливка остаётся тинтом: чинили текст, а не фон.
+    expect(badge.getAttribute("style")).toContain("var(--color-accent-tint-10)");
+  });
+
+  it("вордмарк сохраняет интерактивный акцент — правка бейджа его не задела", () => {
+    render(<TitleBar />);
+    // «Tunnel» лежит на обычной подложке, а не на тинте: его контраст не был проблемой.
+    expect(screen.getByText("Tunnel").getAttribute("style")).toContain(
+      "var(--color-accent-interactive)",
+    );
+  });
+
   it("renders children (WindowControls slot)", () => {
     render(
       <TitleBar>

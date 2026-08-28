@@ -118,18 +118,22 @@ vi.mock("./components/StatusPanel", () => ({
   },
 }));
 
-// Mock fetch for update check
-const mockFetch = vi.fn().mockResolvedValue({
-  ok: true,
-  json: async () => ({
-    tag_name: "v1.5.0",
-    assets: [],
-    body: "",
-    html_url: "https://github.com",
-  }),
-});
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(globalThis as any).fetch = mockFetch;
+// Phase 30: the app update check is the Rust command `check_app_update_info`, not a
+// webview fetch — the app's own CSP names no GitHub origin in `connect-src`. Tests that
+// care about update state answer that command from their own `invoke` mock using this
+// factory, which mirrors the command's snake_case wire shape.
+function appUpdateWire(overrides: Record<string, unknown> = {}) {
+  return {
+    current_version: "1.5.0",
+    latest_version: "1.5.0",
+    latest_tag: "v1.5.0",
+    available: false,
+    download_url: "",
+    release_notes: "",
+    sha256: "",
+    ...overrides,
+  };
+}
 
 // Mock window.matchMedia
 const matchMediaListeners: Array<(e: MediaQueryListEvent) => void> = [];
@@ -196,6 +200,9 @@ describe("App", () => {
       if (cmd === "read_client_config") return null;
       if (cmd === "get_auto_connect") return false;
       if (cmd === "auto_detect_config") return null;
+      // Without this the mount-time update check would reject on every App test and
+      // fill the run with «Update check failed» warnings that mean nothing.
+      if (cmd === "check_app_update_info") return appUpdateWire();
       return null;
     });
 
@@ -2399,23 +2406,12 @@ describe("App", () => {
       render(<App />);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining("github.com"),
-      expect.any(Object),
-    );
+    // The probe leaves the webview: obligation 1 / RESEARCH L-1.
+    expect(invoke).toHaveBeenCalledWith("check_app_update_info");
   });
 
   it("update available when remote version is newer", async () => {
     vi.mocked(getVersion).mockResolvedValue("1.0.0");
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        tag_name: "v2.0.0",
-        assets: [{ name: "TrustTunnel-Pro-v2.0.0-setup.exe", browser_download_url: "https://example.com/Pro-setup.exe" }],
-        body: "New features",
-        html_url: "https://github.com/releases/v2.0.0",
-      }),
-    });
 
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_active_page", "about");
@@ -2423,6 +2419,15 @@ describe("App", () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
+      if (cmd === "check_app_update_info")
+        return appUpdateWire({
+          current_version: "1.0.0",
+          latest_version: "2.0.0",
+          latest_tag: "v2.0.0",
+          available: true,
+          download_url: "https://example.com/Pro-setup.exe",
+          release_notes: "New features",
+        });
       return null;
     });
 
@@ -2439,15 +2444,6 @@ describe("App", () => {
 
   it("update not available when current version is newer", async () => {
     vi.mocked(getVersion).mockResolvedValue("3.0.0");
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        tag_name: "v2.0.0",
-        assets: [],
-        body: "",
-        html_url: "https://github.com",
-      }),
-    });
 
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_active_page", "about");
@@ -2455,6 +2451,13 @@ describe("App", () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
+      if (cmd === "check_app_update_info")
+        return appUpdateWire({
+          current_version: "3.0.0",
+          latest_version: "2.0.0",
+          latest_tag: "v2.0.0",
+          available: false,
+        });
       return null;
     });
 
@@ -2468,13 +2471,11 @@ describe("App", () => {
   });
 
   it("update check failure is handled gracefully", async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({}),
-    });
-
     const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_app_update_info") return Promise.reject("server-unreachable");
+      return null;
+    });
 
     await act(async () => {
       render(<App />);
@@ -2483,6 +2484,29 @@ describe("App", () => {
     await waitFor(() => {
       expect(consoleSpy).toHaveBeenCalledWith("Update check failed:", expect.anything());
     });
+
+    consoleSpy.mockRestore();
+  });
+
+  it("a failed check leaves the update dot dark (hasAppUpdate stays false)", async () => {
+    // App.tsx derives `hasAppUpdate` from `appAvailable ?? available`. A check that
+    // never succeeded must not light the tab nudge — that is the same lie as the
+    // up-to-date plate this phase removed from the card.
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_app_update_info") return Promise.reject("no-internet");
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(aboutPanelProps.updateInfo?.checkError).toBe("no-internet");
+    });
+    expect(aboutPanelProps.updateInfo?.appAvailable).toBe(false);
+    expect(aboutPanelProps.updateInfo?.available).toBe(false);
 
     consoleSpy.mockRestore();
   });
@@ -2733,17 +2757,8 @@ describe("App", () => {
 
   // ─── compareVersions tests (indirectly via update check) ───
 
-  it("compareVersions: equal versions → not available", async () => {
+  it("EDGE adjacency: identical version strings → not available, the up-to-date branch", async () => {
     vi.mocked(getVersion).mockResolvedValue("1.5.0");
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        tag_name: "v1.5.0",
-        assets: [],
-        body: "",
-        html_url: "https://github.com",
-      }),
-    });
 
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_active_page", "about");
@@ -2751,6 +2766,10 @@ describe("App", () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
+      // The comparison itself now happens in Rust (compare_semver); what the front
+      // end owes is that it renders the command's verdict rather than re-deriving one.
+      if (cmd === "check_app_update_info")
+        return appUpdateWire({ current_version: "1.5.0", latest_version: "1.5.0", available: false });
       return null;
     });
 
@@ -2760,6 +2779,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(aboutPanelProps.updateInfo?.available).toBe(false);
+      expect(aboutPanelProps.updateInfo?.checkError).toBeNull();
     });
   });
 
@@ -2786,17 +2806,11 @@ describe("App", () => {
 
   // ─── Update: find exe/msi asset ───
 
-  it("update uses exe/msi asset when no zip available", async () => {
+  it("carries the installer URL and its checksum through from the command", async () => {
+    // Asset selection moved into Rust with the check; what this asserts is that the
+    // front end still carries both the URL and the digest, because `self_update`
+    // needs the pair and losing the digest would silently disarm the tamper control.
     vi.mocked(getVersion).mockResolvedValue("1.0.0");
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        tag_name: "v2.0.0",
-        assets: [{ name: "TrustTunnel-Pro-setup.exe", browser_download_url: "https://example.com/Pro-setup.exe" }],
-        body: "New version",
-        html_url: "https://github.com/releases",
-      }),
-    });
 
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_active_page", "about");
@@ -2804,6 +2818,15 @@ describe("App", () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
+      if (cmd === "check_app_update_info")
+        return appUpdateWire({
+          current_version: "1.0.0",
+          latest_version: "2.0.0",
+          latest_tag: "v2.0.0",
+          available: true,
+          download_url: "https://example.com/Pro-setup.exe",
+          sha256: "b".repeat(64),
+        });
       return null;
     });
 
@@ -2814,6 +2837,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(aboutPanelProps.updateInfo?.downloadUrl).toBe("https://example.com/Pro-setup.exe");
     });
+    expect(aboutPanelProps.updateInfo?.sha256).toBe("b".repeat(64));
   });
 
   // ─── Phase 18 — Welcome tour mount logic (REQ-18-ONBOARDING-01..04) ───

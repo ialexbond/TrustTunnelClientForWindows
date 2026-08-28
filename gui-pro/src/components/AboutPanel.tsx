@@ -1,25 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import {
-  Github,
-  Download,
-  RefreshCw,
-  Loader2,
-  CheckCircle2,
-  ArrowUpCircle,
-  Heart,
-  ExternalLink,
-  FileText,
-  Compass,
-} from "lucide-react";
+import { useState } from "react";
 import { ChangelogModal } from "./ChangelogModal";
+import { AboutHero } from "./about/AboutHero";
+import { AppInfoCard } from "./about/AppInfoCard";
+import { FooterLinks } from "./about/FooterLinks";
+import { UpdateCard } from "./about/UpdateCard";
 import type { UpdateInfo } from "../shared/types";
-import { open } from "@tauri-apps/plugin-shell";
-import { useSnackBar } from "../shared/ui/SnackBarContext";
-import { formatError } from "../shared/utils/formatError";
-import { buildVersionLabel } from "../shared/utils/buildVersionLabel";
 
 interface AboutPanelProps {
   updateInfo: UpdateInfo;
@@ -27,299 +12,86 @@ interface AboutPanelProps {
   onOpenDownload: () => void;
 }
 
-interface UpdateProgressPayload {
-  stage: string;
-  percent: number;
-  message: string;
-}
-
+/**
+ * The «О программе» tab: four blocks in one column, and nothing else.
+ *
+ * WHAT THIS FILE USED TO BE, AND WHY IT STOPPED BEING THAT.
+ *
+ * Before phase 30 this was 329 lines: the hero, the update block with its own `self_update` call,
+ * its `update-progress` listener and its progress state, the description block, the footer row —
+ * all inline, all in one file, and all wrapped in a 384px-capped column that was vertically centred
+ * in the viewport. (The capping utility is not named here on purpose — this plan's acceptance check
+ * is a blunt count of it in this file, and a comment that spells it out would trip the very rule it
+ * explains.) Two things were wrong with that shape.
+ *
+ *  · It was the LAST screen in the application living by its own layout rules. «Настройки» and
+ *    «Маршрутизация» are a full-height flex column with a hidden overflow, holding one scrolling
+ *    region with the tab's own padding and a single full-width stack inside it. This tab now uses
+ *    exactly that rhythm (see `AppSettingsPanel`), so the four blocks are as wide as the window
+ *    allows instead of being pinned to a 384px ribbon floating in the middle of an empty screen.
+ *  · Everything it drew inline is now a component with its own tests and its own showcase entry, so
+ *    keeping a second copy here would mean two drawings of one screen, drifting apart quietly.
+ *
+ * WHAT IT OWNS NOW: the block order, and the changelog window's open/closed state. That is all.
+ * The check callback, the download callback and the update state pass straight through to the card;
+ * the self-update call, the progress listener and the progress bar live in the card because it is
+ * the only thing that reads them.
+ *
+ * THE PROP CONTRACT WITH `App.tsx` IS UNCHANGED — `updateInfo`, `onCheckUpdates`, `onOpenDownload`.
+ * In particular no second «retry» callback was threaded through: a retry IS a check, so the card
+ * calls the same handler for both, and adding a parallel prop would have opened a second path into
+ * the update machinery for no behaviour that does not already exist (T-30-30).
+ *
+ * THE STATUS-PANEL SLOT IS NOT OURS. `App.tsx` renders `statusPanelFor("about")` as this
+ * component's SIBLING inside the tabpanel, above it in the same flex column — unlike «Настройки»,
+ * which takes it as a prop and mounts it itself. Reimplementing it here would paint it twice.
+ */
 function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
-  const { t } = useTranslation();
-  // The logo is theme-swapped purely via CSS (.only-dark / .only-light keyed on the
-  // `data-theme` attribute) so a theme change re-paints it without re-rendering this
-  // component. See index.css.
-  const [updating, setUpdating] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
-  const pushSuccess = useSnackBar();
   const [changelogOpen, setChangelogOpen] = useState(false);
 
-  // Translate update progress message keys from Rust
-  const translateProgress = useCallback((payload: UpdateProgressPayload): UpdateProgressPayload => {
-    const { message } = payload;
-    if (message.startsWith("update.downloading|")) {
-      const parts = message.split("|");
-      return { ...payload, message: t("update.downloading", { downloaded: parts[1], total: parts[2] }) };
-    }
-    if (message.startsWith("update.")) {
-      return { ...payload, message: t(message) };
-    }
-    return payload;
-  }, [t]);
-
-  useEffect(() => {
-    const unlisten = listen<UpdateProgressPayload>("update-progress", (event) => {
-      setUpdateProgress(translateProgress(event.payload));
-    });
-    return () => { unlisten.then((f) => f()); };
-  }, [translateProgress]);
-
-  const handleSelfUpdate = async () => {
-    if (!updateInfo.downloadUrl) return;
-    setUpdating(true);
-    setUpdateProgress({ stage: "download", percent: 0, message: t("status.preparing") });
-    try {
-      await invoke("self_update", {
-        downloadUrl: updateInfo.downloadUrl,
-        expectedSha256: updateInfo.sha256 || "",
-        language: localStorage.getItem("tt_language") || "ru",
-        theme: localStorage.getItem("tt_theme") || "dark",
-      });
-    } catch (e) {
-      pushSuccess(formatError(e), "error");
-      setUpdating(false);
-      setUpdateProgress(null);
-    }
-  };
-
+  // The single source of the displayed version: the value the update check reported, falling back
+  // to the frozen product version when it has not answered yet. `AboutHero` deliberately takes no
+  // default of its own, so this stays the one place the fallback is written.
   const version = updateInfo.currentVersion || "3.0.0";
-  // T-13 build hash: append `-<hash>` to the version when a build hash was
-  // injected at build time (VITE_BUILD_HASH → __BUILD_HASH__ via vite define).
-  // Graceful fallback to bare `v{version}` when unset. See buildVersionLabel.
-  const versionLabel = buildVersionLabel(version, __BUILD_HASH__);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto py-6 px-4">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* One scrolling region carrying the tab's own padding, and one column inside it with the
+          design's gap — the same two-element shape `AppSettingsPanel` uses, so the two tabs cannot
+          disagree about the screen's margins. `scroll-overlay` keeps the scrollbar off the layout,
+          which is what lets the widest block measure the full 968px the screen contract names. */}
+      <div className="flex-1 scroll-overlay py-3 px-4 flex flex-col gap-[var(--space-4)]">
+        <AboutHero version={version} buildHash={__BUILD_HASH__} />
 
-      <div className="w-full max-w-sm space-y-5">
-        {/* Logo + wordmark — горизонтальный layout:
-              [SVG logo 72px]  [H1 TrustTunnel крупно    PRO superscript в
-                                верхнем правом углу текста]
-            Theme-swapped SVG (dark/light).  Wordmark — Outfit крупнее для
-            читаемости. PRO бейдж держится в верхнем правом углу h1 через
-            flex items-start (не vertical-center как было). */}
-        {/* Главный блок: logo + wordmark в row, v{version} ярлык под
-            ним (центрированно).
-            FIX-FS: tailwind.config.js override'нул весь fontSize до xs..2xl
-            (нет 3xl/5xl). Поэтому `text-5xl` класс НЕ генерировался — текст
-            оставался базового размера. Вместо text-5xl используем inline
-            fontSize в px. */}
-        <div className="flex flex-col items-center gap-3">
-          <div className="flex items-center justify-center gap-4">
-            <img
-              src="/logo/shield-dark.svg"
-              alt="TrustTunnel"
-              width={72}
-              height={72}
-              className="only-dark shrink-0"
-              draggable={false}
-            />
-            <img
-              src="/logo/shield-light.svg"
-              alt="TrustTunnel"
-              width={72}
-              height={72}
-              className="only-light shrink-0"
-              draggable={false}
-            />
-            <div className="flex items-start gap-1.5">
-              <h1
-                // Wordmark «Trust» (primary) + «Tunnel» (accent) — две
-                // части через span'ы. text-5xl через расширенный token
-                // (tailwind.config.js + tokens.css). Outfit display face.
-                className="text-5xl font-bold tracking-wide leading-none"
-                style={{ fontFamily: "var(--font-family-display)" }}
-              >
-                <span style={{ color: "var(--color-text-primary)" }}>Trust</span>
-                <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
-              </h1>
-              <span
-                // Единый badge-style с TitleBar'овским PRO: accent-tint-10
-                // фон + accent-interactive текст + --radius-sm + font-bold
-                // + leading-none с asymmetric padding для optical-center.
-                // Разница только в scale: text-[11px]/pt-[4px]/pb-[3px]
-                // здесь vs text-[9px]/pt-[3px]/pb-[2px] в TitleBar.
-                className="text-[11px] font-bold px-2 pt-[4px] pb-[3px] rounded-[var(--radius-sm)] leading-none"
-                style={{
-                  backgroundColor: "var(--color-accent-tint-10)",
-                  color: "var(--color-accent-interactive)",
-                }}
-              >
-                PRO
-              </span>
-            </div>
-          </div>
-          {/* Version ярлык — под logo+wordmark blockом (был справа от
-              wordmark, расхолащивал горизонтальный ряд). */}
-          <span
-            className="text-[11px] font-mono px-2.5 py-0.5 rounded-full"
-            style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
-          >
-            v{versionLabel}
-          </span>
-        </div>
+        {/* The panel supplies the state it already receives from App.tsx plus the one callback the
+            card cannot own: opening the changelog window that this panel mounts below. */}
+        <UpdateCard
+          updateInfo={updateInfo}
+          onCheck={onCheckUpdates}
+          onOpenDownload={onOpenDownload}
+          onOpenChangelog={() => setChangelogOpen(true)}
+        />
 
-        {/* Update card */}
-        <div
-          className="rounded-xl p-4 space-y-3"
-          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-        >
-          {updating && updateProgress ? (
-            /* Downloading */
-            <div className="space-y-2">
-              <div
-                className="flex items-center gap-3 rounded-lg p-3"
-                style={{ backgroundColor: "var(--color-accent-tint-08)", border: "1px solid var(--color-accent-tint-20)" }}
-              >
-                <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-accent-fg)" }} />
-                <p className="text-xs font-medium" style={{ color: "var(--color-accent-fg)" }}>
-                  {updateProgress.message}
-                </p>
-              </div>
-              <div className="w-full rounded-full h-1 overflow-hidden" style={{ backgroundColor: "var(--color-bg-hover)" }}>
-                <div
-                  className="h-full rounded-full transition-all duration-300"
-                  style={{ width: `${updateProgress.percent}%`, backgroundColor: "var(--color-accent-500)" }}
-                />
-              </div>
-            </div>
-          ) : updateInfo.available ? (
-            /* Update available */
-            <div className="space-y-2.5">
-              <div
-                className="flex items-center gap-2.5 rounded-lg p-2.5"
-                style={{ backgroundColor: "var(--color-success-tint-06)", border: "1px solid var(--color-status-connected-border)" }}
-              >
-                <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-fg)" }} />
-                <p className="text-xs font-medium" style={{ color: "var(--color-success-fg)" }}>
-                  {t("about.update_available", { version: updateInfo.latestVersion })}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSelfUpdate}
-                  disabled={!updateInfo.downloadUrl}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: "var(--color-status-connected-bg)", color: "var(--color-success-fg)" }}
-                >
-                  <ArrowUpCircle className="w-3.5 h-3.5" />
-                  {t("buttons.update")}
-                </button>
-                <button
-                  onClick={onOpenDownload}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
-                  style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  {t("buttons.download")}
-                </button>
-                {updateInfo.releaseNotes && (
-                  <button
-                    onClick={() => setChangelogOpen(true)}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
-                    style={{
-                      backgroundColor: "var(--color-bg-hover)",
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    {t("buttons.whats_new")}
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Up to date */
-            <div
-              className="flex items-center gap-2.5 rounded-lg p-2.5"
-              style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
-            >
-              <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-fg)" }} />
-              <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                {t("about.up_to_date")}
-              </p>
-            </div>
-          )}
+        <AppInfoCard />
 
-          <button
-            onClick={onCheckUpdates}
-            disabled={updateInfo.checking || updating || updateInfo.available}
-            className="w-full flex items-center justify-center gap-1.5 px-4 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-            style={{
-              backgroundColor: "var(--color-bg-hover)",
-              color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border)",
-            }}
-          >
-            {updateInfo.checking ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                {t("status.checking")}
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-3.5 h-3.5" />
-                {t("buttons.check_updates")}
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* About description — compact */}
-        <div
-          className="rounded-xl p-4 text-xs leading-relaxed"
-          style={{
-            backgroundColor: "var(--color-bg-surface)",
-            border: "1px solid var(--color-border)",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          <p>{t("about.description")}</p>
-          <div
-            className="flex items-start gap-2 rounded-lg p-2.5 mt-3"
-            style={{ backgroundColor: "var(--color-bg-elevated)" }}
-          >
-            <Heart className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-accent-fg)" }} />
-            <p className="text-[11px] leading-relaxed">
-              {t("about.vibe_coding")}
-            </p>
-          </div>
-        </div>
-
-        {/* Footer links */}
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          <button
-            onClick={() => open("https://github.com/ialexbond/TrustTunnelClient")}
-            className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            <Github className="w-3 h-3" />
-            GitHub
-            <ExternalLink className="w-2.5 h-2.5 opacity-50" />
-          </button>
-          <span style={{ color: "var(--color-border)" }}>·</span>
-          {/* Manual welcome-tour re-trigger (user request). App.tsx listens for this
-              window event and mounts the WelcomeTour overlay, bypassing the
-              existing-user auto-skip so a configured user can re-watch the intro. */}
-          <button
-            onClick={() => window.dispatchEvent(new CustomEvent("tt-show-welcome-tour"))}
-            className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            <Compass className="w-3 h-3" />
-            {t("about.show_welcome_tour")}
-          </button>
-          <span style={{ color: "var(--color-border)" }}>·</span>
-          <span className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
-            {t("about.copyright", { year: new Date().getFullYear() })}
-          </span>
-        </div>
+        <FooterLinks />
       </div>
 
+      {/* Окно «Что нового» (фаза 30). Раньше сюда передавалась ОДНА строка заметок — та, что
+          приехала с проверкой обновлений, — и потому окно могло рассказать только про версию,
+          которой у пользователя ещё нет. Теперь у окна два источника, и установленную порцию оно
+          достаёт само из вложенного в сборку файла: панель не разбирает файл за него и не передаёт
+          готовое тело, иначе источник установленной порции размазался бы по двум местам.
+
+          Порция новой версии передаётся ТОЛЬКО когда обновление действительно найдено: `available`,
+          а не просто непустая строка заметок — ответ проверки может нести текст выпуска и тогда,
+          когда установлена уже самая свежая версия. */}
       <ChangelogModal
         isOpen={changelogOpen}
         onClose={() => setChangelogOpen(false)}
-        version={updateInfo.latestVersion ?? version}
-        releaseNotes={updateInfo.releaseNotes ?? ""}
+        installedVersion={version}
+        availableVersion={updateInfo.available ? updateInfo.latestVersion : undefined}
+        availableNotes={updateInfo.available ? updateInfo.releaseNotes || undefined : undefined}
       />
     </div>
   );

@@ -53,14 +53,23 @@ export function TitleBar({ children }: TitleBarProps) {
           <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
         </span>
         <span
-          // PRO badge — тот же stylistic pattern что и AboutPanel:
-          // accent-tint-10 фон + accent-interactive текст + rounded-sm +
+          // PRO badge — тот же stylistic pattern что и хиро «О программе»:
+          // accent-tint-10 фон + текст токеном «на тинте» + rounded-sm +
           // font-bold. Масштаб подогнан под 32px TitleBar height:
           // text-xs (12px, strict compliance) + padding pt-[3px]/pb-[2px].
+          //
+          // ЦВЕТ ТЕКСТА — --color-accent-on-tint, НЕ --color-accent-interactive.
+          // Тот же дефект, что нашли на бейдже «О программе», и та же причина:
+          // текст акцентом на прозрачной заливке ТОГО ЖЕ оттенка — подложка и
+          // буквы сближаются с двух сторон. Замерено в живом Storybook с
+          // отключёнными переходами: интерактивным акцентом 5.11:1 в тёмной, но
+          // 4.14:1 в светлой — светлая ниже порога 4.5:1. 12px bold — не
+          // «крупный текст» по WCAG (крупный от 24px, либо от 18.66px жирного),
+          // послабление до 3:1 не применяется. С accent-on-tint: 7.72 / 5.76.
           className="text-xs font-bold px-1.5 pt-[3px] pb-[2px] rounded-[var(--radius-sm)] leading-none"
           style={{
             backgroundColor: "var(--color-accent-tint-10)",
-            color: "var(--color-accent-interactive)",
+            color: "var(--color-accent-on-tint)",
           }}
         >
           PRO
