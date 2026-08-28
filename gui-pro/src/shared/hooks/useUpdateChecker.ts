@@ -1,15 +1,53 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
-import type { UpdateInfo } from "../types";
-import { compareSemver } from "../utils/compareSemver";
-
-// Asset name pattern for this edition (Pro)
-const ASSET_PATTERN = /Pro.*setup.*\.exe$/i;
+import type { UpdateInfo, UpdateCheckFailure } from "../types";
 
 // Background check interval — 24h per REQ-18-UPDATE-DETECTION-03 + D-2.4
 // (was 6h до Phase 18). App startup check unchanged.
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Backend reason code → `UpdateCheckFailure`, exhaustively and with NO passthrough.
+ *
+ * Same device as `vpnEventHelpers.REASON_CODE_I18N`: the backend mints stable ASCII
+ * tokens, the presentation boundary is the single place that knows what they mean.
+ * The keys mirror `updater.rs` `UPDATE_NO_INTERNET_REASON` /
+ * `UPDATE_SERVER_UNREACHABLE_REASON`.
+ *
+ * A token that is not in this table resolves to `server-unreachable` rather than
+ * being carried through as-is. That is deliberate: a passthrough would let a string
+ * the front end has never heard of — a stack trace, a hostname, a status line —
+ * become the value the card renders. There is no code path here that can put an
+ * unknown string on screen.
+ */
+const FAILURE_BY_REASON_CODE: Record<string, UpdateCheckFailure> = {
+  "no-internet": "no-internet",
+  "server-unreachable": "server-unreachable",
+};
+
+function toCheckFailure(rejected: unknown): UpdateCheckFailure {
+  return (
+    (typeof rejected === "string" ? FAILURE_BY_REASON_CODE[rejected] : undefined) ??
+    "server-unreachable"
+  );
+}
+
+/**
+ * Phase 30 backend contract — `check_app_update_info` wire shape.
+ *
+ * snake_case for the same reason `SidecarVersionInfo` below is: Tauri serializes
+ * the Rust struct's own field names onto the wire.
+ */
+interface AppUpdateInfoWire {
+  current_version: string;
+  latest_version: string;
+  latest_tag: string;
+  available: boolean;
+  download_url: string;
+  release_notes: string;
+  sha256: string;
+}
 
 // Plan 18-03 backend contract — match snake_case wire format from Tauri serde.
 // Tauri авто-маппит camelCase JS keys → snake_case Rust fields на boundary,
@@ -61,9 +99,11 @@ export interface UpdateCheckerSshParams {
  * - Когда выходит более новая sidecar версия — `sidecarDismissed = false`
  *   автоматически (key для новой версии не существует)
  *
- * Silent fail (D-2.x): GitHub API errors / Tauri invoke rejections →
- * `console.warn` only, state stays consistent (checking flags returns to false,
- * available flags остаются prior value либо false).
+ * Silent fail (D-2.x) — STILL TRUE FOR THE SIDECAR TRACK ONLY. A failed sidecar
+ * probe returns to a consistent state with nothing said. The APP track stopped
+ * being silent in Phase 30 (ABOUT-01): a failed `check_app_update_info` sets
+ * `updateInfo.checkError` so the card can name the cause instead of reporting the
+ * installed version as current.
  *
  * D-29: hook НЕ logging versions / paths / secrets в activityLog. Только
  * console.warn для debug visibility (DevTools-only).
@@ -88,56 +128,78 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
     sidecarDismissed: false,
     sidecarChecking: false,
     lastChecked: null,
+    checkError: null,
   });
+
+  /**
+   * Жив ли ещё тот, кто просил проверку.
+   *
+   * Тот же приём, что у эффекта с `getVersion()` внизу файла: флажок, который снимает уборка
+   * эффекта, и который перечитывается ПОСЛЕ ожидания. Разница только в носителе — там флажок
+   * локальная переменная эффекта, потому что и запрос живёт внутри эффекта; здесь проверку
+   * запускает кто угодно и когда угодно (кнопка на карточке, запуск приложения, суточный будильник),
+   * поэтому флажок вынесен в ссылку уровня хука. Механизм новым не является.
+   *
+   * Зачем вообще. Проверка обновлений ходит в сеть и может идти секунды. Если за это время вкладка
+   * «О программе» закрылась или закрылось окно, ответ приезжает НЕКОМУ: записывать его в состояние
+   * уже некуда, а побочные записи (отметка времени последней проверки) относятся к сеансу, который
+   * пользователь уже прервал. React 18 на такую запись не ругается — она просто теряется молча,
+   * поэтому дефект был невидимым, а не безобидным.
+   */
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    // Значение выставляется в теле эффекта, а не только начальным значением ссылки: в строгом
+    // режиме разработки эффекты гасятся и запускаются повторно, и без этой строки второй запуск
+    // застал бы флажок уже снятым.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const checkForUpdates = useCallback(async (_silent = false) => {
     setUpdateInfo(prev => ({ ...prev, checking: true }));
     try {
-      const currentVersion = await getVersion();
-      const res = await fetch(
-        "https://api.github.com/repos/ialexbond/TrustTunnelClientForWindows/releases/latest",
-        { headers: { "Accept": "application/vnd.github.v3+json" } }
-      );
-      if (!res.ok) throw new Error(`GitHub API: ${res.status}`);
-      const data = await res.json();
-      const latestTag = (data.tag_name || "").replace(/^v\.?/, "");
-      // Direction: shared compareSemver is ASCENDING (positive when a > b), the
-      // same sign the former local compareVersions returned — so `> 0` still
-      // means "latestTag is newer than the installed app" (update available).
-      const isNewer = compareSemver(latestTag, currentVersion) > 0;
-      const assets = data.assets || [];
-
-      // Find setup.exe matching this edition (Pro)
-      const asset = assets.find((a: { name: string }) => ASSET_PATTERN.test(a.name));
-
-      // Look for SHA256 checksum: matching .sha256 asset or pattern in release notes
-      const sha256Asset = asset
-        ? assets.find((a: { name: string }) => a.name === asset.name + ".sha256")
-          || assets.find((a: { name: string }) => a.name.endsWith(".sha256") && ASSET_PATTERN.test(a.name.replace(".sha256", "")))
-        : assets.find((a: { name: string }) => a.name.endsWith(".sha256"));
-      let sha256 = "";
-      if (sha256Asset) {
-        try {
-          const hashRes = await fetch(sha256Asset.browser_download_url);
-          if (hashRes.ok) sha256 = (await hashRes.text()).trim().split(/\s/)[0];
-        } catch { /* checksum fetch is optional */ }
-      } else {
-        const match = (data.body || "").match(/SHA256:\s*([a-fA-F0-9]{64})/);
-        if (match) sha256 = match[1];
+      // Phase 30: the probe runs in Rust (`check_app_update_info`), not as a
+      // cross-origin fetch from the webview. Two reasons, both load-bearing:
+      // (1) the app's own CSP names no GitHub origin in `connect-src`
+      //     (tauri.conf.json: `connect-src 'self' ipc: http://ipc.localhost`), so a
+      //     webview request to the GitHub releases API has no route the policy allows;
+      // (2) reqwest can tell a DNS/no-route failure from a server that did not
+      //     answer, which `fetch` collapses into one opaque TypeError — and that
+      //     distinction is the whole point of the failure plates on the card.
+      // Asset selection, the checksum lookup and the version comparison all moved
+      // into the command with it; the hook now only maps the answer into state.
+      const info = await invoke<AppUpdateInfoWire>("check_app_update_info");
+      // Ответ приехал — но, возможно, уже некому. Ранний выход СРАЗУ после ожидания, до разбора
+      // ответа и до любой записи: ни состояния, ни отметки времени в хранилище. Смотри пояснение
+      // у `mountedRef`.
+      if (!mountedRef.current) return;
+      // A resolved-but-unusable payload is a FAILED check, not a crash. The command
+      // is typed, but the IPC boundary is not: anything that reaches here without
+      // the shape we asked for (null, a bare string, a truncated object) used to
+      // dereference straight into a TypeError and take the whole About tree down.
+      // Routing it into the normal failure path is both safer and more honest —
+      // «сервер обновлений не ответил» is exactly what a nonsense answer means.
+      if (!info || typeof info !== "object" || typeof info.available !== "boolean") {
+        throw new Error("malformed_update_payload");
       }
 
       const nowIso = new Date().toISOString();
       setUpdateInfo(prev => ({
         ...prev,
-        available: isNewer,        // EXISTING — backwards-compat alias
-        appAvailable: isNewer,     // NEW (Phase 18)
-        latestVersion: latestTag,
-        currentVersion,
-        downloadUrl: asset?.browser_download_url || data.html_url || "",
-        sha256,
-        releaseNotes: data.body || "",
+        available: info.available,        // EXISTING — backwards-compat alias
+        appAvailable: info.available,     // NEW (Phase 18)
+        latestVersion: info.latest_version,
+        currentVersion: info.current_version,
+        downloadUrl: info.download_url,
+        sha256: info.sha256,
+        releaseNotes: info.release_notes,
         checking: false,
         lastChecked: nowIso,
+        // A successful check retires whatever the last failure was. Without this
+        // the card would keep naming a cause that is no longer true.
+        checkError: null,
       }));
       // tt_last_update_check для 24h cadence rate-limit + debug visibility
       // (CLAUDE.md localStorage table). WR-05: guard the write so a
@@ -145,9 +207,38 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
       // the rest of the path — the cadence key is best-effort debug metadata.
       try { localStorage.setItem("tt_last_update_check", nowIso); } catch { /* privacy/quota */ }
     } catch (e) {
-      // Silent fail per D-2.x — DevTools-only visibility
+      // Phase 30 (ABOUT-01) — no longer a SILENT fail. The failure used to end
+      // here in a console.warn, which left `available: false` and made the card
+      // assert «У вас установлена актуальная версия» after a check that never
+      // succeeded. Now the cause reaches the card as a discriminant.
+      //
+      // NOTE what is deliberately NOT touched: `lastChecked` and every version
+      // field keep their previous values. What the app last actually knew is
+      // still true, and the design says so explicitly — the card goes on naming
+      // the older moment rather than blanking it.
+      //
+      // The VERDICT is a different matter and IS cleared. `available` answers
+      // "is there an update right now", and a check that failed did not answer
+      // it. Leaving it standing produced a state where `checkError` and
+      // `available` were both truthy at rest — reachable by a background 24h
+      // re-check failing after a successful one, and by two overlapping manual
+      // checks settling out of order. That state makes `App.tsx` keep the
+      // update dot lit off a check that never succeeded, and it is the same
+      // class of lie as the up-to-date plate this phase removes. Only the
+      // freshness of the claim is dropped; `latestVersion` survives, so the
+      // moment a check succeeds again the dot returns without a refetch.
       console.warn("Update check failed:", e);
-      setUpdateInfo(prev => ({ ...prev, checking: false }));
+      // Отказ тоже адресован живому получателю. Запись в журнал разработчика выше оставлена
+      // намеренно — она помогает при разборе и ни на что в приложении не влияет, а вот причина
+      // отказа дальше не едет: карточки, которой её показывать, больше нет.
+      if (!mountedRef.current) return;
+      setUpdateInfo(prev => ({
+        ...prev,
+        checking: false,
+        available: false,
+        appAvailable: false,
+        checkError: toCheckFailure(e),
+      }));
     }
   }, []);
 
@@ -165,6 +256,15 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
    *
    * Silent fail (D-2.x): любая ошибка backend → state.sidecarAvailable
    * остаётся false, exception не бросается.
+   *
+   * Phase 30 — THIS FUNCTION NEVER WRITES `checkError`, and that is a decision,
+   * not an omission. `checkError` belongs to the APP update track: its two values
+   * are localized by `UpdateCard` into copy about the application's own update
+   * server. The sidecar cascade is the other update track, with its own
+   * vocabulary, its own surfaces (ProtocolUpdateSection / the sidecar update
+   * modal) and its own failure wording. Letting a failed SSH probe set
+   * `checkError` would make the «О программе» card announce a cause that has
+   * nothing to do with the application — the two vocabularies stay separate.
    */
   const checkSidecarForServer = useCallback(
     async (sshParams: UpdateCheckerSshParams) => {
@@ -181,6 +281,11 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
           keyPath: sshParams.keyPath ?? null,
           keyData: sshParams.keyData ?? null,
         });
+
+        // Тот же ранний выход, что и у проверки приложения выше. Дорожка сайдкара идёт по SSH и
+        // ждёт дольше всех, так что закрытое за это время окно здесь ВЕРОЯТНЕЕ, а не реже.
+        // Чинится вместе, потому что это один и тот же дефект, а не два похожих.
+        if (!mountedRef.current) return;
 
         // Per-version dismissal lookup (REQ-18-UPDATE-FLOW-02), per-launch
         // scope (UAT-2 / owner 6.8): read from sessionStorage so a fresh
@@ -215,6 +320,7 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
       } catch (e) {
         // Silent fail per D-2.x — DevTools-only visibility
         console.warn("Sidecar update check failed:", e);
+        if (!mountedRef.current) return;
         setUpdateInfo(prev => ({ ...prev, sidecarChecking: false }));
       }
     },

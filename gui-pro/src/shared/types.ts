@@ -44,6 +44,22 @@ export interface ReconnectProgress {
   failover?: boolean;
 }
 
+/**
+ * Why an app-update check failed, as a DISCRIMINANT — never as a message.
+ *
+ * The two members mirror the two stable ASCII reason codes minted in
+ * `src-tauri/src/commands/updater.rs` (`UPDATE_NO_INTERNET_REASON` /
+ * `UPDATE_SERVER_UNREACHABLE_REASON`). They are two members and not one because
+ * «нет интернета» and «сервер обновлений не ответил» ask the user for two
+ * different things: one is actionable here and now, the other is only waiting.
+ *
+ * There is deliberately no third member and no free-form variant. A backend token
+ * this union has never heard of is mapped to `server-unreachable` at the hook
+ * boundary rather than carried through, so nothing the network or GitHub prints
+ * can ever reach the screen as text.
+ */
+export type UpdateCheckFailure = "no-internet" | "server-unreachable";
+
 export interface UpdateInfo {
   // EXISTING — DO NOT REMOVE (backwards-compat для AboutPanel + App.tsx)
   available: boolean;            // alias of appAvailable (legacy contract)
@@ -66,6 +82,23 @@ export interface UpdateInfo {
   sidecarDismissed?: boolean;
   sidecarChecking?: boolean;
   lastChecked?: string | null;
+
+  /**
+   * (Phase 30 — ABOUT-01) Why the LAST app-update check failed, or null.
+   *
+   * Null means the last check succeeded, or none has run yet. Additive and
+   * optional in exactly the shape the Phase-18 sidecar fields above use: every
+   * existing fixture and every prop-drill through `AboutPanel` / `ServerPanel` /
+   * `ServiceTabSection` keeps compiling untouched.
+   *
+   * It carries a CAUSE CATEGORY and never a message. Nothing assigned here comes
+   * from an exception, a URL, a host or an HTTP status — see `UpdateCheckFailure`.
+   *
+   * This field is the whole reason the card can stop lying: before it existed, a
+   * check that never succeeded still left `available: false`, and the card read
+   * that as «У вас установлена актуальная версия».
+   */
+  checkError?: UpdateCheckFailure | null;
 }
 
 export interface VpnConfig {

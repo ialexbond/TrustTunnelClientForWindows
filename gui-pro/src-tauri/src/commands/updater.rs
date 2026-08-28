@@ -417,6 +417,395 @@ pub async fn check_sidecar_version(
     })
 }
 
+// ─── Phase 30: app-update failure classification (REQ ABOUT-01) ────────────
+//
+// PLACEMENT IS LOAD-BEARING. Everything below lives BEFORE the update command
+// on purpose: the D-29 invariant test slices that command's body with
+// `function_body`, which cuts at the next `\nfn ` / `\npub fn ` /
+// `\npub async fn `. A helper written AFTER the command would silently shrink
+// the window that test inspects and turn a real regression into a green run.
+
+/// Stable, secret-free ASCII reason code — the app-update probe never reached
+/// the network: name resolution failed, or the machine has no route out at all.
+///
+/// The frontend (`useUpdateChecker` → `UpdateCard`) is what localizes this; the
+/// backend never ships user-facing prose. Spelling is deliberately identical to
+/// `lifecycle::NO_INTERNET_REASON` — the same real-world condition should not
+/// have two names across two subsystems.
+///
+/// D-09/D-29: a FIXED ASCII token. It carries no host, no URL, no path, no HTTP
+/// status and no exception text, so nothing GitHub or the network stack prints
+/// can leak into the UI or the log channel through this value.
+pub const UPDATE_NO_INTERNET_REASON: &str = "no-internet";
+
+/// Stable, secret-free ASCII reason code — the machine has network, but the
+/// update server did not produce a usable answer: it did not respond in time,
+/// answered with a non-success status, or answered with something we could not
+/// parse or trust.
+///
+/// Localized by the frontend, same as the sibling above. This is also the
+/// DEFAULT verdict for every ambiguous case: its user-facing copy («С
+/// приложением всё в порядке — попробуйте позже») stays true no matter which of
+/// the ambiguous causes actually happened, whereas telling a connected user
+/// that they have no internet is a claim we would be getting wrong.
+///
+/// D-09/D-29: a FIXED ASCII token — no host, path, status code or exit code.
+pub const UPDATE_SERVER_UNREACHABLE_REASON: &str = "server-unreachable";
+
+/// Pure decision helper for the two update-check failure causes.
+///
+/// Takes OBSERVED FACTS rather than a `reqwest::Error`, because a
+/// `reqwest::Error` cannot be constructed in a unit test — the same reason
+/// `lifecycle.rs` keeps its decision helpers free of IO. `classify_reqwest_failure`
+/// below is the thin adapter that reads those facts off a real error.
+///
+/// The model, in words:
+/// - `is_timeout` DOMINATES. A timeout means packets went out and nothing came
+///   back in time, which is exactly the "resolved address that did not answer"
+///   case — the server's problem, not the network's. reqwest reports a connect
+///   PHASE timeout as both `is_connect()` and `is_timeout()`, so this is also
+///   what makes the connect+timeout combination land on server-unreachable.
+/// - Absent a timeout, `no-internet` requires POSITIVE EVIDENCE that the machine
+///   itself has no path out: the source chain naming a name-resolution failure or
+///   an unreachable/down network. That evidence is what the user can act on.
+/// - Everything else — decode failures, non-success statuses, protocol errors,
+///   and a bare connect failure with nothing in the chain to explain it — is
+///   server-unreachable.
+///
+/// Ambiguity therefore always resolves to `UPDATE_SERVER_UNREACHABLE_REASON`.
+///
+/// WHAT THIS USED TO BE, AND WHY IT CHANGED. The first implementation read
+/// `!is_timeout && (is_connect || source_names_dns)`, treating a bare
+/// `reqwest::Error::is_connect()` as sufficient evidence of "no internet". It is
+/// not: `is_connect()` is true for EVERY error raised while establishing the
+/// connection, which includes TCP `connection refused`, `connection reset`, TLS
+/// handshake failure and proxy errors — all of which happen after the address
+/// resolved and the packet left the machine. A user on working internet whose
+/// network resets the TLS handshake to `api.github.com` was told «нет интернета»
+/// and asked to check a connection that was fine. That is the app stating
+/// something it did not verify, which is the exact class of defect this phase
+/// exists to remove; `30-RESEARCH.md` §3 had already written the rule down
+/// («ambiguity resolves to server-unreachable, never to no-internet»).
+/// `is_connect` is therefore no longer an input at all: keeping a fact that
+/// carries no decision weight in the signature is an invitation to wire it back
+/// into the verdict.
+pub fn classify_update_failure(is_timeout: bool, source_names_no_network: bool) -> &'static str {
+    if !is_timeout && source_names_no_network {
+        UPDATE_NO_INTERNET_REASON
+    } else {
+        UPDATE_SERVER_UNREACHABLE_REASON
+    }
+}
+
+/// Does this error's source chain name a machine-has-no-network problem?
+///
+/// Walks `std::error::Error::source()` rather than matching on a type, because
+/// the resolver error is buried several layers down (reqwest → hyper → hyper-util
+/// → the resolver) and those layers are not part of reqwest's public API. Matching
+/// the rendered text is blunt, but the alternative is depending on private types.
+///
+/// D-29: only the CLASSIFICATION escapes this function. The message it inspects
+/// never leaves it, so a resolver that echoes the hostname cannot leak it.
+fn error_chain_names_no_network(e: &dyn std::error::Error) -> bool {
+    // Markers as printed by the Windows and POSIX resolvers and socket layers,
+    // plus hyper's own wrapper text. Lowercased before matching so casing drift
+    // does not matter.
+    //
+    // TWO GROUPS, BOTH POSITIVE EVIDENCE. Name resolution failing and having no
+    // route out are the two ways the machine itself is the reason nothing left
+    // it; `30-RESEARCH.md` §3 lists both under `no-internet`. The "no route" group
+    // is what keeps the honest, actionable «нет интернета» verdict for the
+    // Wi-Fi-off / cable-out case now that a bare `is_connect()` no longer counts.
+    //
+    // THE BARE THREE-LETTER TOKEN "dns" IS DELIBERATELY ABSENT. Matched with
+    // `contains`, it fired on any rendered text that happened to hold that
+    // sequence — a hostname like `cdns.example`, a proxy naming `dnsmasq`, a
+    // Windows message mentioning a DNS *server* while failing for some other
+    // reason — and flipped the verdict to `no-internet`. Every phrase below is
+    // specific enough to mean what it says.
+    const NO_NETWORK_MARKERS: [&str; 10] = [
+        // — name resolution
+        "name resolution",
+        "failed to lookup address",
+        "getaddrinfo",
+        "no such host",
+        "nodename nor servname",
+        "os error 11001", // WSAHOST_NOT_FOUND
+        // — no route out of the machine at all
+        "network is unreachable",
+        "network is down",
+        "no route to host",
+        "os error 10051", // WSAENETUNREACH
+    ];
+
+    let mut current: Option<&dyn std::error::Error> = Some(e);
+    while let Some(err) = current {
+        let rendered = err.to_string().to_lowercase();
+        if NO_NETWORK_MARKERS.iter().any(|m| rendered.contains(m)) {
+            return true;
+        }
+        current = err.source();
+    }
+    false
+}
+
+/// Adapter: read the observable facts off a real `reqwest::Error` and delegate.
+///
+/// Returns `String` because that is what a Tauri command's `Err` variant is; the
+/// value is always one of the two consts above, never a rendered error.
+fn classify_reqwest_failure(e: reqwest::Error) -> String {
+    classify_update_failure(e.is_timeout(), error_chain_names_no_network(&e)).to_string()
+}
+
+/// How long the update check waits for the TCP+TLS connection to be established.
+///
+/// Separate from the total budget below because the two failures are different
+/// events: a connect that never completes is a machine/route problem, a request
+/// that connects and then stalls is the server's. reqwest reports a connect-PHASE
+/// timeout as both `is_connect()` and `is_timeout()`, which `classify_update_failure`
+/// already accounts for.
+const UPDATE_CHECK_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The total budget for one update-check request, connect included.
+///
+/// WHY THIS EXISTS (phase-30 security follow-up, finding S3). `check_app_update_info`
+/// used a bare `reqwest::Client::new()`, which sets NO timeout of any kind — only the
+/// OS connect timeout applies, and that one does not fire at all once the peer has
+/// accepted the connection. A server that accepts and then never answers left the
+/// `invoke` promise unresolved for the rest of the session, and the card sat on
+/// «Проверяем обновления…» with no way out: exactly the stuck-card outcome the
+/// panic fix in `extract_sha256_from_body` removed, reached by a different route.
+/// Worse, `classify_update_failure` takes `is_timeout` as a first-class input, so
+/// that whole branch — and the truth table testing it — described a path production
+/// could not take. A configured timeout is what makes the branch real.
+///
+/// 30s is chosen against what the request IS: one small JSON document from
+/// api.github.com on a 24h background timer. Nothing here streams, so there is no
+/// legitimate slow-but-progressing case to protect. `self_update`'s DOWNLOAD client
+/// is deliberately NOT given this budget — a multi-megabyte installer on a slow link
+/// would be aborted mid-transfer, which is a regression, not a hardening.
+const UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The HTTP client the app-update check and its digest fetch share.
+///
+/// Takes its two budgets as arguments rather than reading the consts directly, so a
+/// test can drive the same builder with millisecond budgets and prove the timeout is
+/// real against a socket that accepts and never answers. A test that only asserted
+/// «the const is 30s» would prove that a number exists, not that it is wired in.
+///
+/// Returns the reason code rather than the builder error: `ClientBuilder::build`
+/// fails on TLS-backend initialisation, which the user can do nothing about and
+/// which must not put a rendered error on the wire (D-29).
+fn build_update_check_client(
+    connect_timeout: std::time::Duration,
+    total_timeout: std::time::Duration,
+) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(connect_timeout)
+        .timeout(total_timeout)
+        .build()
+        .map_err(|_| UPDATE_SERVER_UNREACHABLE_REASON.to_string())
+}
+
+/// The largest body `resolve_release_sha256` will read from a `.sha256` asset.
+///
+/// A `sha256sum` line is «<64 hex>  <filename>» — about eighty bytes. 4 KiB is
+/// two orders of magnitude of headroom for a BOM, CRLFs and a long filename, and
+/// still nowhere near a size worth pulling into memory.
+const MAX_DIGEST_BYTES: u64 = 4 * 1024;
+
+/// Is the ANNOUNCED digest body too large to be a digest?
+///
+/// The check runs on a 24h background timer and reads whatever URL the release
+/// payload names. `validate_download_url` already pins the HOST, but nothing
+/// pinned the SIZE: a release publishing a multi-gigabyte file named `*.sha256`
+/// — or a compromised release account — turned a routine background check into an
+/// out-of-memory kill of the whole app.
+///
+/// This is the CHEAP arm only: it refuses a body whose declared length is already
+/// absurd, before a single byte is read. It is not the whole guard, and it never
+/// was — a chunked response declares no length at all, so `None` reaches here and
+/// this function correctly says «nothing to refuse yet». The bound that does not
+/// depend on the server's honesty is `read_capped_digest_text`.
+fn digest_body_too_large(content_length: Option<u64>) -> bool {
+    content_length.is_some_and(|n| n > MAX_DIGEST_BYTES)
+}
+
+/// Read a response body, giving up the moment it exceeds `cap` bytes.
+///
+/// WHY THIS EXISTS (phase-30 security follow-up, finding S4). The size guard added
+/// earlier only ever consulted `Content-Length`, and the code then called
+/// `res.text()`, which reads to the end of the stream. Declaring a length is the
+/// server's choice: a chunked response declares none, `digest_body_too_large`
+/// returned false for it, and an unbounded read followed. So the cap protected
+/// against a hostile release that announces its payload and not against one that
+/// does not — which is the wrong way round, since announcing it is the honest
+/// behaviour. A guard that a hostile party opts into is not a guard.
+///
+/// Streaming chunk by chunk with a running total is what makes the bound
+/// independent of the declaration. `None` on overrun rather than a truncated
+/// string: a partial read of a digest file is not a digest, and returning the
+/// first 4 KiB would hand `is_hex_sha256` something that could coincidentally
+/// pass. The caller treats `None` exactly as it treats a malformed body — fall
+/// through to the release-body scan — so an oversized asset degrades to «this
+/// release published no usable digest» instead of killing the app.
+///
+/// D-29: the body is inspected here and never rendered anywhere.
+async fn read_capped_digest_text(mut res: reqwest::Response, cap: usize) -> Option<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match res.chunk().await {
+            Ok(Some(chunk)) => {
+                // Checked BEFORE extending, so the high-water mark is one chunk
+                // over the cap rather than the whole remaining body.
+                if buf.len() + chunk.len() > cap {
+                    return None;
+                }
+                buf.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            // A truncated or broken stream is not a digest either.
+            Err(_) => return None,
+        }
+    }
+    String::from_utf8(buf).ok()
+}
+
+/// Is this release asset THIS edition's Windows installer?
+///
+/// One definition for both readers — the installer lookup in `check_app_update_info` and the
+/// digest fallback in `resolve_release_sha256`. They used to spell the rule separately, and the
+/// copy in the fallback was simply missing, which is how a Light digest could be paired with a Pro
+/// installer. The repository ships two editions from one release, so "any installer-shaped asset"
+/// is never the right answer here.
+fn is_pro_installer_asset_name(name: &str) -> bool {
+    name.contains("Pro") && name.contains("setup") && name.ends_with(".exe")
+}
+
+/// Resolve the expected installer digest for a release, or "" when it has none.
+///
+/// Ported from `useUpdateChecker.ts` when the check moved into Rust. Every step is
+/// best-effort by design: the previous behaviour was that a missing or unreachable
+/// checksum left `expectedSha256` empty rather than failing the whole check, and a
+/// stricter rule here would turn "release without a digest" into "no update check
+/// at all". `self_update` is what decides whether an empty expectation is
+/// acceptable — that decision is not this function's to make.
+async fn resolve_release_sha256(
+    client: &reqwest::Client,
+    assets: &[serde_json::Value],
+    installer_asset_name: Option<&str>,
+    release_notes: &str,
+) -> String {
+    let digest_asset_url = installer_asset_name
+        .and_then(|installer| {
+            let expected = format!("{installer}.sha256");
+            assets.iter().find_map(|a| {
+                if a.get("name").and_then(|v| v.as_str()) == Some(expected.as_str()) {
+                    a.get("browser_download_url").and_then(|v| v.as_str())
+                } else {
+                    None
+                }
+            })
+        })
+        .or_else(|| {
+            assets.iter().find_map(|a| {
+                let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                // THE EDITION FILTER BELONGS HERE TOO. The front-end fallback this replaced kept
+                // it (`…endsWith(".sha256") && ASSET_PATTERN.test(name.replace(".sha256",""))`);
+                // the port dropped it and took the first `.sha256` asset in the release, whatever
+                // it belonged to. This repository publishes Pro and Light from the same release,
+                // so a Light digest listed first was handed to `self_update` as the expectation
+                // for a Pro installer — and `verify_checksum` then reports
+                // UPDATE_CHECKSUM_MISMATCH, i.e. a tamper-style failure for a perfectly good
+                // download. A digest belonging to the OTHER edition is strictly worse than none.
+                let base = name.strip_suffix(".sha256")?;
+                if is_pro_installer_asset_name(base) {
+                    a.get("browser_download_url").and_then(|v| v.as_str())
+                } else {
+                    None
+                }
+            })
+        });
+
+    if let Some(url) = digest_asset_url {
+        // V9 whitelist applies to the digest asset too: it is fetched from the
+        // same untrusted release payload as the installer URL.
+        if validate_download_url(url).is_ok() {
+            if let Ok(res) = client
+                .get(url)
+                .header("User-Agent", "TrustTunnel-UpdateChecker")
+                .send()
+                .await
+            {
+                // TWO ARMS, AND THE SECOND IS THE LOAD-BEARING ONE. The declared
+                // length is refused first because it costs nothing; the streaming
+                // cap is what holds when the server declares nothing at all.
+                if res.status().is_success() && !digest_body_too_large(res.content_length()) {
+                    if let Some(text) = read_capped_digest_text(res, MAX_DIGEST_BYTES as usize).await
+                    {
+                        // `sha256sum` output is "<digest>  <filename>" — take the digest.
+                        let candidate = text.split_whitespace().next().unwrap_or("").to_string();
+                        if is_hex_sha256(&candidate) {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: a "SHA256: <64 hex>" line in the release body.
+    extract_sha256_from_body(release_notes)
+}
+
+/// Is this exactly 64 hex characters — the shape of a SHA-256 digest?
+fn is_hex_sha256(s: &str) -> bool {
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Pull a `SHA256: <64 hex>` digest out of a release body, or "" when absent.
+///
+/// Scans EVERY `sha256` marker in the body and returns the first that is followed by a well-formed
+/// 64-character run, so a prose mention of the word before the real digest line cannot hide it.
+///
+/// Hand-rolled rather than regex: `regex` is not a dependency of this crate and a
+/// checksum-shaped scan is not worth adding one for.
+fn extract_sha256_from_body(body: &str) -> String {
+    // INDEX AND SLICE THE SAME STRING. This used to search `lower` and then slice `body` with the
+    // offset it found. `str::to_lowercase` is not length-preserving in UTF-8 — 'İ' (U+0130) grows
+    // 2 bytes to 3, 'ẞ' shrinks 3 to 2, the Kelvin sign (U+212A) shrinks 3 to 1 — so one such
+    // character anywhere before the marker shifted every later index. Best case the hex run came
+    // out truncated and the digest was silently lost (`self_update` then rejects the whole update
+    // as UPDATE_CHECKSUM_MISSING); worst case the offset landed on a continuation byte and the
+    // slice PANICKED inside the async command, leaving the `invoke` promise unresolved and the
+    // card stuck on «Проверяем обновления…» for the rest of the session.
+    // Scanning the lowercased copy is safe: a digest is ASCII hex, and `verify_checksum` compares
+    // case-insensitively anyway.
+    let lower = body.to_lowercase();
+
+    // EVERY OCCURRENCE, NOT JUST THE FIRST. The code this replaced took `lower.find("sha256")`,
+    // read the one hex run after it and gave up if that run was not 64 characters — a regression
+    // against the front-end regex it was ported from, which scanned the whole body. A Russian
+    // release body that says «Проверьте контрольную сумму SHA256 перед установкой» before the
+    // real `SHA256: …` line stopped at the prose mention and returned "", which silently killed
+    // the in-app update for that release. Walking on until a run is well formed restores the old
+    // behaviour and cannot loop: `from` advances past the marker every iteration.
+    let mut from = 0usize;
+    while let Some(rel) = lower[from..].find("sha256") {
+        let at = from + rel + "sha256".len();
+        let digest: String = lower[at..]
+            .chars()
+            .skip_while(|c| !c.is_ascii_hexdigit())
+            .take_while(|c| c.is_ascii_hexdigit())
+            .collect();
+        if is_hex_sha256(&digest) {
+            return digest;
+        }
+        from = at;
+    }
+    String::new()
+}
+
 /// REQ-18-UPDATE-DETECTION-01 — App version check result (Windows installer).
 ///
 /// Backend mirror existing frontend `useUpdateChecker.ts` GitHub API call —
@@ -429,6 +818,16 @@ pub struct AppUpdateInfo {
     pub available: bool,
     pub download_url: String,    // installer .exe URL либо html_url fallback
     pub release_notes: String,
+    /// Expected SHA-256 of the installer, or "" when the release publishes none.
+    ///
+    /// Phase 30: this moved here from the webview. The frontend used to fetch the
+    /// `.sha256` asset itself and hand the digest to `self_update` as
+    /// `expectedSha256`. Once the CHECK moved into Rust, leaving the CHECKSUM on a
+    /// webview request would have quietly emptied that argument — the tamper
+    /// control would have disappeared as a side effect of a refactor rather than
+    /// by anyone's decision. Empty is not an error: it means the release has no
+    /// published digest, exactly as before.
+    pub sha256: String,
 }
 
 /// REQ-18-UPDATE-DETECTION-01 — App version probe (GitHub API).
@@ -440,30 +839,47 @@ pub struct AppUpdateInfo {
 /// Asset filter: `Pro*setup*.exe$`. Если asset не найден — `download_url` fallback
 /// на `html_url` (release page) per OQ-5 — пользователь всё равно может перейти.
 ///
-/// Errors: `UPDATE_CHECK_FAILED` (silent fail per D-2.x).
+/// Errors (Phase 30 — the two localizable causes, see the consts above):
+/// `UPDATE_NO_INTERNET_REASON` when the probe never left the machine, and
+/// `UPDATE_SERVER_UNREACHABLE_REASON` for every other failure. The single
+/// collapsed token this used to return is gone: the frontend could not tell
+/// «нет интернета» from «сервер не ответил» through it, so the card silently
+/// claimed the installed version was current after a failed check. The sidecar
+/// commands in this file still use the old collapsed token — that is the OTHER
+/// update track, with its own surfaces, and it is out of this change's scope.
 #[tauri::command]
 pub async fn check_app_update_info(
     app: tauri::AppHandle,
 ) -> Result<AppUpdateInfo, String> {
     let current_version = app.package_info().version.to_string();
 
-    let client = reqwest::Client::new();
+    // Built, never defaulted — see `UPDATE_CHECK_TIMEOUT` for why the default
+    // constructor is banned here. The same client is handed to
+    // `resolve_release_sha256`, so the digest fetch inherits both budgets.
+    //
+    // The banned constructor is NOT spelled out in this comment on purpose: the
+    // guard below counts occurrences inside this function, and a comment naming
+    // the thing it forbids would report a violation of the rule it documents.
+    // Same shape as the hygiene gate's comment stripper (`about-hygiene.sh`).
+    let client = build_update_check_client(UPDATE_CHECK_CONNECT_TIMEOUT, UPDATE_CHECK_TIMEOUT)?;
     let res = client
         .get("https://api.github.com/repos/ialexbond/TrustTunnelClientForWindows/releases/latest")
         .header("User-Agent", "TrustTunnel-UpdateChecker")
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
-        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+        .map_err(classify_reqwest_failure)?;
 
+    // Everything from here on has already proved the network works — the answer
+    // itself is what is unusable, so every branch below is server-unreachable.
     if !res.status().is_success() {
-        return Err("UPDATE_CHECK_FAILED".into());
+        return Err(UPDATE_SERVER_UNREACHABLE_REASON.into());
     }
 
     let data: serde_json::Value = res
         .json()
         .await
-        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+        .map_err(|_| UPDATE_SERVER_UNREACHABLE_REASON.to_string())?;
 
     let latest_tag = data
         .get("tag_name")
@@ -471,11 +887,11 @@ pub async fn check_app_update_info(
         .unwrap_or("")
         .to_string();
     if latest_tag.is_empty() {
-        return Err("UPDATE_CHECK_FAILED".into());
+        return Err(UPDATE_SERVER_UNREACHABLE_REASON.into());
     }
 
     ssh::sanitize::validate_version(&latest_tag)
-        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+        .map_err(|_| UPDATE_SERVER_UNREACHABLE_REASON.to_string())?;
 
     let latest_version = latest_tag.trim_start_matches('v').to_string();
     let release_notes = data
@@ -495,24 +911,41 @@ pub async fn check_app_update_info(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-    let download_url = assets
+    let installer_asset_name = assets
         .iter()
-        .filter_map(|a| {
+        .find_map(|a| {
             let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let url = a.get("browser_download_url").and_then(|v| v.as_str()).unwrap_or("");
-            if name.contains("Pro") && name.contains("setup") && name.ends_with(".exe") {
-                Some(url.to_string())
+            if is_pro_installer_asset_name(name) {
+                Some(name.to_string())
             } else {
                 None
             }
+        });
+    let download_url = installer_asset_name
+        .as_ref()
+        .and_then(|name| {
+            assets.iter().find_map(|a| {
+                if a.get("name").and_then(|v| v.as_str()) == Some(name.as_str()) {
+                    a.get("browser_download_url")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                } else {
+                    None
+                }
+            })
         })
-        .next()
         .unwrap_or(html_url);
 
     if !download_url.is_empty() {
         validate_download_url(&download_url)
-            .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+            .map_err(|_| UPDATE_SERVER_UNREACHABLE_REASON.to_string())?;
     }
+
+    // Installer integrity expectation — see the doc comment on `AppUpdateInfo::sha256`.
+    // Same three-step resolution the frontend used to perform: the digest asset
+    // that belongs to THIS installer, else any published digest asset, else a
+    // 64-hex string in the release body. A missing digest is not an error.
+    let sha256 = resolve_release_sha256(&client, &assets, installer_asset_name.as_deref(), &release_notes).await;
 
     let available = compare_semver(&current_version, &latest_version) < 0;
 
@@ -523,6 +956,7 @@ pub async fn check_app_update_info(
         available,
         download_url,
         release_notes,
+        sha256,
     })
 }
 
@@ -1174,6 +1608,467 @@ mod sidecar_version_tests {
     }
 }
 
+// ─── Phase 30: update-failure classification (ABOUT-01) ────────────────────
+//
+// The FULL input space, one #[test] per row plus one test over the whole table:
+// two booleans is four rows, and enumerating all four proves the "ambiguity
+// resolves to server-unreachable" rule instead of sampling it. Every assertion
+// names a const rather than a quoted string — the same discipline
+// `sidecar_version_tests` follows — so renaming a token becomes a compile error
+// here rather than a silent divergence from the front end's lookup table.
+//
+// THESE TESTS USED TO LOCK IN THE WRONG RULE. The first version asserted the
+// implemented eight-row table, in which a bare `is_connect()` meant no-internet.
+// That contradicted `30-RESEARCH.md` §3, and because the tests were written from
+// the implementation rather than from the rule, they could not catch it: they
+// were green over a card telling connected users they had no internet.
+#[cfg(test)]
+mod update_failure_classification_tests {
+    use super::*;
+
+    #[test]
+    fn a_named_resolution_failure_is_no_internet() {
+        // The resolver could not turn the hostname into an address: no DNS server
+        // answered, or the machine has no working resolver at all. This is POSITIVE
+        // evidence that nothing left the box, and the only kind that earns the
+        // «нет интернета» verdict.
+        assert_eq!(
+            classify_update_failure(false, true),
+            UPDATE_NO_INTERNET_REASON
+        );
+    }
+
+    #[test]
+    fn a_connect_failure_with_nothing_in_the_chain_is_server_unreachable() {
+        // REGRESSION. This used to be no-internet, on the reading that
+        // `reqwest::Error::is_connect()` means the request never got out of the
+        // machine. It does not: `is_connect()` covers TCP refused, TCP reset, TLS
+        // handshake failure and proxy errors, all of which happen AFTER the address
+        // resolved and the packet left. Telling a connected user «нет интернета» is
+        // a claim the app cannot support, so an unexplained connect failure takes
+        // the honest default instead — its copy («С приложением всё в порядке —
+        // попробуйте позже») stays true whichever of the ambiguous causes it was.
+        assert_eq!(
+            classify_update_failure(false, false),
+            UPDATE_SERVER_UNREACHABLE_REASON
+        );
+    }
+
+    #[test]
+    fn a_timeout_outranks_a_no_network_marker() {
+        // A CONNECT-PHASE timeout: reqwest reports is_connect() and is_timeout()
+        // together. The address resolved and the handshake was attempted — the far
+        // end simply never answered, which is the server's problem, not the
+        // network's. A stale marker further down the chain is noise here.
+        assert_eq!(
+            classify_update_failure(true, true),
+            UPDATE_SERVER_UNREACHABLE_REASON
+        );
+    }
+
+    #[test]
+    fn a_plain_timeout_is_server_unreachable() {
+        // The update server accepted the connection and then went quiet, or a
+        // filtered port swallowed the handshake.
+        assert_eq!(
+            classify_update_failure(true, false),
+            UPDATE_SERVER_UNREACHABLE_REASON
+        );
+    }
+
+    #[test]
+    fn only_a_named_cause_can_reach_the_no_internet_verdict() {
+        // The rule stated as a whole, over the FULL input space: two booleans is
+        // four rows, and exactly one of them may say «нет интернета». Enumerating
+        // them here proves «ambiguity resolves to server-unreachable» rather than
+        // sampling it — and it is the assertion that fails if anyone widens the
+        // no-internet arm again.
+        let no_internet_rows = [(false, true), (false, false), (true, true), (true, false)]
+            .into_iter()
+            .filter(|(is_timeout, names_no_network)| {
+                classify_update_failure(*is_timeout, *names_no_network) == UPDATE_NO_INTERNET_REASON
+            })
+            .count();
+        assert_eq!(no_internet_rows, 1);
+    }
+}
+
+// ─── The timeout that makes the `is_timeout` branch reachable (S3) ─────────
+//
+// The truth table above is exhaustive over `classify_update_failure`'s inputs,
+// and two of its four rows describe a timeout — but until this change the update
+// check ran on a bare `reqwest::Client::new()`, which configures no timeout at
+// all. Those two rows therefore tested a path production could not take, and the
+// real behaviour was the opposite of what the table implied: a server that
+// accepted the connection and never answered hung the `invoke` promise for the
+// session and pinned the card on «Проверяем обновления…».
+//
+// WHY THIS IS A SOCKET TEST AND NOT A GREP. Asserting «the source contains
+// `.timeout(`» proves a string exists; asserting «UPDATE_CHECK_TIMEOUT == 30s»
+// proves a number exists. Neither proves the budget is WIRED INTO the client the
+// command uses. So the test drives the production builder — the same function
+// `check_app_update_info` calls — against a listener that accepts the connection
+// and then deliberately says nothing, which is precisely the failure the OS
+// connect timeout cannot catch.
+#[cfg(test)]
+mod update_check_timeout_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A socket that completes the TCP handshake and then never writes a byte.
+    ///
+    /// Returns the bound address. The accept loop holds each connection open in a
+    /// detached task rather than dropping it: dropping the `TcpStream` would send
+    /// FIN and the client would fail immediately with a connection error, which is
+    /// a DIFFERENT failure from the one under test and would let a client with no
+    /// timeout pass.
+    async fn silent_listener() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                held.push(stream);
+            }
+        });
+        addr
+    }
+
+    /// Send one request at millisecond budgets and return the error it must produce.
+    ///
+    /// THE OUTER BOUND IS NOT BELT-AND-BRACES, IT IS THE FAILURE MODE. Without it,
+    /// a client built with no total budget — the very regression these tests exist
+    /// to catch — would not fail the test, it would HANG it, and a hanging test in
+    /// CI reads as an infrastructure problem rather than as the defect it is.
+    /// Five seconds against a 300 ms budget is a sixteen-fold margin, so a slow
+    /// machine cannot trip it while a missing budget always does.
+    ///
+    /// Millisecond budgets keep the run under a second. The production consts are
+    /// asserted separately; what these prove is that the BUILDER wires whatever
+    /// budget it is given into the client the command uses.
+    async fn error_from_a_silent_server() -> reqwest::Error {
+        let addr = silent_listener().await;
+        let client =
+            build_update_check_client(Duration::from_millis(500), Duration::from_millis(300))
+                .expect("the update-check client must build");
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            client
+                .get(format!("http://{addr}/repos/x/y/releases/latest"))
+                .send(),
+        )
+        .await
+        .expect(
+            "the request never came back — the client was built without a total timeout, \
+             which is exactly the unbounded wait that pinned the card on «Проверяем обновления…»",
+        );
+
+        outcome.expect_err("a silent server must not resolve — that is the whole point")
+    }
+
+    #[tokio::test]
+    async fn a_server_that_accepts_and_never_answers_times_out() {
+        let err = error_from_a_silent_server().await;
+        assert!(
+            err.is_timeout(),
+            "the request must fail as a TIMEOUT, not as some other error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_check_is_reported_as_server_unreachable() {
+        // The other half of the fix: the branch is now reachable AND it lands on
+        // the verdict `30-RESEARCH.md` §3 mandates for it. «С приложением всё в
+        // порядке — попробуйте позже» is true of a server that went quiet;
+        // «нет интернета» would be the app stating something it did not verify.
+        let err = error_from_a_silent_server().await;
+        assert_eq!(
+            classify_reqwest_failure(err),
+            UPDATE_SERVER_UNREACHABLE_REASON
+        );
+    }
+
+    #[test]
+    fn the_production_budgets_are_finite_and_sane() {
+        // A budget of zero would be a client that can never succeed; an hour-long
+        // one would be indistinguishable from the unbounded wait this replaced.
+        // The check is one small JSON document on a 24h background timer, so the
+        // upper bound is generous by an order of magnitude and still bounded.
+        assert!(UPDATE_CHECK_CONNECT_TIMEOUT > Duration::ZERO);
+        assert!(UPDATE_CHECK_TIMEOUT > UPDATE_CHECK_CONNECT_TIMEOUT);
+        assert!(UPDATE_CHECK_TIMEOUT <= Duration::from_secs(60));
+    }
+
+    #[test]
+    fn the_update_check_does_not_build_an_untimed_client() {
+        // Belt to the socket test's braces, and the arm that survives a refactor:
+        // the socket test proves the BUILDER works, this proves the COMMAND uses
+        // it. Someone reintroducing `reqwest::Client::new()` inside
+        // `check_app_update_info` would leave both socket tests green.
+        let source = include_str!("./updater.rs");
+        let body = source
+            .split("pub async fn check_app_update_info")
+            .nth(1)
+            .and_then(|s| s.split("\n// ─── Phase 19").next())
+            .unwrap_or("");
+        assert!(
+            !body.is_empty(),
+            "check_app_update_info not found — this guard has lost its subject"
+        );
+        assert!(
+            !body.contains("reqwest::Client::new()"),
+            "check_app_update_info must build its client through build_update_check_client — \
+             `Client::new()` configures no timeout and reopens the stuck-card defect"
+        );
+        assert!(
+            body.contains("build_update_check_client("),
+            "check_app_update_info must obtain its client from build_update_check_client"
+        );
+    }
+}
+
+// ─── The digest read is bounded even when nothing is declared (S4) ────────
+//
+// `digest_body_too_large` is a pure function over `Option<u64>` and its unit
+// tests were always green — but they measured the ANNOUNCEMENT, and a hostile
+// release simply does not have to make one. These tests exercise the read
+// itself, over a real socket, against a server that declares no length and then
+// never stops sending: the exact case the declared-length cap lets through.
+#[cfg(test)]
+mod digest_read_cap_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// How many 1 KiB filler chunks the oversized fixture sends: 64 KiB, sixteen
+    /// times `MAX_DIGEST_BYTES`.
+    ///
+    /// WHY A FINITE NUMBER AND NOT AN ENDLESS STREAM. The first version of this
+    /// fixture wrote forever, on the reasoning that «unbounded» is the property
+    /// under test. It hung the test binary: the client stops reading at the cap
+    /// and drops the response, but the writer task and the pooled connection are
+    /// still on the test's runtime, and the runtime cannot be torn down under
+    /// them. A test that hangs reports as CI infrastructure trouble, not as a
+    /// defect — the exact failure mode the timeout work in this same file just
+    /// removed from production.
+    ///
+    /// A finite body loses nothing, because the property is not «the server never
+    /// stops», it is «the reader stops at the cap». A reader without the cap
+    /// returns a 64 KiB string here and the `is_none()` assertion fails; a reader
+    /// with it returns `None`. The mutation check below confirms exactly that.
+    const OVERSIZED_CHUNKS: usize = 64;
+
+    /// An HTTP/1.1 server that answers with `Transfer-Encoding: chunked`, sends
+    /// `body`, and then optionally sends `OVERSIZED_CHUNKS` filler chunks.
+    ///
+    /// Chunked on purpose: it is the standard way to answer WITHOUT a
+    /// `Content-Length`, so `res.content_length()` is `None` and the cheap arm of
+    /// the guard cannot fire. Whatever these tests prove, they prove about the
+    /// streaming arm alone.
+    async fn chunked_server(body: &'static str, keep_sending: bool) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    // DRAIN THE REQUEST FIRST, even though its contents are irrelevant
+                    // to what is measured. Skipping this made the test flaky under the
+                    // full parallel suite (~1 run in 3): closing a socket that still has
+                    // unread received data makes Windows send RST instead of FIN, and the
+                    // RST discards the response the client had not finished reading. The
+                    // symptom was `send().await.unwrap()` panicking on a connection
+                    // reset — a fixture defect that looks exactly like a product defect,
+                    // which is the worst kind of flake to leave in a security test.
+                    let mut request = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while !request.ends_with(b"\r\n\r\n") {
+                        match stream.read(&mut byte).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(_) => request.push(byte[0]),
+                        }
+                    }
+                    let head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+                    if stream.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    let first = format!("{:x}\r\n{}\r\n", body.len(), body);
+                    if stream.write_all(first.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    if keep_sending {
+                        // 1 KiB per chunk, `OVERSIZED_CHUNKS` of them.
+                        let filler = "x".repeat(1024);
+                        let chunk = format!("400\r\n{filler}\r\n");
+                        for _ in 0..OVERSIZED_CHUNKS {
+                            if stream.write_all(chunk.as_bytes()).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    let _ = stream.write_all(b"0\r\n\r\n").await;
+                });
+            }
+        });
+        addr
+    }
+
+    async fn read_from(addr: std::net::SocketAddr) -> Option<String> {
+        let client = reqwest::Client::new();
+        let res = client.get(format!("http://{addr}/x.sha256")).send().await.unwrap();
+        // The premise of the whole test: the server declared nothing, so the
+        // declared-length arm has no opinion here.
+        assert_eq!(
+            res.content_length(),
+            None,
+            "the fixture must answer WITHOUT a Content-Length, or it is testing the other arm"
+        );
+        assert!(!digest_body_too_large(res.content_length()));
+        read_capped_digest_text(res, MAX_DIGEST_BYTES as usize).await
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_undeclared_digest_body_still_reads() {
+        // The guard must not defend by breaking the normal case: a real
+        // `sha256sum` line is about eighty bytes and may perfectly well arrive
+        // chunked.
+        const LINE: &str =
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  Setup.exe\n";
+        let addr = chunked_server(LINE, false).await;
+        let text = read_from(addr).await.expect("a short body must read normally");
+        assert_eq!(text, LINE);
+        assert!(is_hex_sha256(text.split_whitespace().next().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn an_undeclared_oversized_body_is_refused_at_the_cap() {
+        // 64 KiB arriving with no declared length: `digest_body_too_large` has
+        // nothing to refuse (asserted inside `read_from`), so if this comes back
+        // as a string, the only bound on the read was the server's goodwill.
+        let addr = chunked_server("start", true).await;
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), read_from(addr))
+            .await
+            .expect(
+                "the read never returned — an undeclared body is being read without bound, \
+                 which is the defect this cap exists to remove",
+            );
+        assert!(
+            outcome.is_none(),
+            "an oversized body must yield None, not a truncated string that could \
+             coincidentally look like a digest"
+        );
+    }
+}
+
+// ─── Phase 30: installer digest resolution (T-30-03) ───────────────────────
+//
+// The digest lookup moved out of the webview and into Rust; without these, the
+// only thing standing between a release body and `self_update`'s tamper control
+// would be hand-reading. The network half (`resolve_release_sha256`) needs a
+// live client and is covered by the end-of-phase manual check; the parsing half
+// below is where a silent regression would actually hide.
+#[cfg(test)]
+mod update_sha256_tests {
+    use super::*;
+
+    const VALID: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    #[test]
+    fn accepts_exactly_sixty_four_hex_characters() {
+        assert!(is_hex_sha256(VALID));
+        assert!(!is_hex_sha256(&VALID[..63])); // one short
+        assert!(!is_hex_sha256(&format!("{VALID}a"))); // one long
+        assert!(!is_hex_sha256("")); // the "no digest published" value
+        assert!(!is_hex_sha256(&VALID.replace('e', "z"))); // not hex
+    }
+
+    #[test]
+    fn extracts_a_digest_from_a_release_body() {
+        let body = format!("## What's new\n\n- fixes\n\nSHA256: {VALID}\n");
+        assert_eq!(extract_sha256_from_body(&body), VALID);
+    }
+
+    #[test]
+    fn tolerates_case_and_punctuation_around_the_marker() {
+        let body = format!("sha256 = {VALID}");
+        assert_eq!(extract_sha256_from_body(&body), VALID);
+    }
+
+    #[test]
+    fn a_digest_body_larger_than_a_digest_is_refused() {
+        // The real thing is ~80 bytes; the cap is 4 KiB. Unknown length is still
+        // accepted (chunked responses declare none), which is the deliberate limit
+        // of this guard, not an oversight.
+        assert!(!digest_body_too_large(Some(80)));
+        assert!(!digest_body_too_large(Some(MAX_DIGEST_BYTES)));
+        assert!(!digest_body_too_large(None));
+        assert!(digest_body_too_large(Some(MAX_DIGEST_BYTES + 1)));
+        assert!(digest_body_too_large(Some(4 * 1024 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn only_this_editions_installer_is_recognised() {
+        // REGRESSION for the digest fallback: it used to accept the first `.sha256` asset in the
+        // release regardless of which edition it belonged to. Both editions ship from one release,
+        // so the Light digest paired with the Pro installer turned a good download into
+        // UPDATE_CHECKSUM_MISMATCH — a tamper warning for a file nobody tampered with.
+        assert!(is_pro_installer_asset_name(
+            "TrustTunnel Client Pro_3.0.0_x64-setup.exe"
+        ));
+        assert!(!is_pro_installer_asset_name(
+            "TrustTunnel Client Light_2.7.0_x64-setup.exe"
+        ));
+        // Not an installer at all, and the digest file's own name (the caller strips `.sha256`
+        // before asking).
+        assert!(!is_pro_installer_asset_name("trusttunnel-v1.0.49-linux-x86_64.tar.gz"));
+        assert!(!is_pro_installer_asset_name(
+            "TrustTunnel Client Pro_3.0.0_x64-setup.exe.sha256"
+        ));
+    }
+
+    #[test]
+    fn a_prose_mention_before_the_digest_line_does_not_hide_it() {
+        // REGRESSION. The scan used to stop at the FIRST `sha256` in the body. This body — the
+        // ordinary shape of a Russian release description for this project — mentions the word in
+        // a sentence before the line that carries the value, and the old code returned "", which
+        // `self_update` turns into UPDATE_CHECKSUM_MISSING and a dead in-app update.
+        let body = format!(
+            "Проверьте контрольную сумму SHA256 перед установкой.\n\nSHA256: {VALID}\n"
+        );
+        assert_eq!(extract_sha256_from_body(&body), VALID);
+
+        // Two mentions where neither of the first two is well formed.
+        let noisy = format!("sha256 sums:\nSHA256: deadbeef\nSHA256 = {VALID}");
+        assert_eq!(extract_sha256_from_body(&noisy), VALID);
+    }
+
+    #[test]
+    fn a_character_that_changes_length_when_lowercased_does_not_break_the_scan() {
+        // REGRESSION. The scan searched the lowercased copy and sliced the ORIGINAL. 'İ' is two
+        // bytes and lowercases to three, so the marker sat at byte 3 of `body` and byte 4 of
+        // `lower`; slicing `body` at 10 landed inside the em dash and PANICKED. 'ẞ' shifts the
+        // other way and silently truncated the hex run instead.
+        // Written as escapes rather than as literals so the intent survives any editor or
+        // encoding that would otherwise normalize them away.
+        let grows = format!("\u{0130} SHA256\u{2014} {VALID}"); // 'İ' 2 bytes -> 3, then an em dash
+        assert_eq!(extract_sha256_from_body(&grows), VALID);
+
+        let shrinks = format!("\u{1E9E} SHA256: {VALID}"); // 'ẞ' 3 bytes -> 2
+        assert_eq!(extract_sha256_from_body(&shrinks), VALID);
+
+        let kelvin = format!("\u{212A} SHA256: {VALID}"); // KELVIN SIGN, 3 bytes -> 1
+        assert_eq!(extract_sha256_from_body(&kelvin), VALID);
+    }
+
+    #[test]
+    fn a_body_without_a_digest_yields_empty_not_garbage() {
+        // "Missing digest" must come back as "", never as a truncated or
+        // neighbouring hex run that `self_update` would then compare against.
+        assert_eq!(extract_sha256_from_body("no checksum here"), "");
+        assert_eq!(extract_sha256_from_body("SHA256: deadbeef"), "");
+        assert_eq!(extract_sha256_from_body(""), "");
+    }
+}
+
 #[cfg(test)]
 mod d29_invariant_tests {
     /// D-29 invariant — check_sidecar_version + check_app_update_info MUST NOT
@@ -1190,12 +2085,21 @@ mod d29_invariant_tests {
     /// добавлении emit_log в новую функцию.
     fn function_body(source: &str, signature: &str) -> String {
         let after_sig = source.split(signature).nth(1).unwrap_or("");
-        // function body ends at next `pub async fn`, `pub fn`, или конце модуля.
+        // function body ends at next `pub async fn`, `pub fn`, `async fn`, `fn`, или конце модуля.
+        //
+        // `\nasync fn ` was missing here. A private `async fn` written after a command silently
+        // joined that command's window — which sounds harmless, but the window is what the D-29
+        // grep inspects, and a window that swallows an unrelated function is a window nobody can
+        // reason about. It is also the mirror of the real hole this splitter had: see the helper
+        // test below.
         let body_until_next = after_sig
             .split("\npub async fn ")
             .next()
             .unwrap_or("")
             .split("\npub fn ")
+            .next()
+            .unwrap_or("")
+            .split("\nasync fn ")
             .next()
             .unwrap_or("")
             .split("\nfn ")
@@ -1230,6 +2134,66 @@ mod d29_invariant_tests {
             !body.contains("emit_log("),
             "D-29: check_app_update_info must NOT call emit_log (use eprintln! for debug only)"
         );
+    }
+
+    /// The command's CALL GRAPH, not just its lexical window.
+    ///
+    /// The placement banner above the phase-30 helpers argues — correctly — that writing them
+    /// BEFORE `check_app_update_info` leaves that command's `function_body` window intact. What it
+    /// does not say is that the window then contains none of them, and two of those helpers are
+    /// precisely the material D-29 exists to keep out of the log channel:
+    /// `resolve_release_sha256` handles a URL and an HTTP response body, and
+    /// `error_chain_names_no_network` renders error strings that may carry the hostname. An
+    /// `emit_log(...)` added inside either one is executed by the command and was invisible to the
+    /// test that claims to protect it.
+    ///
+    /// WHY THE LIST GREW (phase-30 security follow-up, finding S5). The docstring said CALL GRAPH
+    /// while the array named TWO of roughly a dozen helpers the command actually reaches, and the
+    /// unnamed ones handle exactly the material the invariant is about: `extract_sha256_from_body`
+    /// scans a third-party release body, `validate_download_url` handles the URL,
+    /// `read_capped_digest_text` streams an untrusted response. The invariant HELD — the whole
+    /// file emits nothing — so nothing was leaking; what was weaker than its own wording was the
+    /// regression detection, and a guard whose green means less than a reader takes it for is
+    /// worse than an honest narrow one. Widening the coverage rather than narrowing the wording is
+    /// the choice that keeps D-29 (secrets and untrusted payloads never reach the log channel)
+    /// actually enforced.
+    ///
+    /// SIGNATURES CARRY THEIR FIRST PARAMETER wherever a bare `fn name` also occurs earlier in the
+    /// file — in a doc comment, a banner or another test. `function_body` takes the text after the
+    /// FIRST match, so a needle that hits prose first would silently measure the wrong window and
+    /// report a vacuous pass. The `!body.is_empty()` arm is what catches a needle that a rename
+    /// has stopped matching altogether.
+    #[test]
+    fn app_update_check_helpers_do_not_call_activity_log_or_emit_log() {
+        let source = include_str!("./updater.rs");
+        for sig in [
+            "async fn resolve_release_sha256",
+            "fn error_chain_names_no_network",
+            "async fn read_capped_digest_text",
+            "fn extract_sha256_from_body(body: &str)",
+            "fn validate_download_url(url: &str)",
+            "fn build_update_check_client(",
+            "fn digest_body_too_large(content_length",
+            "fn is_pro_installer_asset_name(name: &str)",
+            "fn is_hex_sha256(s: &str)",
+            "fn compare_semver(a: &str, b: &str)",
+            "fn classify_reqwest_failure(e: reqwest::Error)",
+            "fn classify_update_failure(is_timeout: bool",
+        ] {
+            let body = function_body(source, sig);
+            assert!(
+                !body.is_empty(),
+                "D-29: helper {sig} not found — the guard has lost its subject and cannot measure anything"
+            );
+            assert!(
+                !body.contains("activity_log"),
+                "D-29: {sig} must NOT call activity_log"
+            );
+            assert!(
+                !body.contains("emit_log("),
+                "D-29: {sig} must NOT call emit_log (use eprintln! for debug only)"
+            );
+        }
     }
 }
 
