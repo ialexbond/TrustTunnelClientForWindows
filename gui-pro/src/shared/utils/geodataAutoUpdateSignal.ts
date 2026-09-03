@@ -9,8 +9,11 @@
  * session. Turning auto-update OFF then suppressed the badge forever — precisely the case D-05 says
  * the badge exists for.
  *
- * The setting is persisted on the RUST side (D-12), so `useFeatureToggles`' localStorage +
- * `storage`-event sync is unusable here. What carries over is its window-CustomEvent idiom: the
+ * The setting is persisted on the RUST side (D-12), so a localStorage + `storage`-event sync is
+ * unusable here. (That sentence used to name `useFeatureToggles`, the app's toggle store; it was
+ * deleted on 2026-09-03 together with its only key, «Блокировка сайтов». The idiom below outlived
+ * it, which is why it is now described rather than cited.) What carries over is the
+ * window-CustomEvent idiom: the
  * writer announces the change, every live reader re-reads from the backend (the command stays the
  * single source of truth — the event carries no payload deliberately, so a listener can never end
  * up trusting a value the backend refused to persist).

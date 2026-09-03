@@ -1,13 +1,24 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { formatError } from "../utils/formatError";
+import { normalizePath, samePath } from "../utils/samePath";
+import { localizeVpnError } from "./vpnEventHelpers";
 import type { VpnConfig, VpnStatus } from "../types";
+import type { i18n as I18nType } from "i18next";
 
 interface UseAutoConnectParams {
   config: VpnConfig;
   status: VpnStatus;
   setStatus: React.Dispatch<React.SetStateAction<VpnStatus>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
+  /**
+   * 30.1 regression defect 1: auto-connect is a REAL door to the refused connect — on launch it
+   * invokes `vpn_connect` with the manifest's last-used path, which is exactly the path a moved
+   * data root leaves behind. Its catch used to render `formatError(e)` raw, so the guard's English
+   * sentence (and now its ASCII reason code) would reach the banner untranslated. Injected the way
+   * `useVpnActions` takes it rather than imported from the singleton, so a test can hand in its own
+   * instance and the hook keeps no module-level global.
+   */
+  i18n: I18nType;
   /**
    * F29: deliver the honest launch-time DIRECT ping (measured right before `vpn_connect`) into the card
    * freeze cache so the auto-connected card shows the real ping instead of «—» / a cold-boot 200/500.
@@ -82,6 +93,7 @@ export function useAutoConnect({
   setStatus,
   setError,
   seedConfigPing,
+  i18n,
 }: UseAutoConnectParams) {
   const autoConnectDone = useRef(false);
 
@@ -185,10 +197,25 @@ export function useAutoConnect({
         // "what the UI shows active". Fall back to the manifest last-used only when no
         // app-level active path exists (cold start before any in-session switch).
         const activePath = config.configPath;
+        // Raw-path-comparison class (30.1 class sweep — site 2 of 3). Two comparisons live here
+        // and they deliberately use DIFFERENT helpers:
+        //
+        //   • the membership test asks «is this the same file?» — `samePath`. With a byte `===`
+        //     the app-level active config looked ABSENT from a manifest that merely spelled its
+        //     path differently, so this whole preference was skipped and auto-connect launched
+        //     the manifest's last-used server instead of the one the UI shows active.
+        //   • the inequality asks «are these two paths different?» — and it must NOT be a negated
+        //     `samePath`, because `samePath` answers false whenever EITHER side is missing. A
+        //     negation would turn «we do not know» into «they differ», which is a different bug in
+        //     the same line. Compare the two normalized values instead; `normalizePath` is
+        //     exported for exactly this, so both forms derive equality the same way.
+        //
+        // Sites 1 and 3 of the class: `useVpnActions.markLastUsed`, `useConfigLifecycle`'s
+        // external-delete watcher.
         if (
           activePath &&
-          activePath !== lastUsedPath &&
-          list?.some((c) => c.path === activePath)
+          normalizePath(activePath) !== normalizePath(lastUsedPath ?? "") &&
+          list?.some((c) => samePath(c.path, activePath))
         ) {
           lastUsedPath = activePath;
         }
@@ -248,7 +275,7 @@ export function useAutoConnect({
         });
       } catch (e) {
         if (cancelled) return;
-        setError(formatError(e));
+        setError(localizeVpnError(e, i18n));
         setStatus("error");
       }
     };
@@ -269,9 +296,11 @@ export function useAutoConnect({
     };
   // WR-05: `config.configPath` is now a genuine read inside the effect (the auto-connect
   // target is reconciled against it), so it is a legitimate, non-hidden dependency. The
-  // other values read (`config.logLevel`, the setters) are stable for a single one-shot
-  // run guarded by `autoConnectDone`; the disable documents that the one-shot semantics
-  // are intentional and we do not want the effect to re-fire on logLevel/setter identity.
+  // other values read (`config.logLevel`, the setters, and the injected `i18n` instance —
+  // a process-wide singleton whose identity does not change on a language switch) are stable
+  // for a single one-shot run guarded by `autoConnectDone`; the disable documents that the
+  // one-shot semantics are intentional and we do not want the effect to re-fire on
+  // logLevel/setter/i18n identity.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.configPath]);
 }

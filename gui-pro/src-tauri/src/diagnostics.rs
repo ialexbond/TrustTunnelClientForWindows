@@ -2,7 +2,7 @@
 use std::os::windows::process::CommandExt;
 
 use crate::logging::sanitize;
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 
 /// Run a PowerShell command and return stdout (empty string on failure).
 #[cfg(windows)]
@@ -70,7 +70,7 @@ pub fn collect_system_info() -> String {
     }
 
     // VPN config (sanitized)
-    let config_path = portable_data_dir().join("trusttunnel_client.toml");
+    let config_path = user_data_dir().join("trusttunnel_client.toml");
     if config_path.exists() {
         if let Ok(config_text) = std::fs::read_to_string(&config_path) {
             let sanitized = sanitize(&config_text);
@@ -80,13 +80,31 @@ pub fn collect_system_info() -> String {
         info.push_str("--- VPN Config ---\nNo config file found\n\n");
     }
 
+    // Where the app's data actually lives, and whether the primary lookup answered.
+    //
+    // Reported so a machine on which `current_exe()` could not be resolved says so out loud in
+    // the diagnostics the user can copy, instead of degrading to the process working directory
+    // in silence — which presents as «my servers disappeared» with no error anywhere.
+    // The path is a directory name, never file contents — nothing here can carry a credential.
+    {
+        let (root, origin) = crate::ssh::user_data_dir_with_origin();
+        info.push_str(&format!(
+            "--- Data Root ---\n{}\nresolved from: {origin:?}\n\n",
+            root.display()
+        ));
+    }
+
     // Disk space
     #[cfg(windows)]
     {
-        let exe_drive = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.to_str().map(|s| s.chars().next().unwrap_or('C').to_string()));
-        let drive = exe_drive.unwrap_or_else(|| "C".to_string());
+        // Measures the volume the DATA lives on, resolved through the shared helper. Those are
+        // the same volume today, but they will not be once the install moves (phases 31/32:
+        // Program Files on C:, a redirected user profile on D:), and the one that can actually
+        // fill up — logs, geodata `.dat` files, the webview profile — is the data volume.
+        let data_drive = user_data_dir()
+            .to_str()
+            .map(|s| s.chars().next().unwrap_or('C').to_string());
+        let drive = data_drive.unwrap_or_else(|| "C".to_string());
         let space = ps(&format!(
             "Get-PSDrive {drive} | Select-Object @{{N='Free(GB)';E={{[math]::Round($_.Free/1GB,2)}}}}, @{{N='Used(GB)';E={{[math]::Round($_.Used/1GB,2)}}}} | Format-List | Out-String"
         ));
@@ -98,7 +116,7 @@ pub fn collect_system_info() -> String {
 
 /// Write system diagnostics snapshot to logs/system.txt.
 pub fn write_system_snapshot() {
-    let dir = portable_data_dir().join("logs");
+    let dir = user_data_dir().join("logs");
     if std::fs::create_dir_all(&dir).is_err() {
         eprintln!("[diagnostics] Failed to create logs directory");
         return;

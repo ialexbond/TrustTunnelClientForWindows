@@ -28,10 +28,16 @@ export interface SettingsCardProps {
  * light-theme foreground. That gap is banked as A11Y-27-01 and is deliberately NOT fixed here, so
  * substituting a `-500` would silently ship the known-failing colour.
  *
- * `warning` is reserved for «Экспериментальные функции» — the only card on the tab painted in that
- * family, and that exclusivity IS the signal. It tints the header tile ONLY: the card shell stays
- * neutral, because a whole card painted amber reads as an error state rather than as "handle with
- * care".
+ * `warning` tints the header tile ONLY: the card shell stays neutral, because a whole card painted
+ * amber reads as an error state rather than as "handle with care".
+ *
+ * IT CURRENTLY HAS NO USER. It existed for «Экспериментальные функции», and that card was removed
+ * on 2026-09-03 together with its one row — «Блокировка сайтов», a feature that never worked. The
+ * variant stays because the RULE it encodes is still the design's: warning tone means «this card is
+ * not like the others», and it says that only while exactly one card on a tab wears it. The next
+ * card that needs it inherits the rule, not a fresh invention — which is why deleting the variant
+ * would cost more than keeping it. That there is no such card today is asserted, not assumed:
+ * `AppSettingsPanel.test.tsx` fails if a warning tile appears on the tab.
  *
  * Lifted from the Phase-27 story tier (`components/_story/settingsDemos.tsx`) unchanged apart from
  * its import path — `_story/` never ships, so the approved design could not be drawn from there.

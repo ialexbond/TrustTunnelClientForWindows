@@ -11,12 +11,16 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 
-/// Validate that a path lives inside the app's portable data directory (next to the exe).
+/// Validate that a path lives inside the app's per-user data root (`ssh::user_data_dir`).
+///
+/// D-03 C: the root MOVED out of the install directory. This guard derives from the same helper
+/// the data does, deliberately — a guard left pointing at the executable's directory would
+/// refuse every config the app itself had just written, i.e. every connect would fail.
 /// Prevents path-traversal where the frontend could read/write arbitrary files over IPC.
 pub fn validate_app_path(path: &str) -> Result<(), String> {
-    validate_path_in_dir(path, &portable_data_dir())
+    validate_path_in_dir(path, &user_data_dir())
 }
 
 /// F16 (Fable-5 review): the canonical-output variant of `validate_app_path`. Returns the
@@ -25,7 +29,7 @@ pub fn validate_app_path(path: &str) -> Result<(), String> {
 /// check-then-use (TOCTOU) window where validate and spawn resolved the string twice. Same
 /// confinement semantics as `validate_app_path`; only the success value differs.
 pub fn validate_app_path_canonical(path: &str) -> Result<PathBuf, String> {
-    validate_path_in_dir_canonical(path, &portable_data_dir())
+    validate_path_in_dir_canonical(path, &user_data_dir())
 }
 
 /// Generalized form: require `path` to canonicalize to a location inside `allowed_dir`.
@@ -116,7 +120,7 @@ pub const COPY_SOURCE_UNRESOLVABLE: &str = "COPY_SOURCE_UNRESOLVABLE";
 /// the caller copies from THIS buffer, so validate and copy cannot resolve the raw string to
 /// two different targets).
 ///
-/// Allow-list: `portable_data_dir()` + `std::env::temp_dir()`. Two roots, and only two.
+/// Allow-list: `user_data_dir()` + `std::env::temp_dir()`. Two roots, and only two.
 /// The temp root is what makes the Users-tab «Скачать конфиг» download work at all —
 /// `ssh/server/server_config.rs:524` stages the exported config there on purpose (Phase-19
 /// UAT fix, D-01), and the old `validate_app_path` source check rejected the very file the
@@ -174,7 +178,7 @@ pub fn validate_copy_source(path: &str) -> Result<PathBuf, String> {
         Ok(c) => allowed_roots.push(c),
         Err(_) => allowed_roots.push(r),
     };
-    push_root(portable_data_dir());
+    push_root(user_data_dir());
     push_root(std::env::temp_dir());
 
     // 3. The PARENT directory, same reparse-point test — but ONLY when the parent is not one
@@ -186,7 +190,7 @@ pub fn validate_copy_source(path: &str) -> Result<PathBuf, String> {
     //    ordinary configuration (corporate roaming profiles, `mklink /J`), and Rust reports a
     //    junction as a symlink, so an unconditional check failed EVERY download on such a
     //    machine with COPY_SOURCE_REPARSE_POINT — the same blocker this phase exists to
-    //    remove, wearing a different hat. The same applies to `portable_data_dir()` when the
+    //    remove, wearing a different hat. The same applies to `user_data_dir()` when the
     //    install path is reached through a junction.
     //
     //    The exemption costs no confinement. It compares CANONICAL parent against CANONICAL
@@ -287,7 +291,7 @@ pub fn validate_temp_staged_path(path: &str) -> Result<PathBuf, String> {
         .map_err(|e| format!("{TEMP_CLEANUP_UNRESOLVABLE}|{e}"))?;
 
     let canonicalize_root = |r: PathBuf| std::fs::canonicalize(&r).unwrap_or(r);
-    let app_data_root = canonicalize_root(portable_data_dir());
+    let app_data_root = canonicalize_root(user_data_dir());
     let temp_root = canonicalize_root(std::env::temp_dir());
 
     // 3. Refuse the app data dir. Correctness here does NOT rest on this running before the temp
@@ -442,14 +446,58 @@ mod tests {
         );
     }
 
+    /// D-03 C (phase 30.1 plan 08) — **the confinement root follows the data root.**
+    ///
+    /// This is the guard that would have failed silently and catastrophically. `validate_app_path`
+    /// confines every path-taking IPC command to the app's data directory. When the data moved
+    /// out of the install directory, a guard left deriving from `current_exe()` would have
+    /// refused every config the app itself had just written — i.e. EVERY CONNECT WOULD FAIL,
+    /// with a path-traversal rejection as the only clue.
+    ///
+    /// Two halves, because either alone is vacuous: a file genuinely inside the data root is
+    /// ACCEPTED (proves the guard did not stay behind), and a file in a sibling directory
+    /// outside it is REFUSED (proves the guard is still a guard and did not simply widen).
+    #[test]
+    fn the_confinement_root_follows_the_data_root() {
+        let root = user_data_dir();
+        let inside = root.join(format!("tt_d03c_inside_{}.toml", std::process::id()));
+        std::fs::write(&inside, "loglevel = \"info\"\n").expect("data-root write must succeed");
+
+        let accepted = validate_app_path(&inside.to_string_lossy());
+
+        // A sibling of the data root — outside it, but not somewhere exotic.
+        let outside_dir = root
+            .parent()
+            .expect("the data root must have a parent")
+            .join(format!("tt_d03c_outside_{}", std::process::id()));
+        std::fs::create_dir_all(&outside_dir).expect("sibling dir must be creatable");
+        let outside = outside_dir.join("intruder.toml");
+        std::fs::write(&outside, "loglevel = \"info\"\n").expect("sibling write must succeed");
+
+        let refused = validate_app_path(&outside.to_string_lossy());
+
+        let _ = std::fs::remove_file(&inside);
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir(&outside_dir);
+
+        accepted.expect(
+            "a config INSIDE the data root must be accepted — a guard that refuses it makes \
+             every connect fail",
+        );
+        refused.expect_err(
+            "a config OUTSIDE the data root must still be refused — the guard must follow the \
+             data, not be widened away",
+        );
+    }
+
     /// The wizard's Save-As door (`components/wizard/useWizardState.ts:1675`) hands `copy_file`
     /// an APP-DIR source. Adding the temp root must not cost the data-dir root. Under
-    /// `cargo test --lib` `portable_data_dir()` resolves to the test binary's own directory,
+    /// `cargo test --lib` `user_data_dir()` resolves to a per-process temp sandbox (D-03 C),
     /// which is writable. The returned buffer is asserted CANONICAL — that is what lets
     /// `copy_file` read from the exact path the confinement decision was made against.
     #[test]
-    fn copy_source_accepts_a_file_in_the_portable_data_dir() {
-        let src = portable_data_dir()
+    fn copy_source_accepts_a_file_in_the_user_data_dir() {
+        let src = user_data_dir()
             .join(format!("tt_test_source_appdir_{}.toml", std::process::id()));
         std::fs::write(&src, "loglevel = \"info\"\n").expect("app-dir write must succeed");
 
@@ -594,7 +642,7 @@ mod tests {
     /// FIRST, so it holds even for a portable install unpacked inside `%TEMP%`.
     #[test]
     fn temp_cleanup_refuses_a_file_in_the_app_data_dir_and_leaves_it_on_disk() {
-        let live = portable_data_dir()
+        let live = user_data_dir()
             .join(format!("tt_test_cleanup_appdir_{}.toml", std::process::id()));
         std::fs::write(&live, "loglevel = \"info\"\n").expect("app-dir write must succeed");
 

@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import i18n from "../../shared/i18n";
 import { renderWithProviders } from "../../test/test-utils";
 import { ConnectionPanel, type ConnectionPanelHandle } from "./ConnectionPanel";
+import { captureListeners } from "../../test/fixtures/events";
 import type { ConfigSummary } from "../../shared/hooks/useConfigList";
 import {
   isSelfDeleting,
@@ -418,5 +419,221 @@ describe("ConnectionPanel scroll behavior (IN-45/IN-49)", () => {
       "ping_config_endpoint",
       expect.objectContaining({ configPath: "C:/app/b.toml" }),
     );
+  });
+
+  // ─── G-30.1-01 (30.1 UAT, T-14): the wiring, end to end ──────────────────────────────────────
+  //
+  // The per-surface behaviour is pinned in ConfigEditView / ConfigQr's own suites. What can only be
+  // proven here is that the panel actually CONNECTS the fs signal to them: open a modal, delete the
+  // file underneath it, and the modal must learn. Without the wiring both components keep their new
+  // prop at its default and nothing on screen changes — which is exactly the shape of the bug.
+  describe("G-30.1-01 — an open per-config modal learns its file was deleted", () => {
+    /** invoke mock whose `config_file_exists` answer is switched mid-test via the returned setter. */
+    function mockPanelIpc(initialExists: boolean) {
+      let exists = initialExists;
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_configs") return Promise.resolve(ONE);
+        if (cmd === "read_client_config") return Promise.resolve({ endpoint: {}, listener: { tun: {} } });
+        if (cmd === "export_config_deeplink_local") return Promise.resolve("tt://deadbeef");
+        if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+        if (cmd === "config_file_exists") return Promise.resolve(exists);
+        return Promise.resolve(null);
+      });
+      return { deleteTheFile: () => { exists = false; } };
+    }
+
+    async function openCardMenuItem(user: ReturnType<typeof userEvent.setup>, itemKey: string) {
+      await user.click(screen.getByRole("button", { name: i18n.t("connection.card.actions_label") }));
+      const menu = screen.getByRole("menu");
+      await user.click(within(menu).getByText(i18n.t(itemKey)));
+    }
+
+    it("the settings modal reaches its deleted-file state on the fs-watcher event", async () => {
+      const user = userEvent.setup();
+      const events = captureListeners();
+      const { deleteTheFile } = mockPanelIpc(true);
+      setup();
+      await screen.findByText("Германия — Frankfurt");
+
+      await openCardMenuItem(user, "connection.card.edit");
+      // The ordinary editable form, while the file is still there.
+      await screen.findByLabelText(i18n.t("connection.editView.credentials_password_aria"));
+      expect(screen.queryByText(i18n.t("connection.editView.file_missing"))).toBeNull();
+
+      // The user deletes the .toml in the file manager; the data-dir watcher fires.
+      deleteTheFile();
+      await act(async () => {
+        events.emitEvent("configs-changed", undefined);
+      });
+
+      expect(await screen.findByText(i18n.t("connection.editView.file_missing"))).toBeInTheDocument();
+      // And the save is gone with the form — nothing left to write into a file that is not there.
+      expect(screen.queryByRole("button", { name: i18n.t("connection.editView.save") })).toBeNull();
+    });
+
+    it("the QR modal reaches its deleted-file state on the fs-watcher event", async () => {
+      const user = userEvent.setup();
+      const events = captureListeners();
+      const { deleteTheFile } = mockPanelIpc(true);
+      setup();
+      await screen.findByText("Германия — Frankfurt");
+
+      await openCardMenuItem(user, "connection.card.qr");
+      await screen.findByLabelText(i18n.t("connection.qr.link_aria"));
+      expect(screen.queryByText(i18n.t("connection.qr.file_missing"))).toBeNull();
+
+      deleteTheFile();
+      await act(async () => {
+        events.emitEvent("configs-changed", undefined);
+      });
+
+      expect(await screen.findByText(i18n.t("connection.qr.file_missing"))).toBeInTheDocument();
+      // The link the window exists for is NOT taken away.
+      expect(screen.getByLabelText(i18n.t("connection.qr.link_aria"))).toBeInTheDocument();
+    });
+
+    it("asks about the OPEN config's own path, not the active one", async () => {
+      const user = userEvent.setup();
+      captureListeners();
+      // TWO configs this time: a tunnel is up on cfg-a while the user opens the settings of the
+      // INACTIVE cfg-b. The class this closes is «the app confuses one config for another», so the
+      // question must name b.toml and nothing else — an implementation that reused the active
+      // pointer would silently watch the wrong file and never notice b's deletion.
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_configs") return Promise.resolve(TWO);
+        if (cmd === "read_client_config") return Promise.resolve({ endpoint: {}, listener: { tun: {} } });
+        if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+        if (cmd === "config_file_exists") return Promise.resolve(true);
+        return Promise.resolve(null);
+      });
+      setup({ status: "connected", activeConfigPath: "C:/app/a.toml" });
+      await screen.findByText("Нидерланды");
+
+      // cfg-b's own «…» menu (the second card's actions button).
+      const actionButtons = screen.getAllByRole("button", { name: i18n.t("connection.card.actions_label") });
+      await user.click(actionButtons[actionButtons.length - 1]);
+      await user.click(within(screen.getByRole("menu")).getByText(i18n.t("connection.card.edit")));
+
+      const askedPaths = () =>
+        invokeMock.mock.calls
+          .filter((c) => c[0] === "config_file_exists")
+          .map((c) => (c[1] as { configPath: string }).configPath);
+      await waitFor(() => expect(askedPaths()).toContain("C:/app/b.toml"));
+      expect(askedPaths()).not.toContain("C:/app/a.toml");
+    });
+
+    it("says nothing about a deletion while the file is on disk", async () => {
+      const user = userEvent.setup();
+      const events = captureListeners();
+      mockPanelIpc(true);
+      setup();
+      await screen.findByText("Германия — Frankfurt");
+
+      await openCardMenuItem(user, "connection.card.edit");
+      await screen.findByLabelText(i18n.t("connection.editView.credentials_password_aria"));
+      await act(async () => {
+        events.emitEvent("configs-changed", undefined);
+      });
+
+      expect(screen.queryByText(i18n.t("connection.editView.file_missing"))).toBeNull();
+    });
+  });
+
+  // ─── G-30.1-01, third surface: the delete CONFIRMATION is also open against one config ───────
+  //
+  // The dialog is asynchronous — the user can sit on it while the file leaves the disk, and the
+  // folder-as-truth reconcile inside list_configs then prunes the manifest entry before he presses
+  // «Удалить». delete_config answers «Config not found in manifest»: a raw English backend string,
+  // shown to somebody who confirmed an outcome he already had.
+  describe("G-30.1-01 — the delete confirmation of an already-deleted config", () => {
+    const BACKEND_NOT_FOUND = "Config not found in manifest";
+
+    async function confirmDeleteOfTheOnlyCard(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByText("Германия — Frankfurt");
+      await user.click(screen.getByRole("button", { name: i18n.t("connection.card.actions_label") }));
+      await user.click(within(screen.getByRole("menu")).getByText(i18n.t("connection.card.delete")));
+      await user.click(await screen.findByRole("button", { name: L.deleteConfirm }));
+    }
+
+    it("reports the deletion in Russian instead of the backend's «not found»", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_configs") return Promise.resolve(ONE);
+        if (cmd === "config_file_exists") return Promise.resolve(false);
+        if (cmd === "delete_config") return Promise.reject(BACKEND_NOT_FOUND);
+        if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+        return Promise.resolve(null);
+      });
+      setup();
+      await confirmDeleteOfTheOnlyCard(user);
+
+      expect(await screen.findByText(i18n.t("connection.snackbar.config_already_gone"))).toBeInTheDocument();
+      expect(screen.queryByText(BACKEND_NOT_FOUND)).toBeNull();
+    });
+
+    it("still ATTEMPTS delete_config — its twin sweep and exclusion prune are not skipped", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_configs") return Promise.resolve(ONE);
+        if (cmd === "config_file_exists") return Promise.resolve(false);
+        if (cmd === "delete_config") return Promise.resolve(null);
+        if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+        return Promise.resolve(null);
+      });
+      setup();
+      await confirmDeleteOfTheOnlyCard(user);
+
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((c) => c[0] === "delete_config")).toBe(true),
+      );
+    });
+
+    it("keeps «Конфиг удалён» for an ordinary delete of a file that is still there", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_configs") return Promise.resolve(ONE);
+        if (cmd === "config_file_exists") return Promise.resolve(true);
+        if (cmd === "delete_config") return Promise.resolve(null);
+        if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+        return Promise.resolve(null);
+      });
+      setup();
+      await confirmDeleteOfTheOnlyCard(user);
+
+      expect(await screen.findByText(i18n.t("connection.snackbar.config_deleted"))).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t("connection.snackbar.config_already_gone"))).toBeNull();
+    });
+
+    it("still surfaces a GENUINE delete failure — the absorption is scoped to a gone file", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_configs") return Promise.resolve(ONE);
+        if (cmd === "config_file_exists") return Promise.resolve(true);
+        if (cmd === "delete_config") return Promise.reject("Permission denied");
+        if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+        return Promise.resolve(null);
+      });
+      setup();
+      await confirmDeleteOfTheOnlyCard(user);
+
+      expect(await screen.findByText("Permission denied")).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t("connection.snackbar.config_already_gone"))).toBeNull();
+    });
+
+    it("does not absorb a failure when the existence check itself could not answer", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_configs") return Promise.resolve(ONE);
+        if (cmd === "config_file_exists") return Promise.reject(new Error("IPC unavailable"));
+        if (cmd === "delete_config") return Promise.reject(BACKEND_NOT_FOUND);
+        if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+        return Promise.resolve(null);
+      });
+      setup();
+      await confirmDeleteOfTheOnlyCard(user);
+
+      // An unanswered question is not evidence of a deletion — the failure surfaces as before.
+      expect(await screen.findByText(BACKEND_NOT_FOUND)).toBeInTheDocument();
+    });
   });
 });

@@ -609,6 +609,41 @@ pub fn set_vpn_status(
     set_vpn_status_inner(app, &state.vpn_status, &state.last_error, status, error);
 }
 
+/// Record WHY the last attempt failed, WITHOUT claiming a state (D-02, 30.1 blocker 2).
+///
+/// This is deliberately NOT a second status writer, and the name says so. `set_vpn_status` is
+/// still the only thing that writes `vpn_status` or emits `"vpn-status"` (D-01 / STATUS-02);
+/// this touches `last_error` alone.
+///
+/// It exists for `respawn_sidecar`, which returns `()` and therefore has no `Err` channel: it
+/// bails like its three sibling guards and lets the supervisor above decide the terminal state,
+/// but the supervisor cannot name a cause it was never told. `connectivity.rs` already reads
+/// this slot after each failed attempt (`try_connect` → `failure_reason`), so writing the cause
+/// here hands it to the existing channel rather than inventing one.
+///
+/// D-29: callers pass a stable ASCII reason code — never a serde message, a path or a secret.
+pub fn record_failure_cause(state: &AppState, cause: &str) {
+    // Same poison-recovery discipline as the status write (WR-01): the slot must always land, or
+    // the supervisor reads a stale cause and names the wrong failure.
+    let mut e = state.last_error.lock().unwrap_or_else(|e| e.into_inner());
+    *e = Some(cause.to_string());
+}
+
+/// What must the connect do with the result of loading the routing rules? (D-02)
+///
+/// Pure, so «a corrupt file refuses» and «a healthy file is passed through untouched» are
+/// assertions rather than a branch buried inside a 400-line command that no test can call.
+/// The second half matters as much as the first: a wrong abort here costs EVERY healthy user
+/// the ability to connect, which is a worse defect than the one being fixed.
+pub fn rules_load_outcome(
+    loaded: Result<routing_rules::RoutingRules, String>,
+) -> Result<routing_rules::RoutingRules, &'static str> {
+    // Note `load_routing_rules` already answers `Ok(default)` for a file that does not exist, so
+    // an `Err` here means exactly one thing: bytes are on disk and they are not readable as
+    // rules. That is the only case worth refusing a connect over.
+    loaded.map_err(|_| crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON)
+}
+
 /// The actual single writer of `vpn_status`/`last_error` + the single emitter of
 /// the `"vpn-status"` event (D-01 / STATUS-02). Takes the two Arcs directly so it
 /// can be called from a spawned task that owns cloned handles rather than the
@@ -732,7 +767,7 @@ pub fn set_vpn_status_reconnecting_attempt(
 /// Pro and Light must never read or stale-kill each other's sidecar PID when both
 /// are installed in the same data dir.
 fn sidecar_pid_path() -> std::path::PathBuf {
-    ssh::portable_data_dir().join(crate::lifecycle::SIDECAR_PID_BASENAME)
+    ssh::user_data_dir().join(crate::lifecycle::SIDECAR_PID_BASENAME)
 }
 
 /// OS image name of the spawned VPN sidecar (Tauri spawns it via
@@ -789,9 +824,21 @@ pub(crate) fn save_sidecar_pid(pid: u32) {
 // inline at the two real sites (sidecar.rs on Terminated, kill_stale_sidecar
 // below), so a parallel unused helper only invited the cleanup paths to drift.
 
-/// Full path of THIS edition's own sidecar executable. Resolved the SAME way the
-/// spawn does: tauri-plugin-shell's `.sidecar("trusttunnel_client")` runs the binary
-/// that sits NEXT TO the app executable, so `current_exe().with_file_name(...)` is
+/// Full path of THIS edition's own sidecar executable.
+///
+/// **DELIBERATELY EXEMPT from the D-03 C data-root move (phase 30.1 plan 08).** Two independent
+/// reasons, either of which alone is sufficient:
+///   1. The sidecar binary is PROGRAM CODE shipped by the installer (`bundle.externalBin`), not
+///      user data. Program code belongs in the install directory — that is the entire point of
+///      moving the install to a location users cannot write.
+///   2. This path must stay BYTE-IDENTICAL to what the spawner resolves. Tauri's
+///      `.sidecar("trusttunnel_client")` runs the binary beside the app executable, and the
+///      identity check below compares this buffer against the image path the OS reports for the
+///      live process. Pointing it at the data root would make every comparison fail — the app
+///      would stop recognising its own sidecar (AUDIT-2026-06-11 #21 is the recorded finding for
+///      exactly that drift).
+///
+/// Resolved the SAME way the spawn does, so `current_exe().with_file_name(...)` is
 /// byte-for-byte the path the spawned process reports as its image path
 /// (AUDIT-2026-06-11 #21). Deliberately NOT canonicalized: `fs::canonicalize` returns
 /// a `\\?\`-prefixed verbatim path while `QueryFullProcessImageNameW(PROCESS_NAME_WIN32)`
@@ -1110,9 +1157,6 @@ pub async fn teardown_session_sidecar(app: &tauri::AppHandle) {
         );
         sidecar::kill_sidecar(child).await.ok();
     }
-    // Remove the hosts-file DNS block the session installed (same as vpn_disconnect),
-    // so a give-up never leaves a stale DNS override behind.
-    routing_rules::cleanup_hosts_block().ok();
     // FIX-A (RC-2): restore pre-VPN system DNS on terminal teardown too (mirror of
     // vpn_disconnect) so a give-up never strands the resolver.
     crate::dns_guard::restore_system_dns();
@@ -1416,6 +1460,32 @@ fn vpn_connect_path_guard(config_path: &str) -> Result<std::path::PathBuf, Strin
     crate::commands::paths::validate_app_path_canonical(config_path)
 }
 
+/// The log line the CA-2 connect guard writes when it refuses (30.1 regression, defect 1).
+///
+/// **Why this is a function and not an inline `format!`.** The refusal used to write NOTHING.
+/// Six real failures on a real Windows install left one `VPN connect: config=…` line each and then
+/// silence — the single most diagnostic event of the whole incident was absent from the log the
+/// user would send. Making the line a named, unit-tested function is what stops it from being
+/// dropped again the next time someone edits that arm, and it lets the D-29 property («no
+/// credential reaches the log channel») be asserted directly instead of by reading the arm.
+///
+/// The line carries BOTH sides of the comparison the guard made — the path it refused and the
+/// root it compared against — because either alone leaves the reader guessing which of the two
+/// moved. It also carries the guard's own English sentence: that string distinguishes
+/// «outside the root» from «could not be resolved at all», and the log is the only channel
+/// allowed to see it (D-09: what crosses IPC is the reason CODE, never this).
+///
+/// D-29: the argument is a FILE PATH, never config contents — the password lives inside the
+/// `.toml`, which nothing here opens. `vpn_connect` already logs the same path one line into
+/// its body, so this adds no new class of value to the log.
+fn connect_refusal_log_line(config_path: &str, guard_error: &str) -> String {
+    format!(
+        "[vpn] connect REFUSED by the path guard (CA-2): config={config_path} \
+         is outside the data root {} — {guard_error}",
+        crate::ssh::user_data_dir().to_string_lossy()
+    )
+}
+
 #[tauri::command]
 pub async fn vpn_connect(
     app: tauri::AppHandle,
@@ -1583,15 +1653,62 @@ pub async fn vpn_connect(
     // resolution, used for both the confinement decision and the spawn.
     let config_path = match vpn_connect_path_guard(&config_path) {
         Ok(canonical) => canonical.to_string_lossy().to_string(),
+        // 30.1 regression defect 1 — THE REFUSAL IS NOW LEGIBLE. This arm used to write no log
+        // line, pass `None` as the reason, and return the guard's raw English sentence. Three
+        // separate failures on the one event that most needed to be readable:
+        //   * no log     — the incident left six `VPN connect: config=…` lines and nothing after
+        //                  them, so the log a user sends says only "he pressed connect";
+        //   * no reason  — a terminal Error with `None` renders the generic fallback «Не удалось
+        //                  выполнить подключение к серверу», blaming a server never contacted;
+        //   * raw string — «Access denied: path is outside the application data directory» reached
+        //                  the red banner verbatim, in English, in a Russian application.
+        // The shape is the D-02 routing-rules refusal a few lines below: log the developer-facing
+        // English, move the status off the `Connecting` emitted above through the SINGLE mutator
+        // carrying a CODE, and return that same code so the IPC-rejection channel (which the
+        // frontend localizes through the same boundary map) says the same thing as the snackbar.
         Err(e) => {
-            set_vpn_status(&app, &state, VpnStatus::Error, None);
-            return Err(e);
+            crate::logging::log_app("ERROR", &connect_refusal_log_line(&config_path, &e));
+            let reason = crate::lifecycle::CONFIG_OUTSIDE_DATA_DIR_REASON;
+            set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+            return Err(reason.to_string());
         }
     };
 
-    // Resolve routing rules and write config files before starting sidecar
-    let rules = routing_rules::load_routing_rules().unwrap_or_default();
-    if let Err(e) = routing_rules::resolve_and_apply_inner(&config_path, &rules, geodata_state.as_ref()) {
+    // Resolve routing rules and write config files before starting sidecar.
+    //
+    // D-02 (30.1 milestone review, blocker 2): a rules file that will not parse REFUSES the
+    // connect. This used to be `load_routing_rules().unwrap_or_default()`, which turned «I cannot
+    // read your routing» into «you have no routing» — and then connected, and then said
+    // «Подключено». In selective mode that is the app carrying the user's traffic outside the
+    // tunnel they asked for while reporting success.
+    //
+    // The abort is the idiom six lines above (`vpn_connect_path_guard`): move the status off the
+    // `Connecting` emitted at :1553 through the SINGLE mutator, then return `Err`. Unlike that
+    // guard we pass a REASON — it predates the reason-code registry, and a new failure that has a
+    // name should carry it so the frontend can say the Russian sentence instead of rendering a
+    // serde message in English.
+    let rules = match rules_load_outcome(routing_rules::load_routing_rules()) {
+        Ok(rules) => rules,
+        Err(reason) => {
+            // The parse error itself is logged (English, unbounded, developer-facing) and NEVER
+            // travels: what crosses IPC is the token. D-09/D-29.
+            crate::logging::log_app(
+                "ERROR",
+                "[vpn] routing_rules.json could not be parsed — refusing the connect (D-02)",
+            );
+            set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+            return Err(reason.to_string());
+        }
+    };
+    // Item 13: the reporting variant, so a geo entry that could not be resolved reaches the user
+    // on the same `vpn-log` channel this block already warns on — instead of an `eprintln!` that
+    // goes nowhere in a packaged build.
+    if let Err(e) = routing_rules::resolve_and_apply_reporting(
+        &config_path,
+        &rules,
+        geodata_state.as_ref(),
+        Some(&app),
+    ) {
         eprintln!("[vpn_connect] Warning: failed to resolve routing rules: {e}");
         app.emit("vpn-log", VpnLogPayload {
             message: format!("Warning: routing rules resolve failed: {e}"),
@@ -1916,7 +2033,6 @@ pub async fn respawn_sidecar(
     //              exists-guard makes this a no-op when the restore failed and kept the old file,
     //              so a failed restore can never be overwritten with tunnel-resolver state;
     //   flush   — drop anything the OS cached through the tunnel that just died.
-    routing_rules::cleanup_hosts_block().ok();
     crate::dns_guard::restore_system_dns();
     crate::dns_guard::snapshot_system_dns();
     crate::dns_guard::flush_dns_cache();
@@ -1939,9 +2055,41 @@ pub async fn respawn_sidecar(
 
     // 4. Re-resolve + apply routing rules (reuse the GeoData state from AppState).
     if let Some(geodata_state) = app.try_state::<Arc<GeoDataState>>() {
-        let rules = routing_rules::load_routing_rules().unwrap_or_default();
+        // D-02, the reconnect half. This function returns `()` and has no caller to hand an
+        // `Err` to, so it bails the way its three existing guards do — log, then return, WITHOUT
+        // writing a status. The supervisor above owns the terminal state and that ownership rule
+        // is not weakened here.
+        //
+        // What is new is one line: before returning we RECORD the cause in the shared last-error
+        // slot. That slot is not a new channel — `connectivity.rs` already reads it after every
+        // failed attempt to learn why the attempt failed, and it is what lets the loop
+        // short-circuit a terminal reason. Because the code is registered terminal
+        // (`lifecycle::is_terminal_reason`), the loop stops after ONE attempt instead of
+        // re-reading a byte-identical file to the end of its budget, and the supervisor's
+        // terminal arm then prefers this recorded cause over its generic give-up code
+        // (`connectivity::terminal_reason_for_give_up`). The user lands on terminal `Error`
+        // carrying this code, with the arm's existing sidecar teardown having run — so no child
+        // is left holding the WinTUN adapter or the killswitch.
+        let rules = match rules_load_outcome(routing_rules::load_routing_rules()) {
+            Ok(rules) => rules,
+            Err(reason) => {
+                crate::logging::log_app(
+                    "WARN",
+                    "[reconnect] routing_rules.json could not be parsed — aborting respawn (D-02)",
+                );
+                record_failure_cause(&state, reason);
+                return;
+            }
+        };
         if let Err(e) =
-            routing_rules::resolve_and_apply_inner(&config_path, &rules, geodata_state.as_ref())
+            // Item 13: same reporting channel on the reconnect path — a user watching a
+            // reconnect has the same right to know which entries stopped being in force.
+            routing_rules::resolve_and_apply_reporting(
+                &config_path,
+                &rules,
+                geodata_state.as_ref(),
+                Some(app),
+            )
         {
             crate::logging::log_app(
                 "WARN",
@@ -2200,9 +2348,6 @@ pub async fn vpn_disconnect(
             "VPN disconnect: kill_sidecar failed — running unconditional cleanup anyway (#20)",
         );
     }
-
-    // Clean up hosts file blocked entries on disconnect — ALWAYS, even on kill failure.
-    routing_rules::cleanup_hosts_block().ok();
 
     // FIX-A (RC-2): restore the pre-VPN system DNS (+flush). The hard-killed C++ sidecar
     // never restores it, so without this the system stays on the dead tunnel resolver and
@@ -3698,7 +3843,7 @@ mod tests {
     }
 
     /// RED (GREEN by 17-04) — CA-2 path confinement. `vpn_connect` (and its reconnect twin)
-    /// must reject a config path OUTSIDE `portable_data_dir` BEFORE spawning the sidecar
+    /// must reject a config path OUTSIDE `user_data_dir` BEFORE spawning the sidecar
     /// (defense-in-depth, SAFETY-01 / ASVS V12), reusing the `validate_app_path` primitive
     /// that already guards `ping.rs:285` and `manifest.rs`. The guard is factored into the
     /// pure `vpn_connect_path_guard(config_path) -> Result<PathBuf, String>` so it is testable
@@ -3717,10 +3862,153 @@ mod tests {
         );
 
         // A real config inside the portable data dir passes the guard.
-        let inside = crate::ssh::portable_data_dir().join("TrustTunnel_swift-fox.toml");
+        let inside = crate::ssh::user_data_dir().join("TrustTunnel_swift-fox.toml");
         assert!(
             vpn_connect_path_guard(&inside.to_string_lossy()).is_ok(),
             "an in-data-dir config path must pass the guard"
+        );
+    }
+
+    /// 30.1 regression defect 1, part 1 — **THE REFUSAL LEAVES A LOG LINE, AND THAT LINE SAYS
+    /// WHICH TWO PATHS DISAGREED.**
+    ///
+    /// The incident: six connects refused in six seconds and the log held one
+    /// `VPN connect: config=…` line per attempt and NOTHING after it. The refusal — the single
+    /// most diagnostic event of the whole failure — was invisible in the file the user sends.
+    /// A guard that refuses silently is indistinguishable from a guard that never ran.
+    ///
+    /// Asserted against the LINE, not against the arm that writes it, because the line is the
+    /// artifact a reader gets: it must name the offending path AND the root it was compared
+    /// against (either alone leaves the reader unable to say which of the two moved) and it
+    /// must carry the guard's own sentence so «outside the root» and «could not resolve» stay
+    /// distinguishable in the log after both collapse into one reason code on the wire.
+    ///
+    /// D-29 is asserted directly: a password handed to this function must not appear in the
+    /// line. It cannot today — the argument is a path — and this pins that it stays true.
+    #[test]
+    fn the_refused_connect_logs_the_path_and_the_root_it_was_compared_against() {
+        let root = crate::ssh::user_data_dir();
+        let offender = "C:/Windows/System32/evil.toml";
+        let guard_error = vpn_connect_path_guard(offender)
+            .expect_err("the fixture must actually be refused, or this test proves nothing");
+
+        let line = connect_refusal_log_line(offender, &guard_error);
+
+        assert!(
+            line.contains(offender),
+            "the log line must name the path that was refused — got: {line}"
+        );
+        assert!(
+            line.contains(root.to_string_lossy().as_ref()),
+            "the log line must name the data root the path was compared against; without it the \
+             reader cannot tell whether the config moved or the root did — got: {line}"
+        );
+        assert!(
+            line.contains(&guard_error),
+            "the log line must carry the guard's own sentence — it is the only channel allowed \
+             to see it (D-09), and it is what separates «outside the root» from «unresolvable»"
+        );
+        assert!(
+            line.contains("REFUSED"),
+            "the line must be greppable as a refusal, not as another neutral connect trace"
+        );
+
+        // D-29, asserted against a REAL password-bearing file rather than against the shape of
+        // the code. A refusal must never become a reason to open the file it refused: the
+        // `.toml` this guard rejects holds the endpoint password in plaintext, and «log more
+        // detail so we can diagnose it» is exactly the well-meaning edit that would put it in
+        // the log channel. The fixture is a genuine config, genuinely refused.
+        let outside = std::env::temp_dir().join(format!(
+            "tt_d29_refusal_{}_{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(
+            &outside,
+            "[endpoint]\nhost = \"ru1.example.com\"\nuser = \"swift-fox\"\npassword = \"SECRET-D29-MUST-NOT-LEAK\"\n",
+        )
+        .expect("the fixture must be writable");
+        let outside_str = outside.to_string_lossy().to_string();
+        let refusal = vpn_connect_path_guard(&outside_str)
+            .expect_err("a config in the temp root is outside the data sandbox and must be refused");
+        let with_secret = connect_refusal_log_line(&outside_str, &refusal);
+        let _ = std::fs::remove_file(&outside);
+        assert!(
+            !with_secret.contains("SECRET-D29-MUST-NOT-LEAK"),
+            "the refusal log line must not carry the refused config's contents — the password \
+             lives in that file and the log channel must never see it (D-29)"
+        );
+    }
+
+    /// 30.1 regression defect 1, parts 2 and 3 — **THE REFUSAL CARRIES A CAUSE, AND THE CAUSE IS
+    /// RENDERABLE IN RUSSIAN.**
+    ///
+    /// The arm used to pass `None` to `set_vpn_status` and return the guard's raw English
+    /// sentence. `None` renders the frontend's generic fallback «Не удалось выполнить подключение
+    /// к серверу» — naming a server that was never contacted — and the English sentence reached
+    /// the red banner verbatim in a Russian application.
+    ///
+    /// This is a WIRING assertion on purpose. The arm is inside a `#[tauri::command]` that needs
+    /// a live `AppHandle`, so no unit test can call it; what CAN be pinned is that the three
+    /// properties are present in its body. Each check names the specific regression it catches,
+    /// so a future edit that drops one is told which failure it is re-introducing.
+    #[test]
+    fn the_refused_connect_carries_a_reason_code_and_logs_at_error() {
+        let body = d02_function_body(include_str!("./vpn.rs"), "vpn_connect")
+            .expect("guard must locate its subject");
+
+        // The refusal arm must be there at all — locate-or-fail, so a rename cannot make this
+        // test pass by measuring an empty string.
+        assert!(
+            body.contains("match vpn_connect_path_guard(&config_path)"),
+            "the CA-2 guard call has moved or been renamed — this test has lost its subject and \
+             is no longer evidence of anything"
+        );
+        assert!(
+            body.contains("connect_refusal_log_line(&config_path, &e)"),
+            "the path-guard refusal no longer writes its log line — six real failures on the \
+             a real machine left NOTHING in the log, which is how this defect survived to a \
+             shipped build"
+        );
+        assert!(
+            body.contains(r#"crate::logging::log_app("ERROR", &connect_refusal_log_line"#),
+            "the refusal must be logged at ERROR: it is a connect that did not happen, not a \
+             trace line, and a user filtering their log for errors must find it"
+        );
+        assert!(
+            body.contains("crate::lifecycle::CONFIG_OUTSIDE_DATA_DIR_REASON"),
+            "the refusal must carry its reason CODE. Passing `None` here is what made the app \
+             blame the server for a refusal it decided locally, before contacting anything"
+        );
+
+        // The `None`-reason write must be gone FROM THIS ARM. Scoped to the arm rather than to
+        // the whole function on purpose: `vpn_connect` has a second `Error, None` write on the
+        // sidecar-spawn-failure path (the core would not start). That one is a different defect
+        // with a different sentence, it is out of this fix's scope, and it is recorded in
+        // `deferred-items.md` — banning it here would make this test fail for a reason it is not
+        // about, which is how a rule gets loosened until it measures nothing.
+        let arm_start = body
+            .find("match vpn_connect_path_guard(&config_path)")
+            .expect("subject located above");
+        let arm = &body[arm_start..];
+        let arm = &arm[..arm.find("\n    };").map(|i| i + 7).unwrap_or(arm.len())];
+        assert!(
+            arm.contains("Some(reason.to_string())"),
+            "the guard's refusal arm must pass Some(reason) to set_vpn_status. Passing `None` \
+             renders the generic «Не удалось выполнить подключение к серверу» fallback — the \
+             sentence that blamed a server the app never contacted"
+        );
+        assert!(
+            !arm.contains("VpnStatus::Error, None"),
+            "the guard's refusal arm still writes a terminal Error with NO cause"
+        );
+        assert!(
+            !arm.contains("return Err(e);"),
+            "the refusal must return the reason CODE, not the guard's raw English sentence — \
+             that sentence reached the red banner verbatim in a Russian application"
         );
     }
 
@@ -3730,7 +4018,7 @@ mod tests {
     /// is absolute, lives under the canonical data dir, and keeps the requested file name.
     #[test]
     fn ca2_guard_returns_the_canonical_path_used_for_spawn() {
-        let data_dir = crate::ssh::portable_data_dir();
+        let data_dir = crate::ssh::user_data_dir();
         // Canonical form of the data dir (the guard confines against this same canonical root).
         let canonical_dir = std::fs::canonicalize(&data_dir).unwrap_or(data_dir.clone());
 
@@ -3805,6 +4093,228 @@ mod tests {
         assert!(
             error_ack_would_proceed(&state),
             "clear_vpn_error must proceed from Error — the acknowledge that turns the tray gray (D-04)",
+        );
+    }
+
+    // ── D-02 (30.1 milestone review, blocker 2): a rules file that cannot be parsed ──
+    //
+    // The defect these guards exist for: `load_routing_rules().unwrap_or_default()` turned a
+    // truncated or hand-broken `routing_rules.json` into *no rules at all*, and the connect went
+    // on to report «Подключено» over routing the user never asked for. In selective mode that
+    // means the traffic they chose to protect was not protected while the card said it was.
+    //
+    // Two kinds of evidence, because neither alone is enough:
+    //   * the DECISION is a pure function with its own truth table below, and
+    //   * the WIRING is a source-text guard, because a correct decision that no spawn door calls
+    //     is exactly the shape of defect this phase exists to remove.
+
+    /// Every whole-line `//` comment blanked, so a rule cannot be tripped by the prose that
+    /// DOCUMENTS it. Same shape and same reason as `updater.rs`'s `strip_line_comments`: the
+    /// comments added beside these two fixes necessarily spell out `unwrap_or_default`, and a
+    /// guard that fails on the sentence explaining it teaches the next reader to ignore it.
+    /// Only a line whose FIRST non-space characters are `//` is dropped — truncating from a
+    /// mid-line `//` could HIDE code from the rules that follow.
+    fn d02_strip_line_comments(body: &str) -> String {
+        body.lines()
+            .map(|l| if l.trim_start().starts_with("//") { "" } else { l })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The source span of one top-level `pub async fn`, or an explanation of why it could not
+    /// be found. Copied from `updater.rs:function_body` including its three load-bearing
+    /// properties: the needle is BUILT at runtime (so the guard's own literal cannot become the
+    /// match), anchored at `\n` (column zero, so an indented mention is not a definition) and
+    /// anchored at the opening `(` (so a RENAME to a longer name cannot be satisfied by the old
+    /// name surviving as a prefix). Exactly one hit is required — zero means renamed or removed,
+    /// two means duplicated, and neither is something a guard may silently measure through.
+    fn d02_function_body(source: &str, func: &str) -> Result<String, String> {
+        let needle = format!("\npub async fn {func}(");
+        let hits = source.matches(needle.as_str()).count();
+        if hits != 1 {
+            return Err(format!(
+                "cannot measure `{func}`: {hits} top-level definitions found, expected exactly 1 — \
+                 the function was renamed, removed or duplicated and this guard has lost its \
+                 subject. This is a FAILURE, not a pass."
+            ));
+        }
+        let after = source.split(needle.as_str()).nth(1).unwrap_or("");
+        let end = ["\npub async fn ", "\npub fn ", "\nfn ", "\n#[cfg(test)]"]
+            .iter()
+            .filter_map(|t| after.find(t))
+            .min()
+            .unwrap_or(after.len());
+        Ok(d02_strip_line_comments(&after[..end]))
+    }
+
+    #[test]
+    fn no_module_still_defaults_an_unreadable_rules_file_into_no_rules() {
+        // THE CLASS, NOT THE INSTANCE (CONTEXT standing rule 3).
+        //
+        // The review named two sites. There are FOUR, and the other two were found by sweeping for
+        // the call rather than by trusting the list: the TRAY's own connect (`tray.rs`) is a third
+        // spawn door with the identical defect, and the geodata scheduler (`geodata_scheduler.rs`)
+        // is worse than a connect-time lie — on a background timer it would resolve an EMPTY rule
+        // set and rewrite the live `exclusions.txt` / `blocked.txt` from it, destroying working
+        // routing files because a file it never needed to read would not parse.
+        //
+        // A guard scoped to the two sites the review happened to name is how the other two stay
+        // broken while the gate reads green.
+        // ONE documented exception, and it is named here rather than tolerated silently.
+        // `geodata_scheduler::refresh_group_caches` also defaults — deliberately. It only decides
+        // WHICH group caches are worth refreshing; it writes no routing file, spawns nothing and
+        // tells the user nothing, so "read fewer caches this cycle" is the whole consequence. Its
+        // own comment states the fail-open and why. Expressed as an exact COUNT so the exception
+        // cannot quietly grow a second member: if another `unwrap_or_default` appears in that file
+        // this trips, which is the point.
+        let sources = [
+            ("vpn.rs", include_str!("./vpn.rs"), 0usize),
+            ("tray.rs", include_str!("../tray.rs"), 0),
+            ("geodata_scheduler.rs", include_str!("../geodata_scheduler.rs"), 1),
+        ];
+        // Built at runtime so this test's own text is not the thing it finds.
+        let swallow = format!("load_routing_rules(){}", ".unwrap_or_default()");
+        for (name, source, allowed) in sources {
+            let production = d02_strip_line_comments(source);
+            let production = production
+                .split("\n#[cfg(test)]")
+                .next()
+                .unwrap_or(&production);
+            let found = production.matches(swallow.as_str()).count();
+            assert_eq!(
+                found, allowed,
+                "`{name}`: expected {allowed} defaulting read(s) of routing_rules.json, found \
+                 {found}. Every reader of that file must decide what to do about a parse failure; \
+                 defaulting is the app inventing a routing policy and attributing it to the user \
+                 (D-02). The only sanctioned default is the group-cache refresh, which writes no \
+                 routing file and claims nothing to the user.",
+            );
+        }
+
+        // And the sanctioned one must still BE the group-cache refresh — an exception that stops
+        // pointing at its own subject is just a hole.
+        let scheduler = d02_strip_line_comments(include_str!("../geodata_scheduler.rs"));
+        let refresh = scheduler
+            .split("\nasync fn refresh_group_caches(")
+            .nth(1)
+            .expect(
+                "cannot measure the sanctioned exception: `refresh_group_caches` was renamed or \
+                 removed. This is a FAILURE, not a pass.",
+            );
+        let refresh = &refresh[..refresh.find("\nasync fn ").unwrap_or(refresh.len())];
+        assert!(
+            refresh.contains(swallow.as_str()),
+            "the one allowed defaulting read has moved OUT of `refresh_group_caches` — the count \
+             above is now guarding something nobody has reasoned about",
+        );
+    }
+
+    #[test]
+    fn neither_spawn_door_defaults_an_unreadable_rules_file_into_no_rules() {
+        // THE WIRING, not the decision. Both doors that load rules from disk before spawning the
+        // C++ core must react to a parse failure; `unwrap_or_default()` is precisely the call that
+        // makes «I could not read your routing» indistinguishable from «you have no routing».
+        let source = include_str!("./vpn.rs");
+        for door in ["vpn_connect", "respawn_sidecar"] {
+            let body = d02_function_body(source, door).expect("guard must locate its subject");
+            assert!(
+                !body.contains("load_routing_rules().unwrap_or_default()"),
+                "`{door}` still defaults an unreadable routing_rules.json into an EMPTY rule set — \
+                 the connect then proceeds with routing the user never asked for while the card \
+                 reports success (D-02)",
+            );
+            assert!(
+                body.contains("rules_load_outcome(routing_rules::load_routing_rules())"),
+                "`{door}` must run the load result through the ONE decision seam \
+                 (`rules_load_outcome`), which is where the refusal and its reason code live. \
+                 Absent it, a door could handle the failure its own way and drift from its \
+                 sibling — and it is the drift between these two doors, not either one alone, \
+                 that D-02 is about",
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreadable_rules_file_refuses_the_connect_and_a_healthy_one_does_not() {
+        use crate::routing_rules::{load_routing_rules_from, RoutingRules, RuleEntry};
+
+        let dir = std::env::temp_dir().join(format!(
+            "tt_d02_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // (a) THE DEFECT'S OWN CASE — a file that exists and will not parse. Truncated mid-object
+        //     is exactly what a crash or an ENOSPC leaves behind, which is the failure the atomic
+        //     writer of 30.1-01 now prevents going FORWARD but cannot undo for a user who already
+        //     has one.
+        let corrupt = dir.join("corrupt.json");
+        std::fs::write(&corrupt, br#"{"direct":[{"id":"1","type":"doma"#).unwrap();
+        let outcome = rules_load_outcome(load_routing_rules_from(&corrupt));
+        assert_eq!(
+            outcome.err(),
+            Some(crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON),
+            "a rules file that cannot be parsed must REFUSE the connect carrying the named cause \
+             — defaulting it to an empty rule set is the app inventing a routing policy and \
+             attributing it to the user (D-02)",
+        );
+
+        // (b) THE CASE THAT COSTS MORE IF IT BREAKS. A wrong abort takes the connect away from
+        //     every healthy user, which is worse than the defect being fixed — so the happy path
+        //     is asserted here, deliberately, rather than inferred from (a) failing.
+        let healthy = dir.join("healthy.json");
+        let rules = RoutingRules {
+            direct: vec![RuleEntry {
+                id: "1".into(),
+                entry_type: "domain".into(),
+                value: "example.com".into(),
+                label: None,
+            }],
+            ..RoutingRules::default()
+        };
+        std::fs::write(&healthy, serde_json::to_vec(&rules).unwrap()).unwrap();
+        let loaded = rules_load_outcome(load_routing_rules_from(&healthy))
+            .expect("a healthy rules file must connect exactly as it did before D-02");
+        assert_eq!(loaded.direct.len(), 1);
+        assert_eq!(loaded.direct[0].value, "example.com");
+
+        // (c) NO FILE AT ALL is not a refusal. A fresh install has never routed anything; there is
+        //     no unreadable policy, so there is nothing to refuse over.
+        let absent = dir.join("does-not-exist.json");
+        assert!(
+            rules_load_outcome(load_routing_rules_from(&absent)).is_ok(),
+            "a machine with no rules file must still connect — absent is not corrupt",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recording_a_failure_cause_never_claims_a_status() {
+        // The reconnect half of D-02 rests on this being true. `respawn_sidecar` returns `()`, so
+        // it hands the cause to the supervisor through the shared slot and lets the supervisor
+        // own the terminal state — the same ownership rule its three existing guards follow. If
+        // this helper ever grew a status write there would be TWO status writers, which is the
+        // invariant D-01/STATUS-02 exists to hold.
+        let state = test_app_state();
+        *state.vpn_status.lock().unwrap() = VpnStatus::Reconnecting;
+
+        record_failure_cause(&state, crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON);
+
+        assert_eq!(
+            state.last_error.lock().unwrap().as_deref(),
+            Some(crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON),
+            "the cause must reach the slot the supervisor reads, or the terminal Error is generic",
+        );
+        assert_eq!(
+            *state.vpn_status.lock().unwrap(),
+            VpnStatus::Reconnecting,
+            "recording a cause must NOT move the status — the supervisor above owns the terminal \
+             state, and a second writer here would race it",
         );
     }
 }

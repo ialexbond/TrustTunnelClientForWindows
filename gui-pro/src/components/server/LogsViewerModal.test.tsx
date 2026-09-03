@@ -408,4 +408,83 @@ describe("LogsViewerModal", () => {
     // Positive check: Modal IS always rendered (component renders <Modal isOpen={isOpen})
     expect(sourceWithoutComments).toMatch(/<Modal\s+isOpen=\{isOpen\}/);
   });
+
+  // ─── Test 12: 30.1-05 — the search counter declines in Russian ────────────
+  //
+  // The reachable Russian grammar defect of phase 30.1. The milestone review's
+  // item 5 named two OTHER keys (drop.configs_added,
+  // server.security.summary.firewall_subtitle_active_rules) — both unreachable,
+  // because all three of their call sites branch `i18n.language === "ru"` and
+  // take pluralRu instead. This counter has NO such branch: it hands the raw
+  // count straight to t(), so whatever the bundle says is what a Russian user
+  // reads. Before the fix the key carried a single form and the screen said
+  // «Найдено: 2 строк».
+  //
+  // Rendered through the component (not by calling t() directly) on purpose:
+  // calling t() is exactly how the review reproduced a bug that the app cannot
+  // reach, and this test must not repeat that mistake.
+
+  /** N matching lines plus one that never matches, so the filter has to do work. */
+  function logsWithMatches(n: number): string {
+    const lines: string[] = ["May 17 09:59:59 INFO unrelated startup line"];
+    for (let i = 0; i < n; i += 1) {
+      lines.push(`May 17 10:00:00 INFO NEEDLE occurrence ${i}`);
+    }
+    return lines.join("\n");
+  }
+
+  async function counterTextFor(n: number): Promise<string> {
+    const { unmount } = render(
+      <LogsViewerModal
+        isOpen={true}
+        onClose={() => {}}
+        sshParams={SSH_PARAMS}
+        initialLogs={logsWithMatches(n)}
+        _forceState="loaded"
+      />,
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText(i18n.t("server.logs.modal.search_placeholder")),
+      { target: { value: "NEEDLE" } },
+    );
+    const text = await waitFor(() => {
+      const el = screen.getByTestId("logs-match-count");
+      expect(el.textContent).toBeTruthy();
+      return el.textContent as string;
+    });
+    unmount();
+    return text;
+  }
+
+  it("match_count_declines_in_russian — counter reads correct Russian at 1/2/3/4/5/11/21/101", async () => {
+    await i18n.changeLanguage("ru");
+    // one → «строка», few (2-4) → «строки», many (5, 11) → «строк».
+    // 21 and 101 end in 1 without being teens, so they take the «one» form —
+    // they are here because a naive `count === 1` guard passes 1 and fails 21.
+    const expected: Array<[number, string]> = [
+      [1, "Найдено: 1 строка"],
+      [2, "Найдено: 2 строки"],
+      [3, "Найдено: 3 строки"],
+      [4, "Найдено: 4 строки"],
+      [5, "Найдено: 5 строк"],
+      [11, "Найдено: 11 строк"],
+      [21, "Найдено: 21 строка"],
+      [101, "Найдено: 101 строка"],
+    ];
+    const actual: Array<[number, string]> = [];
+    for (const [count] of expected) {
+      actual.push([count, await counterTextFor(count)]);
+    }
+    expect(actual).toEqual(expected);
+  });
+
+  it("match_count_unchanged_in_english — counter still reads English under en", async () => {
+    await i18n.changeLanguage("en");
+    try {
+      expect(await counterTextFor(1)).toBe("Found: 1 line");
+      expect(await counterTextFor(3)).toBe("Found: 3 lines");
+    } finally {
+      await i18n.changeLanguage("ru");
+    }
+  });
 });

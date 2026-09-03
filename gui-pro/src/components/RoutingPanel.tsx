@@ -9,6 +9,7 @@ import type { VpnStatus } from "../shared/types";
 import { Card } from "../shared/ui/Card";
 import { PanelHeader } from "../shared/ui/PanelHeader";
 import { Button } from "../shared/ui/Button";
+import { useConfirm } from "../shared/ui/useConfirm";
 import StatusPanel from "./StatusPanel";
 import { useRoutingState } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
@@ -16,7 +17,7 @@ import { PresetGrid } from "./routing/PresetGrid";
 import { RoutingBlockCard } from "./routing/RoutingBlockCard";
 import { ProcessFilterSection } from "./routing/ProcessFilterSection";
 import { ExportImportButtons } from "./routing/ExportImportButtons";
-import { useFeatureToggles } from "../shared/hooks/useFeatureToggles";
+import { RoutingRulesUnreadable } from "./routing/RoutingRulesUnreadable";
 
 interface RoutingPanelProps {
   configPath: string;
@@ -39,7 +40,24 @@ interface RoutingPanelProps {
 function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect, onDisconnect, onReconnect, vpnMode = "general", onVpnModeChange, isSwitching = false, connectPending = false }: RoutingPanelProps) {
   const { t } = useTranslation();
   const state = useRoutingState({ configPath, status, vpnMode, onReconnect });
-  const { toggles } = useFeatureToggles();
+  const confirm = useConfirm();
+
+  // D-02 (30.1 blocker 2): the reset destroys every rule the user ever typed, so it asks first.
+  // The confirmation lives HERE rather than inside the hook because the dialog is a UI concern and
+  // because a hook that demanded a dialog provider would be untestable without one.
+  //
+  // «Сбросить», never «Повторить»: re-reading a file that will not parse changes nothing, which is
+  // the same reasoning `ConfigEditView` records for a corrupt config (it offers «Закрыть» and
+  // deliberately no retry).
+  const handleResetRules = async () => {
+    const ok = await confirm({
+      title: t("routing.unreadable.confirm_title"),
+      message: t("routing.unreadable.confirm_body"),
+      variant: "danger",
+      confirmText: t("routing.unreadable.confirm_cta"),
+    });
+    if (ok) await state.resetRules();
+  };
 
   // VPN mode change handler — writes to TOML config, marks dirty, notifies parent
   const handleVpnModeChange = async (mode: string) => {
@@ -87,6 +105,13 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
         />
       </div>
     );
+  }
+
+  // D-02 (30.1 milestone review, blocker 2) — BROKEN IS NOT EMPTY. Falling through to the ordinary
+  // body here rendered zero entries in every block, which is exactly what a user with no rules
+  // sees. See `RoutingRulesUnreadable` for the full reasoning and the shape of the way out.
+  if (state.loadFailed) {
+    return <RoutingRulesUnreadable onReset={handleResetRules} />;
   }
 
   return (
@@ -153,14 +178,13 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
 
         {/* Быстрые пресеты — one-click named groups (T-25 / D-01). Canon section order: sits between
             the geodata card and the routing blocks. Each tile lands its group at a smart-default block
-            via addEntry; iplist backings fetch their cache on add; block-target tiles gate on the
-            blockRouting toggle and geosite tiles on geodata-downloaded (Pitfalls #1/#3). */}
+            via addEntry; iplist backings fetch their cache on add; geosite tiles gate on
+            geodata-downloaded (Pitfall #3). */}
         <PresetGrid
           rules={state.rules}
           onAdd={state.addEntry}
           ensureGroupCache={state.ensureGroupCache}
           geodataDownloaded={state.geodataStatus.downloaded}
-          blockRoutingEnabled={toggles.blockRouting}
         />
 
         {/* Routing Blocks */}
@@ -190,21 +214,11 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           onEnsureGroupCache={state.ensureGroupCache}
         />
 
-        {/* Блокировка сайтов — экспериментальная функция, включается в Настройках */}
-        {toggles.blockRouting && (
-        <RoutingBlockCard
-          action="block"
-          vpnMode={vpnMode}
-          entries={state.rules.block}
-          geodataStatus={state.geodataStatus}
-          geodataCategories={state.geodataCategories}
-          iplistGroups={state.iplistGroups}
-          onAdd={state.addEntry}
-          onRemove={state.removeEntry}
-          onMove={state.moveEntry}
-          onEnsureGroupCache={state.ensureGroupCache}
-        />
-        )}
+        {/* Сюда до 2026-09-03 приходила третья карточка — «Заблокировать», спрятанная за
+            экспериментальным тумблером. Блокировка сайтов по домену не работала и не могла заработать
+            без правки замороженного C++-ядра или фильтрующего DNS на сервере пользователя, поэтому вся
+            функция удалена (решение владельца). Карточки нет, тумблера нет, секции
+            «Экспериментальные функции» нет — см. `useRoutingState.RouteAction`. */}
 
         {/* Фильтрация по процессам */}
         <ProcessFilterSection

@@ -13,10 +13,20 @@ use super::sanitize::*;
 // HOW TO BUMP: when raising TRUSTTUNNEL_INSTALL_SH_TAG to a newer release, fetch
 //   curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/<tag>/scripts/install.sh | sha256sum
 // and update TRUSTTUNNEL_INSTALL_SH_SHA256 to the new value IN THE SAME COMMIT.
-// The tag and the hash must always move together.
-const TRUSTTUNNEL_INSTALL_SH_TAG: &str = "v1.0.33";
+// The tag and the hash must always move together — `test_install_pin_is_the_verified_tag_hash_pair`
+// enforces that rule rather than leaving it to this comment.
+//
+// SRV-01 (2026-09-04): raised v1.0.33 → v1.1.0. Not a feature bump — a fix for two defects that
+// were live on every server we installed: v1.0.33's `is_global_ipv6` applied the multicast
+// scope-nibble test to unicast addresses, so an endpoint with
+// `allow_private_network_connections = false` (which we hard-code, see :28 / :128) REFUSED
+// tunnelled traffic to whole global IPv6 blocks while we advertised `has_ipv6 = true`; and every
+// idle non-DNS UDP flow leaked a socket toward the fd ceiling. No breaking changes, no migration,
+// and no config key we write changed — install.sh itself differs by one line. Full delta:
+// `.planning/research/trusttunnel-server-v1.1.0/`.
+const TRUSTTUNNEL_INSTALL_SH_TAG: &str = "v1.1.0";
 const TRUSTTUNNEL_INSTALL_SH_SHA256: &str =
-    "40eddf99a1214b681ef4c2c6404262303e1980c963cbe0fbbf44b9beb2904d12";
+    "771a8d755f38b8b390847473b4c0c749c5fb3a393bae3796ae024d53759ddc01";
 
 // 06-uat install-wizard slimming: the ICMP / IPv6 / Allow-private toggles were removed
 // from the wizard UI (ICMP+IPv6 HIDDEN with the feature kept ON; Allow-private REMOVED).
@@ -64,13 +74,26 @@ pub(crate) async fn await_deploy_idle(max_ms: u64) {
     }
 }
 
-// install-wizard camouflage REMOVED: the `[reverse_proxy]` / decoy feature (both the AUTO
-// local-decoy provisioning and the older MANUAL host:port reverse-proxy) was dropped — it
-// does not work against the prebuilt core (v1.0.33). Its DECOY_* constants, the
-// DECOY_SERVER_PY origin script, build_decoy_provision_block, the deploy_configure
+// install-wizard camouflage REMOVED — CANONICAL RECORD. The four other sites that mention this
+// decision (deploy.rs validate_endpoint_settings / build_intended_vpn_toml / deploy_configure,
+// sanitize.rs, ssh/mod.rs) point here instead of restating it, so it can only be wrong in one place.
+//
+// The `[reverse_proxy]` / decoy feature (both the AUTO local-decoy provisioning and the older
+// MANUAL host:port reverse-proxy) was dropped in June 2026 (d5af1a285): it returned an empty
+// response with no log line against the endpoint pinned AT THAT TIME, v1.0.33. Its DECOY_*
+// constants, the DECOY_SERVER_PY origin script, build_decoy_provision_block, the deploy_configure
 // camouflage phase, the build_intended_vpn_toml `[reverse_proxy]` emission and the
 // validate_endpoint_settings reverse-proxy gate were all removed together. The generated
 // vpn.toml NEVER contains a `[reverse_proxy]` section.
+//
+// SRV-01 (2026-09-04) moved the pin to v1.1.0, so DO NOT READ THE PARAGRAPH ABOVE AS A STATEMENT
+// ABOUT THE VERSION WE INSTALL TODAY. The cause is now understood: at v1.0.33 `reverse_proxy.rs`
+// used a plain `TcpForwarder::new`, whose gate refuses loopback under the private-network flag we
+// hard-code (:28 / :128), closing the stream before a single response byte — and upstream
+// e93c90fa37 both fixes that and adds a regression test for our June scenario verbatim. That is a
+// reason to RE-TEST, not a reason to believe: nothing here has been run against a live v1.1.0
+// endpoint. The feature stays removed until one live test says otherwise — SRV-03 in
+// `.planning/BACKLOG.md`, which owns that decision.
 
 /// Validate all user-supplied fields in EndpointSettings before building shell commands.
 fn validate_endpoint_settings(settings: &EndpointSettings) -> Result<(), String> {
@@ -92,9 +115,11 @@ fn validate_endpoint_settings(settings: &EndpointSettings) -> Result<(), String>
     // validate_metrics_address / validate_socks5_address calls) were removed with those
     // wizard options. The reverse-proxy / camouflage settings (and their
     // validate_reverse_proxy_address / validate_url_path gate) were likewise removed —
-    // that feature was dropped (it does not work on the prebuilt core v1.0.33). The
+    // that feature was dropped against the then-pinned v1.0.33; see the CAMOUFLAGE REMOVED
+    // record at the top of this file for why the v1.1.0 pin does not revive it. The
     // shared validate_url_path validator still exists for other callers; it is just no
-    // longer called from here. validate_auth_status_code stays (407/405 chooser).
+    // longer called from here. validate_auth_status_code stays — it is the auth-failure
+    // code chooser, and since SRV-01 its set is 403|404|405|407, matching upstream.
     Ok(())
 }
 
@@ -104,7 +129,8 @@ fn validate_endpoint_settings(settings: &EndpointSettings) -> Result<(), String>
 ///
 /// D-09 (06-08): `ping_enable` and `speedtest_enable` are NO LONGER written. Both
 /// were inert/dishonest (research §0/§2/§3) and are schema-Optional/default-false
-/// per CONFIGURATION.md v1.0.33, so omitting them is valid — and re-adding an inert
+/// per CONFIGURATION.md at the pinned tag — read at v1.0.33 and still true at the
+/// v1.1.0 pin (SRV-01 changed no key we write) — so omitting them is valid, and re-adding an inert
 /// line would re-introduce the dishonesty D-09 removes. The user-facing "ping"
 /// control is now the `icmp_enable` gate on the `[icmp]` section (see
 /// build_configure_commands). This is the FIRST round-2 schema break, so a re-deploy
@@ -175,9 +201,11 @@ direct = {{}}"#,
     // `[metrics]` section was likewise removed with the Metrics wizard setting.
     //
     // CAMOUFLAGE REMOVED: the `[reverse_proxy]` section (both the AUTO local-decoy branch
-    // and the MANUAL user-supplied host:port branch) was dropped — the feature does not
-    // work on the prebuilt core (v1.0.33). The generated vpn.toml therefore NEVER contains
-    // a `[reverse_proxy]` section, and there is no longer any per-mode append below.
+    // and the MANUAL user-supplied host:port branch) was dropped against the then-pinned
+    // v1.0.33 — see the CAMOUFLAGE REMOVED record at the top of this file, which is the one
+    // place that says what the v1.1.0 pin does and does not change about it. The generated
+    // vpn.toml therefore NEVER contains a `[reverse_proxy]` section, and there is no longer
+    // any per-mode append below.
     toml
 }
 
@@ -625,7 +653,11 @@ echo "Copied provided certificate files"
 {sudo}mkdir -p {dir}/certs
 {sudo}openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
     -keyout {dir}/certs/key.pem -out {dir}/certs/cert.pem \
-    -days 3650 -nodes -subj '/CN={hostname}'
+    -days 3650 -nodes -subj '/CN={hostname}' \
+    -addext 'subjectAltName=DNS:{hostname}' \
+    -addext 'basicConstraints=critical,CA:TRUE' \
+    -addext 'keyUsage=critical,digitalSignature,keyCertSign' \
+    -addext 'extendedKeyUsage=serverAuth'
 "#
             )
         }
@@ -1093,8 +1125,9 @@ async fn deploy_configure(
 
     // CAMOUFLAGE REMOVED: the AUTO local-decoy provisioning phase (its own progress step
     // that ran build_decoy_provision_block) was dropped together with the rest of the
-    // camouflage / `[reverse_proxy]` feature — it does not work on the prebuilt core
-    // (v1.0.33). deploy_configure now ends right after the configure step.
+    // camouflage / `[reverse_proxy]` feature, against the then-pinned v1.0.33 — see the
+    // CAMOUFLAGE REMOVED record at the top of this file. deploy_configure now ends right
+    // after the configure step.
 
     Ok(())
 }
@@ -1413,11 +1446,11 @@ async fn deploy_export_config(
     let policy = if settings.cert_type == "letsencrypt" {
         // Let's-Encrypt: keep today's effective behavior — OS-store validation,
         // no skip_verification, no pinned cert, custom_sni = domain (FIX-OO caution).
-        crate::ssh::server::install_cert_policy_for("letsencrypt", &settings.domain, None)
+        crate::ssh::server::install_cert_policy_for("letsencrypt", &settings.domain, None, false)
     } else {
         // Self-hosted (selfsigned / provided): probe the endpoint's leaf cert
         // and pin it. The TCP destination is the export host (domain or SSH
-        // host IP); the port is the same one export_address used.
+        // host IP, false); the port is the same one export_address used.
         let probe_host = if !settings.domain.is_empty() {
             settings.domain.clone()
         } else {
@@ -1432,29 +1465,57 @@ async fn deploy_export_config(
 
         // Probe failure is NON-FATAL: degrade to skip_verification=true with no
         // pinned cert (the minimum working state), never abort the install.
-        let pinned_pem = match crate::ssh::server::fetch_endpoint_cert(&probe_host, probe_port, &sni).await {
-            Ok(info) => match crate::ssh::server::der_b64_to_pem(&info.leaf_der_b64) {
-                Ok(pem) => Some(pem),
+        let (pinned_pem, pin_verifiable) =
+            match crate::ssh::server::fetch_endpoint_cert(&probe_host, probe_port, &sni).await {
+                Ok(info) => match crate::ssh::server::der_b64_to_pem(&info.leaf_der_b64) {
+                    // SEC-01: `pin_verifiable` is the probe's PROOF that the core will be able
+                    // to verify this endpoint against the pinned leaf under this SNI. It is the
+                    // only thing that may unlock clearing `skip_verification`.
+                    Ok(pem) => (Some(pem), info.pin_verifiable),
+                    Err(e) => {
+                        emit_log(
+                            app,
+                            "warn",
+                            &format!("Cert probe returned an unusable certificate; \
+                                      degrading to skip_verification only: {e}"),
+                        );
+                        (None, false)
+                    }
+                },
                 Err(e) => {
                     emit_log(
                         app,
                         "warn",
-                        &format!("Cert probe returned an unusable certificate; \
-                                  degrading to skip_verification only: {e}"),
+                        &format!("Cert probe failed; degrading to skip_verification only: {e}"),
                     );
-                    None
+                    (None, false)
                 }
-            },
-            Err(e) => {
-                emit_log(
-                    app,
-                    "warn",
-                    &format!("Cert probe failed; degrading to skip_verification only: {e}"),
-                );
-                None
-            }
-        };
-        crate::ssh::server::install_cert_policy_for("selfsigned", &sni, pinned_pem)
+            };
+
+        // SEC-01: say which branch was taken, every time. A fix that quietly never activates
+        // is indistinguishable from no fix at all, and this one CAN never activate — an
+        // endpoint whose certificate predates the SAN fix stays unverified by design. The log
+        // line is what makes that visible instead of silent.
+        if pin_verifiable && pinned_pem.is_some() {
+            emit_log(
+                app,
+                "info",
+                "Certificate verification ENABLED for this server: the probe verified the \
+                 endpoint against its own certificate under this SNI.",
+            );
+        } else {
+            emit_log(
+                app,
+                "warn",
+                "Certificate verification stays OFF for this server: the endpoint's \
+                 certificate could not be verified even against itself (issued before the \
+                 SAN fix, or supplied externally). Traffic is encrypted but the server is \
+                 not authenticated. Re-running the protocol install re-issues the \
+                 certificate and turns verification on.",
+            );
+        }
+
+        crate::ssh::server::install_cert_policy_for("selfsigned", &sni, pinned_pem, pin_verifiable)
     };
 
     let client_toml = crate::ssh::server::apply_install_cert_policy(&client_toml, &policy)?;
@@ -1462,10 +1523,10 @@ async fn deploy_export_config(
     emit_log(app, "debug", &format!("Generated client config:\n{client_toml}"));
     emit_step(app, "export", "ok", "Config generated");
 
-    // ── Save config locally (portable — next to exe) ──
+    // ── Save config locally (per-user data root, D-03 C) ──
     emit_step(app, "save", "progress", "Saving configuration...");
 
-    let config_dir = portable_data_dir();
+    let config_dir = user_data_dir();
 
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
@@ -1625,7 +1686,10 @@ pub async fn deploy_server(
             }
         }
         if run_fail2ban {
-            if let Err(e) = install_fail2ban(app, &handle).await {
+            // Blocker 3 (30.1 milestone review): the jail must watch the port THIS deploy
+            // is talking to, not the `ssh` service alias (= 22). Same `params.port` the
+            // firewall call one line above already threads through.
+            if let Err(e) = install_fail2ban(app, &handle, params.port).await {
                 provision_failed = true;
                 emit_log(app, "warn", &format!("fail2ban provision skipped: {e}"));
             }
@@ -1765,7 +1829,7 @@ mod tests {
         // skip_verification true, pin the probed leaf.
         let sni = derive_sni("");
         assert_eq!(sni, "trusttunnel.local");
-        let policy = install_cert_policy_for("selfsigned", &sni, Some("PEM".to_string()));
+        let policy = install_cert_policy_for("selfsigned", &sni, Some("PEM".to_string()), false);
         assert!(policy.skip_verification);
         assert_eq!(policy.custom_sni, "trusttunnel.local");
         assert_eq!(policy.pinned_pem.as_deref(), Some("PEM"));
@@ -1774,7 +1838,7 @@ mod tests {
     #[test]
     fn install_cert_policy_for_self_hosted_with_domain_uses_domain_sni() {
         let sni = derive_sni("vpn.example.com");
-        let policy = install_cert_policy_for("selfsigned", &sni, Some("PEM".to_string()));
+        let policy = install_cert_policy_for("selfsigned", &sni, Some("PEM".to_string()), false);
         assert!(policy.skip_verification);
         assert_eq!(policy.custom_sni, "vpn.example.com");
         assert_eq!(policy.pinned_pem.as_deref(), Some("PEM"));
@@ -1785,7 +1849,7 @@ mod tests {
         // Probe failure ⇒ caller passes None ⇒ skip_verification true, NO pin
         // (minimum working state), never fatal.
         let sni = derive_sni("");
-        let policy = install_cert_policy_for("selfsigned", &sni, None);
+        let policy = install_cert_policy_for("selfsigned", &sni, None, false);
         assert!(policy.skip_verification);
         assert!(policy.pinned_pem.is_none());
         assert_eq!(policy.custom_sni, "trusttunnel.local");
@@ -1794,7 +1858,7 @@ mod tests {
     #[test]
     fn install_cert_policy_for_provided_cert_type_behaves_like_self_hosted() {
         // "provided" (operator-supplied cert) is also non-letsencrypt ⇒ self-hosted path.
-        let policy = install_cert_policy_for("provided", "vpn.example.com", Some("PEM".to_string()));
+        let policy = install_cert_policy_for("provided", "vpn.example.com", Some("PEM".to_string()), false);
         assert!(policy.skip_verification);
         assert_eq!(policy.pinned_pem.as_deref(), Some("PEM"));
     }
@@ -1802,7 +1866,7 @@ mod tests {
     #[test]
     fn install_cert_policy_for_letsencrypt_keeps_os_store_path() {
         // Let's-Encrypt: no skip_verification, no pin, custom_sni = domain.
-        let policy = install_cert_policy_for("letsencrypt", "vpn.example.com", Some("IGNORED".to_string()));
+        let policy = install_cert_policy_for("letsencrypt", "vpn.example.com", Some("IGNORED".to_string()), false);
         assert!(!policy.skip_verification);
         assert!(policy.pinned_pem.is_none(), "LE must never pin");
         assert_eq!(policy.custom_sni, "vpn.example.com");
@@ -1998,6 +2062,118 @@ mod tests {
         settings.cert_type = "letsencrypt".to_string();
         let output = build_configure_commands(&settings, "sudo ", false, false);
         assert!(output.contains("certbot"), "letsencrypt should use certbot");
+    }
+
+    // ── SEC-01 ───────────────────────────────────────────────────────────────────────
+    //
+    // For every server that was not Let's Encrypt, this app wrote `skip_verification = true`
+    // NEXT TO a pinned certificate. The core reads the pin only when that flag is false, and
+    // the flag short-circuits the verification callback before the host-name check — so the
+    // pin was dead and nothing at all was verified: no chain, no name. A machine-in-the-middle
+    // could present any certificate and be accepted, behind an ordinary green «Подключено».
+    //
+    // These tests pin the relationship between the two keys, because that relationship IS the
+    // defect. A test that merely checked "a pin is written" would have passed throughout.
+
+    /// Truth: a certificate the probe PROVED verifiable turns verification ON and keeps the
+    /// pin. This is the fix; if this reverts, the hole is back.
+    #[test]
+    fn sec01_proven_pin_enables_verification() {
+        let policy = install_cert_policy_for("selfsigned", "trusttunnel.local", Some("PEM".into()), true);
+        assert!(
+            !policy.skip_verification,
+            "a proven pin must clear skip_verification — otherwise the core ignores the pin \
+             and verifies nothing"
+        );
+        assert_eq!(
+            policy.pinned_pem.as_deref(),
+            Some("PEM"),
+            "the pin must survive: with verification on it is the trust anchor"
+        );
+    }
+
+    /// Truth: an UNPROVEN pin must not turn verification on. This is what makes the fix safe
+    /// to ship without a self-signed server to test against — a certificate issued before the
+    /// SAN fix cannot be verified, and enabling verification for it would take that server off
+    /// the air entirely.
+    #[test]
+    fn sec01_unproven_pin_leaves_todays_behaviour_untouched() {
+        let policy = install_cert_policy_for("selfsigned", "trusttunnel.local", Some("PEM".into()), false);
+        assert!(
+            policy.skip_verification,
+            "without proof the old behaviour must be preserved verbatim"
+        );
+        assert_eq!(policy.pinned_pem.as_deref(), Some("PEM"));
+    }
+
+    /// Truth: proof without a pin must NOT enable verification. With no certificate written
+    /// there is no trust anchor, so clearing the flag would leave the core with nothing to
+    /// verify against and the connection would simply fail.
+    #[test]
+    fn sec01_proof_without_a_pin_must_not_enable_verification() {
+        let policy = install_cert_policy_for("selfsigned", "trusttunnel.local", None, true);
+        assert!(
+            policy.skip_verification,
+            "no pin means no anchor; verification must stay off"
+        );
+        assert!(policy.pinned_pem.is_none());
+    }
+
+    /// Truth, stated as the invariant rather than case by case: a pin is NEVER written into a
+    /// config that also disables verification while the pin was proven usable. That pairing is
+    /// exactly the defect, and this asserts it cannot be reintroduced by any input combination.
+    #[test]
+    fn sec01_a_proven_pin_is_never_written_alongside_a_disabled_check() {
+        for cert_type in ["selfsigned", "provided", "letsencrypt"] {
+            for pin in [None, Some("PEM".to_string())] {
+                for proven in [false, true] {
+                    let p = install_cert_policy_for(cert_type, "vpn.example.com", pin.clone(), proven);
+                    if p.skip_verification {
+                        assert!(
+                            !(proven && p.pinned_pem.is_some()),
+                            "{cert_type}/proven={proven}: a PROVEN pin was written next to a \
+                             disabled check — that is the SEC-01 defect itself"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Truth: Let's Encrypt is untouched by all of this. It never pins and always verifies,
+    /// which is why servers with a real domain were never exposed.
+    #[test]
+    fn sec01_letsencrypt_still_verifies_and_never_pins() {
+        let policy = install_cert_policy_for("letsencrypt", "vpn.example.com", Some("PEM".into()), true);
+        assert!(!policy.skip_verification);
+        assert!(policy.pinned_pem.is_none(), "LE must never pin");
+    }
+
+    /// Truth: the self-signed certificate is issued with the extensions a modern verifier
+    /// actually reads. Without these the certificate cannot be verified even in principle —
+    /// CN has not been consulted for name matching for years — so `pin_verifiable` would be
+    /// false forever and the fix above would be dead code that never runs.
+    #[test]
+    fn sec01_selfsigned_cert_carries_what_a_verifier_reads() {
+        let settings = test_settings();
+        let output = build_configure_commands(&settings, "sudo ", false, false);
+
+        assert!(
+            output.contains("subjectAltName=DNS:"),
+            "no SAN: name verification is impossible and the cert can never be verified\n{output}"
+        );
+        assert!(
+            output.contains("extendedKeyUsage=serverAuth"),
+            "no serverAuth EKU: strict verifiers reject the cert for TLS server use\n{output}"
+        );
+        assert!(
+            output.contains("basicConstraints=critical,CA:TRUE"),
+            "not a CA: a self-signed leaf must be its own trust anchor to be pinnable\n{output}"
+        );
+        assert!(
+            output.contains("keyUsage=critical,digitalSignature,keyCertSign"),
+            "keyCertSign missing: the cert cannot act as its own issuer\n{output}"
+        );
     }
 
     #[test]
@@ -2398,6 +2574,28 @@ mod tests {
                 .chars()
                 .all(|c| c.is_ascii_hexdigit() && (!c.is_alphabetic() || c.is_lowercase())),
             "pinned SHA-256 must be 64 lowercase hex chars"
+        );
+    }
+
+    #[test]
+    fn test_install_pin_is_the_verified_tag_hash_pair() {
+        // The two neighbouring tests read the constants, so they pass for ANY pair — including a
+        // tag moved on its own, which is the one mistake the pin can actually make. Bumping the
+        // tag without the hash turns the fail-closed gate into a guaranteed install failure;
+        // bumping the hash without the tag would silently authorise a script we never checked.
+        // Spelling the pair out here forces both to be re-verified together, which is the rule
+        // the constants' own HOW TO BUMP comment states.
+        //
+        // Verified 2026-09-04:
+        //   curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/v1.1.0/scripts/install.sh | sha256sum
+        assert_eq!(
+            TRUSTTUNNEL_INSTALL_SH_TAG, "v1.1.0",
+            "the pinned release tag changed — re-fetch the hash and update this pair together"
+        );
+        assert_eq!(
+            TRUSTTUNNEL_INSTALL_SH_SHA256,
+            "771a8d755f38b8b390847473b4c0c749c5fb3a393bae3796ae024d53759ddc01",
+            "the pinned hash must be the one sha256sum prints for install.sh AT THAT TAG"
         );
     }
 

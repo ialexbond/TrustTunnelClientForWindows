@@ -39,7 +39,6 @@ function makeRules(overrides?: Partial<RoutingRules>): RoutingRules {
     proxy: [
       { id: "r1", type: "domain", value: "example.com", label: undefined },
     ],
-    block: [],
     process_mode: "exclude",
     processes: [],
     ...overrides,
@@ -73,6 +72,7 @@ describe("useRoutingState", () => {
     vi.clearAllMocks();
     pushSpy.mockClear();
     mockInvoke.mockResolvedValue(null);
+    localStorage.clear();
   });
 
   // ── Initial state ──────────────────────────────────
@@ -84,7 +84,6 @@ describe("useRoutingState", () => {
 
     expect(result.current.rules.proxy).toEqual([]);
     expect(result.current.rules.direct).toEqual([]);
-    expect(result.current.rules.block).toEqual([]);
     expect(result.current.loading).toBe(true);
   });
 
@@ -138,7 +137,7 @@ describe("useRoutingState", () => {
   // ── addEntry ───────────────────────────────────────
 
   it("adds an entry to the correct block", async () => {
-    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
 
     const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
@@ -223,7 +222,7 @@ describe("useRoutingState", () => {
   });
 
   it("addEntry detects geoip prefix and sets correct type", async () => {
-    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
 
     const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
@@ -240,7 +239,7 @@ describe("useRoutingState", () => {
   });
 
   it("addEntry detects IP address type", async () => {
-    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
 
     const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
@@ -249,15 +248,15 @@ describe("useRoutingState", () => {
     });
 
     act(() => {
-      result.current.addEntry("block", "192.168.1.1");
+      result.current.addEntry("direct", "192.168.1.1");
     });
 
-    expect(result.current.rules.block[0].type).toBe("ip");
-    expect(result.current.rules.block[0].value).toBe("192.168.1.1");
+    expect(result.current.rules.direct[0].type).toBe("ip");
+    expect(result.current.rules.direct[0].value).toBe("192.168.1.1");
   });
 
   it("addEntry detects CIDR type", async () => {
-    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
 
     const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
@@ -396,7 +395,7 @@ describe("useRoutingState", () => {
   // ── Dirty tracking ────────────────────────────────
 
   it("dirty becomes true after addEntry, false after save", async () => {
-    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
@@ -465,7 +464,6 @@ describe("useRoutingState", () => {
         rules: expect.objectContaining({
           proxy: expect.any(Array),
           direct: expect.any(Array),
-          block: expect.any(Array),
           process_mode: "exclude",
           processes: [],
         }),
@@ -544,16 +542,20 @@ describe("useRoutingState", () => {
   });
 
   it("importRules loads imported data and marks dirty", async () => {
-    const imported: RoutingRules = {
+    // Файл, экспортированный ДО удаления блокировки сайтов (2026-09-03), несёт `block` и
+    // `block_enabled`. Импорт обязан их пережить: они приходят с бэкенда как есть, а хук их просто
+    // не читает. Поэтому фикстура намеренно шире типа — так выглядит реальный файл на диске.
+    const imported = {
       direct: [{ id: "i1", type: "domain", value: "imported.com" }],
       proxy: [],
       block: [{ id: "i2", type: "ip", value: "1.2.3.4" }],
       process_mode: "only",
       processes: ["firefox.exe"],
-    };
+      block_enabled: true,
+    } as unknown as RoutingRules;
 
     mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "load_routing_rules") return makeRules({ proxy: [], direct: [], block: [] });
+      if (cmd === "load_routing_rules") return makeRules({ proxy: [], direct: [] });
       if (cmd === "get_geodata_status") return { downloaded: false, geoip_exists: false, geosite_exists: false, geoip_categories_count: 0, geosite_categories_count: 0 };
       if (cmd === "import_routing_rules") return imported;
       return null;
@@ -574,8 +576,11 @@ describe("useRoutingState", () => {
 
     expect(result.current.rules.direct).toHaveLength(1);
     expect(result.current.rules.direct[0].value).toBe("imported.com");
-    expect(result.current.rules.block).toHaveLength(1);
-    expect(result.current.rules.block[0].value).toBe("1.2.3.4");
+    // Ключи удалённой функции НЕ подхватываются обратно в состояние вкладки: их некуда рисовать,
+    // а подобранное состояние поехало бы дальше в payload сохранения и перезаписало бы то, что
+    // бережёт бэкенд (`CARRIED_LEGACY_KEYS` в routing_rules.rs).
+    expect("block" in result.current.rules).toBe(false);
+    expect("block_enabled" in result.current.rules).toBe(false);
     expect(result.current.rules.process_mode).toBe("only");
     expect(result.current.rules.processes).toEqual(["firefox.exe"]);
     expect(result.current.dirty).toBe(true);
@@ -904,7 +909,7 @@ describe("useRoutingState", () => {
   // ── save completes without error ────────────────────
 
   it("save completes and resets dirty flag", async () => {
-    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
 
     const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
@@ -966,7 +971,6 @@ describe("useRoutingState", () => {
       makeRules({
         proxy: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
         direct: [],
-        block: [],
       }),
     );
 
@@ -1003,7 +1007,6 @@ describe("useRoutingState", () => {
       makeRules({
         proxy: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
         direct: [],
-        block: [],
       }),
     );
 
@@ -1021,7 +1024,7 @@ describe("useRoutingState", () => {
     // D-05: a group is persisted as a single reference chip inside a block, expanded to domains
     // only at resolve-time. Adding a group must create exactly one RuleEntry, and saving must
     // write exactly one row for it — never a domain list.
-    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
 
     const { result } = renderHook(
       () => useRoutingState({ ...defaultOpts, status: "connected" }),
@@ -1055,7 +1058,6 @@ describe("useRoutingState", () => {
     const rules = makeRules({
       direct: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
       proxy: [],
-      block: [],
     });
     setupInvokeForLoad(rules);
 
@@ -1079,7 +1081,6 @@ describe("useRoutingState", () => {
     const rules = makeRules({
       direct: [{ id: "ig1", type: "iplist_group", value: "iplist_group:games" }],
       proxy: [{ id: "ig2", type: "iplist_group", value: "iplist_group:games" }],
-      block: [],
     });
     setupInvokeForLoad(rules);
 
@@ -1106,7 +1107,7 @@ describe("useRoutingState", () => {
 
   function setupInvokeWithGroups() {
     mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "load_routing_rules") return makeRules({ proxy: [], direct: [], block: [] });
+      if (cmd === "load_routing_rules") return makeRules({ proxy: [], direct: [] });
       if (cmd === "get_geodata_status")
         return { downloaded: false, geoip_exists: false, geosite_exists: false, geoip_categories_count: 0, geosite_categories_count: 0 };
       if (cmd === "get_iplist_groups")
@@ -1193,5 +1194,245 @@ describe("useRoutingState", () => {
       expect.anything(),
     );
     expect(mockInvoke).not.toHaveBeenCalledWith("fetch_whitelist_domains");
+  });
+  // ── SITE BLOCKING IS GONE (2026-09-03) — the browser must not touch what is left of it ──
+  //
+  // Здесь раньше стояли четыре теста D-01: «флаг блокировки доезжает до Rust в обе стороны».
+  // Блокировка сайтов удалена, поэтому у тех тестов не осталось предмета — а тест, потерявший
+  // предмет, обязан быть переписан под то, что есть сейчас, а не оставлен зеленеть впустую.
+  //
+  // Сейчас проверяется ДРУГОЕ, и это самое опасное место всей правки. `routing_rules.json` на диске
+  // у каждого, кто хоть раз открывал вкладку, содержит `block` и `block_enabled`. Бэкенд их
+  // ЧИТАЕТ терпимо и ПЕРЕНОСИТ при каждом сохранении (`CARRIED_LEGACY_KEYS` в routing_rules.rs —
+  // там же живут rust-тесты round-trip). Задача этой стороны моста ровно одна: не мешать. Отправь
+  // браузер `block` обратно в payload — и он перезапишет своей (пустой) копией то, что бэкенд
+  // бережёт, то есть сотрёт список доменов, набранный руками.
+
+  /** The `rules` argument of the most recent `save_routing_rules` call — what reached the writer. */
+  function lastSavedRules() {
+    const calls = mockInvoke.mock.calls.filter((c: unknown[]) => c[0] === "save_routing_rules");
+    expect(calls.length).toBeGreaterThan(0);
+    return (calls[calls.length - 1][1] as { rules: Record<string, unknown> }).rules;
+  }
+
+  /** Документ ровно того вида, что лежит сейчас на реальной машине: с обоими удалёнными ключами. */
+  function rulesFileWithLegacyBlockKeys(): RoutingRules {
+    return {
+      ...makeRules(),
+      block: [
+        { id: "b1", type: "domain", value: "ads.example.com", label: undefined },
+        { id: "b2", type: "domain", value: "tracker.example.net", label: undefined },
+      ],
+      block_enabled: true,
+    } as unknown as RoutingRules;
+  }
+
+  it("load(): a rules file carrying the removed keys still loads — the rest of it is read", async () => {
+    // Нечитаемый файл правил ОТМЕНЯЕТ подключение (D-02), поэтому «упасть на лишнем ключе» здесь
+    // означало бы сборку, которая отказывается подключаться у каждого, кто пользовался блокировкой.
+    setupInvokeForLoad(rulesFileWithLegacyBlockKeys());
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.loadFailed).toBe(false);
+    expect(result.current.rules.proxy.map((e) => e.value)).toEqual(["example.com"]);
+  });
+
+  it("save(): the payload carries NO block keys — the browser must not overwrite what Rust preserves", async () => {
+    // САМАЯ ВАЖНАЯ ПРОВЕРКА этой правки со стороны фронтенда. Отправить `block: []` было бы хуже,
+    // чем не отправить ничего: бэкенд переносит ключи из ПРЕДЫДУЩЕГО документа, но `block` из
+    // payload лёг бы поверх — и список доменов пользователя исчез бы при первой же правке правил.
+    setupInvokeForLoad(rulesFileWithLegacyBlockKeys());
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.save();
+    });
+
+    const saved = lastSavedRules();
+    expect("block" in saved).toBe(false);
+    expect("block_enabled" in saved).toBe(false);
+    // …и это не «сохранение вообще ничего не отправило»: живая половина документа на месте.
+    expect(saved.direct).toEqual([]);
+    expect((saved.proxy as { value: string }[]).map((e) => e.value)).toEqual(["example.com"]);
+  });
+
+  it("resetRules(): the reset document carries no block keys either", async () => {
+    // Сброс пишет пустой документ отдельной, выписанной руками формой (не через toBackendPayload),
+    // поэтому это вторая дверь к тому же свойству — и её надо запирать отдельно.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_routing_rules") throw "corrupt";
+      if (cmd === "get_geodata_status")
+        return { downloaded: false, geoip_exists: false, geosite_exists: false, geoip_categories_count: 0, geosite_categories_count: 0 };
+      return null;
+    });
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.loadFailed).toBe(true);
+    });
+
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
+    await act(async () => {
+      await result.current.resetRules();
+    });
+
+    const saved = lastSavedRules();
+    expect("block" in saved).toBe(false);
+    expect("block_enabled" in saved).toBe(false);
+  });
+
+  // ── D-02 (30.1 blocker 2): broken is not the same thing as empty ──────────
+
+  it("a rules file that cannot be read is reported as UNREADABLE, not rendered as an empty list", async () => {
+    // The defect: the catch arm raised a snackbar and left the panel showing zero rules — which is
+    // exactly what a user with no rules sees. Somebody whose file is merely broken was being told
+    // «у вас нет правил», and the obvious next move (start typing rules again) would have
+    // overwritten the file they still had.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_routing_rules") {
+        throw new Error("Failed to parse routing_rules.json: expected `,` at line 12 column 3");
+      }
+      return null;
+    });
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.loadFailed).toBe(true);
+    expect(result.current.rules.direct).toEqual([]);
+  });
+
+  it("a healthy load leaves the unreadable flag down, and a later success clears an earlier failure", async () => {
+    // The flag has to be a fact about the LAST load, not a latch. A user who resets and reloads
+    // must get their panel back; a flag that never clears would strand them on the error screen.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_routing_rules") throw new Error("broken");
+      return null;
+    });
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => expect(result.current.loadFailed).toBe(true));
+
+    setupInvokeForLoad(makeRules());
+    await act(async () => {
+      await result.current.load();
+    });
+
+    expect(result.current.loadFailed).toBe(false);
+    expect(result.current.rules.proxy).toHaveLength(1);
+  });
+
+  it("resetRules writes an EMPTY rules document through the existing save command", async () => {
+    // The way out. It reuses `save_routing_rules` rather than minting a Tauri command, so it
+    // inherits the atomic writer from 30.1-01 and adds no new capability surface — and the file it
+    // leaves behind must be one `load_routing_rules` can parse, or the user is back where they
+    // started.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_routing_rules") throw new Error("broken");
+      return null;
+    });
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => expect(result.current.loadFailed).toBe(true));
+
+    // The reload after the reset must succeed, or the panel would stay on the error state.
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [] }));
+    await act(async () => {
+      await result.current.resetRules();
+    });
+
+    const saved = lastSavedRules();
+    expect(saved.direct).toEqual([]);
+    expect(saved.proxy).toEqual([]);
+    expect(saved.processes).toEqual([]);
+    expect(result.current.loadFailed).toBe(false);
+  });
+
+  // ── Item 17: a legacy bare group value keeps its persisted type ───────────
+  //
+  // Both normaliser sites get their OWN case. They were byte-identical copies, which is exactly
+  // how somebody fixes one and ships the bug through the other.
+
+  it("load(): a legacy bare iplist_group value keeps its persisted type", async () => {
+    // Written by an older build: the type is on the record but the value has no `iplist_group:`
+    // prefix. Deriving the type from the value alone re-types it as a plain domain — the group
+    // stops routing, stops refreshing from its cache, and the chip still looks active.
+    setupInvokeForLoad(
+      makeRules({
+        proxy: [{ id: "g1", type: "iplist_group", value: "games", label: undefined }],
+      }),
+    );
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.rules.proxy[0].type).toBe("iplist_group");
+    expect(result.current.rules.proxy[0].value).toBe("games");
+  });
+
+  it("importRules(): a legacy bare iplist_group value keeps its persisted type", async () => {
+    // The import door is the OTHER copy. Fixing only the load path leaves this one re-typing every
+    // legacy entry a user imports from their own export.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_routing_rules") return makeRules();
+      if (cmd === "import_routing_rules") {
+        return makeRules({
+          direct: [{ id: "g2", type: "iplist_group", value: "games", label: undefined }],
+        });
+      }
+      return null;
+    });
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.importRules();
+    });
+
+    expect(result.current.rules.direct[0].type).toBe("iplist_group");
+    expect(result.current.rules.direct[0].value).toBe("games");
+  });
+
+  it("an entry with NO persisted type still falls back to deriving one", async () => {
+    // Trusting the persisted type must not become «never derive». A record written before the type
+    // was persisted at all, or hand-edited, still needs the value read.
+    const legacyEntry = { id: "g3", value: "geosite:discord", label: undefined } as unknown as {
+      id: string;
+      type: "domain";
+      value: string;
+      label: undefined;
+    };
+    setupInvokeForLoad(makeRules({ proxy: [legacyEntry] }));
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.rules.proxy[0].type).toBe("geosite");
+    expect(result.current.rules.proxy[0].value).toBe("discord");
+  });
+
+  it("a modern prefixed value still has its prefix stripped for display", async () => {
+    // The round-trip that already worked must keep working: persisted type present AND the value
+    // carrying the wire prefix. Strip on the FINAL type, so this is unchanged.
+    setupInvokeForLoad(
+      makeRules({
+        proxy: [{ id: "g4", type: "geoip", value: "geoip:ru", label: undefined }],
+      }),
+    );
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.rules.proxy[0].type).toBe("geoip");
+    expect(result.current.rules.proxy[0].value).toBe("ru");
   });
 });

@@ -4,6 +4,7 @@ import { useConfigList, type ConfigSummary } from "../../shared/hooks/useConfigL
 import { usePerConfigPing, type PingTarget } from "../../shared/hooks/usePerConfigPing";
 import type { ConfigPingSource } from "../../shared/hooks/useConfigPingSource";
 import { useConfigMutations } from "../../shared/hooks/useConfigMutations";
+import { useConfigFileGone } from "../../shared/hooks/useConfigFileGone";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { samePath } from "../../shared/utils/samePath";
@@ -231,6 +232,21 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
       };
     }, []);
 
+    // ─── G-30.1-01: the two per-config modals follow the folder, like everything else ───
+    // The card list is reconciled folder-first (`list_configs` prunes what is gone), so a config
+    // deleted outside the app loses its card immediately — but these two modals are bound to ONE
+    // `.toml` each and, until this, learned nothing. T-14: the owner deleted a config from the
+    // folder, the card went, and the settings window he had open for it stayed, still offering
+    // «Сохранить и переподключить» for a file that had stopped existing.
+    //
+    // Asked per-modal rather than derived from `visibleConfigs` membership: that list is emptied
+    // when `list_configs` itself fails (27 D-15) and its surviving twin's path moves with the active
+    // config (dedupeConfigsByIdentity), so either could report a deletion that never happened. See
+    // useConfigFileGone for the whole argument. What each modal DOES about it differs, and is argued
+    // at each component — an editor loses its save, a transfer surface keeps its link.
+    const editFileMissing = useConfigFileGone(editConfig?.path ?? null);
+    const qrFileMissing = useConfigFileGone(qrConfig?.path ?? null);
+
     // A config is "live-active" only when its path matches AND a tunnel is actually up/in-flight
     // (not merely the last-used pointer). After a disconnect the former-active config is NO LONGER
     // live-active, so it behaves like any inactive config: its primary CONNECTS (not disconnects),
@@ -344,13 +360,14 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
             // Phase 14 (D-13): lock the active-config save while a switch is in flight (a re-save
             // would fire a competing reconnect). ConfigEditView only acts on isActiveConfig.
             isSwitching={isSwitching}
+            fileMissing={editFileMissing}
           />
         )}
         {/* Per-config QR/link transfer modal (D-09) — kept MOUNTED while a config is selected
             so the Modal exit animation plays on close (parent must not early-return null). The
             deeplink is generated LOCALLY (export_config_deeplink_local) inside ConfigQr — no SSH. */}
         {qrConfig && (
-          <ConfigQr isOpen={qrOpen} onClose={closeQr} config={qrConfig} />
+          <ConfigQr isOpen={qrOpen} onClose={closeQr} config={qrConfig} fileMissing={qrFileMissing} />
         )}
       </div>
     );

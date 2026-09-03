@@ -384,11 +384,8 @@ static TunnelDomainLookupAction pass_through_domain_lookup(
     return action;
 }
 
-static bool is_domain_scannable_port(uint16_t port) {
-    static constexpr uint16_t SCANNABLE_PORTS[] = {443, 80, 8080, 8008};
-    return std::any_of(std::begin(SCANNABLE_PORTS), std::end(SCANNABLE_PORTS), [port](uint16_t i) {
-        return port == i;
-    });
+static bool is_domain_scannable_port(const Tunnel *self, uint16_t port) {
+    return self->vpn->exclusions_scannable_ports.contains(port);
 }
 
 static void dns_resolver_handler(void *arg, ClientEvent what, void *data) {
@@ -514,12 +511,11 @@ static void report_connection_info(const Tunnel *self, VpnConnection *conn, cons
 }
 
 static std::optional<DnsHandlerParameters> make_dns_handler_parameters(Tunnel *self) {
-    DnsHandlerParameters parameters{.cert_verify_handler = self->vpn->parameters.cert_verify_handler};
-    if (self->vpn->listener_config.dns_upstreams.size) {
-        if (!self->vpn->dns_proxy_listener) {
-            log_tun(self, warn, "There are user-provided DNS upstreams, but the DNS proxy listener is not initialized");
-            return std::nullopt;
-        }
+    DnsHandlerParameters parameters{
+            .cert_verify_handler = self->vpn->parameters.cert_verify_handler,
+            .alt_exclusions_route = self->vpn->listener_config.dns_alt_exclusions_route,
+    };
+    if (self->vpn->listener_config.dns_upstreams.size && self->vpn->dns_proxy_listener) {
         for (size_t i = 0; i < self->vpn->listener_config.dns_upstreams.size; ++i) {
             parameters.dns_upstreams.emplace_back(
                     DnsProxyAccessor::Upstream{.address = self->vpn->listener_config.dns_upstreams.data[i]});
@@ -920,9 +916,10 @@ static std::shared_ptr<ServerUpstream> select_upstream(
             }
         }
         if (const SocketAddress *dst; // NOLINT(cppcoreguidelines-init-variables)
-                conn != nullptr && conn->flags.test(CONNF_LOOKINGUP_DOMAIN) && conn->flags.test(CONNF_SUSPECT_EXCLUSION)
+                conn != nullptr && conn->flags.test(CONNF_LOOKINGUP_DOMAIN)
+                && (conn->flags.test(CONNF_SUSPECT_EXCLUSION) || self->vpn->exclusions_tcp_early_ack_enabled)
                 && nullptr != (dst = std::get_if<SocketAddress>(&conn->addr.dst))
-                && is_domain_scannable_port(dst->port())) {
+                && is_domain_scannable_port(self, dst->port())) {
             return self->fake_upstream;
         }
         return select_upstream(self, vpn_mode_to_action(self->vpn->domain_filter.get_mode()), nullptr);
@@ -1037,7 +1034,7 @@ std::optional<VpnConnectAction> Tunnel::finalize_connect_action(ConnectRequestRe
             break;
         }
         case DFMS_SUSPECT_EXCLUSION:
-            if (is_domain_scannable_port(dst->port())) {
+            if (is_domain_scannable_port(this, dst->port())) {
                 log_conn(this, conn, dbg, "Connection may target excluded host");
                 conn->flags.set(CONNF_SUSPECT_EXCLUSION);
             }
@@ -1468,15 +1465,17 @@ void Tunnel::on_exclusions_updated() {
     // exclusions are resolved in background
     this->dns_resolver->stop_resolving_queues(1 << VDRQ_BACKGROUND);
 
-    if (this->vpn->endpoint_upstream != nullptr) {
+    if (this->vpn->endpoint_upstream != nullptr && this->vpn->exclusions_preresolve_enabled) {
         std::vector<std::string_view> names = this->vpn->domain_filter.get_resolvable_exclusions();
-        for (std::string_view name : names) {
-            if (!this->dns_resolver->resolve(VDRQ_BACKGROUND, std::string(name)).has_value()) {
-                log_tun(this, dbg, "Failed to start resolve of {}", name);
+        size_t end = std::min((size_t) this->vpn->exclusions_preresolve_max_queries, names.size());
+        for (size_t i = 0; i < end; ++i) {
+            if (!this->dns_resolver->resolve(VDRQ_BACKGROUND, std::string(names[i])).has_value()) {
+                log_tun(this, dbg, "Failed to start resolve of {}", names[i]);
             }
         }
     } else {
-        log_tun(this, dbg, "Skipping exclusions resolve as there's no connection to endpoint");
+        log_tun(this, dbg, "Skipping exclusions resolve: {}",
+                this->vpn->exclusions_preresolve_enabled ? "not connected to endpoint" : "disabled");
     }
 
     using namespace std::chrono;
@@ -1557,8 +1556,15 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
             return;
         }
 
-        if (listener.get() == this->vpn->dns_proxy_listener.get() || listener.get() == this->dns_handler.get()) {
+        if (listener.get() == this->vpn->dns_proxy_listener.get()) {
             this->complete_connect_request(conn->client_id, VPN_CA_FORCE_REDIRECT);
+            return;
+        }
+
+        if (listener.get() == this->dns_handler.get()) {
+            VpnConnectAction action =
+                    (client_event->flags & CCRF_DNS_HANDLER_BYPASS) ? VPN_CA_FORCE_BYPASS : VPN_CA_FORCE_REDIRECT;
+            this->complete_connect_request(conn->client_id, action);
             return;
         }
 

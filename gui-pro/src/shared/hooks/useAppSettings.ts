@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 /**
  * App-level «Авто-режим» settings store (Phase 12, plan 12-03).
@@ -276,6 +277,69 @@ export function useAppSettings(): UseAppSettings {
       readBoolean(APP_SETTINGS_KEYS.masterOn, APP_SETTINGS_DEFAULTS.masterOn),
       readStringArray(APP_SETTINGS_KEYS.failoverExcludedIds),
     );
+  }, []);
+
+  // Item 11 (30.1 review): keep the exclusion set FOLLOWING the manifest.
+  //
+  // The direction of authority, stated plainly because getting it backwards is the whole bug: the
+  // MANIFEST is the source of truth for which config ids exist, and this set is a browser-side
+  // OPINION about those ids — never a second register of them. Nothing in the front end used to
+  // remove an id from it (there was no `removeItem` for this key anywhere in `gui-pro/src`), so a
+  // config the user opted out of and then deleted left its id here forever. Every failover write
+  // mirrors the WHOLE set, so the browser then handed Rust back exactly the dead id Rust had just
+  // pruned on its side. And because migration-derived ids are path-derived and CAN recur,
+  // re-importing the same file brought that server back already excluded — silently skipped by
+  // failover with no switch on screen explaining why.
+  //
+  // Reconciles on mount and on every `configs-changed`, the fs-watcher event `useConfigList` and
+  // `useConfigMutations` already listen to: no new channel, no polling. Several instances of this
+  // hook coexist and each will reconcile, which is harmless — the first write broadcasts, the rest
+  // find nothing left to drop.
+  //
+  // It writes NOTHING when nothing died, which is what keeps the seed effect above honestly
+  // "exactly one startup push" on the ordinary path.
+  useEffect(() => {
+    let cancelled = false;
+
+    const reconcile = async () => {
+      let live: Array<{ id: string }>;
+      try {
+        live = await invoke<Array<{ id: string }>>("list_configs");
+      } catch {
+        // «The manifest could not be read» is NOT the same fact as «none of these configs exist».
+        // Treating it as such would destroy the user's entire opt-out set on a transient hiccup —
+        // a worse failure than the one this reconcile repairs. Leave the set exactly as it is.
+        return;
+      }
+      if (cancelled || !Array.isArray(live)) return;
+
+      const liveIds = new Set(live.map((c) => c.id));
+      const stored = readStringArray(APP_SETTINGS_KEYS.failoverExcludedIds);
+      const kept = stored.filter((id) => liveIds.has(id));
+      if (kept.length === stored.length) return; // nothing died — no write, no mirror push
+
+      localStorage.setItem(
+        APP_SETTINGS_KEYS.failoverExcludedIds,
+        JSON.stringify(kept),
+      );
+      setSettings((s) => ({ ...s, failoverExcludedIds: kept }));
+      broadcastSettingsChanged();
+      // Mirror the PRUNED set, carrying the current master value exactly as the setters do. This
+      // is the line that stops the browser re-supplying an id Rust removed.
+      mirrorFailoverToRust(
+        readBoolean(APP_SETTINGS_KEYS.masterOn, APP_SETTINGS_DEFAULTS.masterOn),
+        kept,
+      );
+    };
+
+    void reconcile();
+    const unlisten = listen("configs-changed", () => {
+      void reconcile();
+    });
+    return () => {
+      cancelled = true;
+      void unlisten.then((f) => f());
+    };
   }, []);
 
   function persistBoolean(key: string, value: boolean): void {

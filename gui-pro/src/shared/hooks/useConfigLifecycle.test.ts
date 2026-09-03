@@ -333,3 +333,64 @@ describe("useConfigLifecycle (H-2 characterization)", () => {
     expect(events.count("config-file-changed")).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// The raw-path-comparison class (30.1 class sweep) — site 3 of 3, and the one
+// the milestone review never named.
+//
+// This watcher compared `event.payload.path` to `config.configPath` with a byte
+// `===`. The path the fs-watcher reports and the path the app stored are the SAME
+// FILE routinely arriving in different string forms on Windows — `C:\…` vs `C:/…`,
+// `c:` vs `C:`. On a mismatch the branch simply did not run, so an external delete
+// of the ACTIVE config was not recognised: the active pointer was never cleared and
+// the UI kept rendering — and offering «Подключить» on — a config that is gone.
+//
+// Its two siblings (useVpnActions.markLastUsed, useAutoConnect's last-used
+// reconciliation) carry the same note; all three now compare through `samePath`.
+// ─────────────────────────────────────────────────────────────────────────
+describe("useConfigLifecycle — the raw-path-comparison class (30.1, site 3 of 3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(invoke).mockResolvedValue(null as never);
+  });
+
+  it("recognises an external delete reported with backslashes and a differently-cased drive letter", async () => {
+    localStorage.setItem("tt_config_path", "C:/cfg/client.toml");
+    const { params, setters } = makeParams({ configPath: "C:/cfg/client.toml" });
+    const events = captureListeners();
+
+    renderHook(() => useConfigLifecycle(params));
+
+    // The very same file, in Windows' own native spelling. A byte comparison calls this a
+    // different file and silently does nothing.
+    await act(async () => {
+      events.emitEvent("config-file-changed", { exists: false, path: "c:\\cfg\\client.toml" });
+    });
+
+    // The active pointer is cleared on all three surfaces that hold it.
+    expect(localStorage.getItem("tt_config_path")).toBeNull();
+    expect(setters.setConfig).toHaveBeenCalledWith({ configPath: "", logLevel: "info" });
+    expect(setters.setWizardKey).toHaveBeenCalled();
+    // …and the user is told, because this one really was an external delete.
+    expect(setters.pushSuccess).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  it("still leaves the active pointer alone when a DIFFERENT config is deleted", async () => {
+    // The helper must not become so forgiving that any delete clears the pointer — normalizing
+    // separators and case is the whole latitude it is allowed.
+    localStorage.setItem("tt_config_path", "C:/cfg/client.toml");
+    const { params, setters } = makeParams({ configPath: "C:/cfg/client.toml" });
+    const events = captureListeners();
+
+    renderHook(() => useConfigLifecycle(params));
+
+    await act(async () => {
+      events.emitEvent("config-file-changed", { exists: false, path: "C:\\cfg\\other.toml" });
+    });
+
+    expect(localStorage.getItem("tt_config_path")).toBe("C:/cfg/client.toml");
+    expect(setters.setConfig).not.toHaveBeenCalled();
+    expect(setters.pushSuccess).not.toHaveBeenCalled();
+  });
+});

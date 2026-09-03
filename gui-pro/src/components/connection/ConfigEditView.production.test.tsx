@@ -340,4 +340,76 @@ describe("ConfigEditView (production)", () => {
       await waitFor(() => expect(saveBtn).not.toBeDisabled());
     });
   });
+
+  // ─── G-30.1-01 (30.1 UAT, T-14): the edited `.toml` is deleted on disk while the modal is open ───
+  //
+  // The owner deleted a config from the folder. The app noticed — the card went, the active pointer
+  // was cleared — and this modal went on offering «Сохранить и переподключить» for the file that had
+  // just stopped existing. The pane must state the deletion and take its actions away, without
+  // vanishing on its own.
+  describe("G-30.1-01 — the config file is deleted while the modal is open", () => {
+    it("replaces the form with the deletion reason and a single «Закрыть»", async () => {
+      setup({ fileMissing: true });
+
+      expect(await screen.findByText(i18n.t("connection.editView.file_missing"))).toBeInTheDocument();
+      // The whole form is gone with it — the fields as well as the buttons.
+      expect(screen.queryByLabelText(L.passwordAria)).not.toBeInTheDocument();
+      // The footer «Закрыть» carries VISIBLE text; the Modal's corner × shares the accessible
+      // name but has no text content — query by the text node, as the loadError guard above does.
+      expect(screen.getByText(L.close, { selector: "button" })).toBeInTheDocument();
+    });
+
+    it("takes «Сохранить и переподключить» away entirely — not merely disables it", async () => {
+      setup({ fileMissing: true, isActiveConfig: true, status: "connected" });
+
+      await screen.findByText(i18n.t("connection.editView.file_missing"));
+      expect(screen.queryByRole("button", { name: L.saveReconnect })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: L.save })).not.toBeInTheDocument();
+    });
+
+    it("«Закрыть» closes the modal", async () => {
+      const { default: userEvent } = await import("@testing-library/user-event");
+      const user = userEvent.setup();
+      const { onClose } = setup({ fileMissing: true });
+
+      await screen.findByText(i18n.t("connection.editView.file_missing"));
+      await user.click(screen.getByText(L.close, { selector: "button" }));
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it("keeps the config's name and status visible, so the user knows WHICH config went", async () => {
+      setup({ fileMissing: true });
+
+      await screen.findByText(i18n.t("connection.editView.file_missing"));
+      expect(screen.getByText("Германия — Frankfurt")).toBeInTheDocument();
+    });
+
+    it("says «удалён», not «повреждён» — a deleted file is not the corrupt-file state", async () => {
+      setup({ fileMissing: true });
+
+      await screen.findByText(i18n.t("connection.editView.file_missing"));
+      // load_error tells the user to re-import; there is nothing to re-import here, and the two
+      // messages must never be substituted for one another.
+      expect(screen.queryByText(L.loadError)).not.toBeInTheDocument();
+    });
+
+    it("wins over loadError when a corrupt read and a deletion are both reported", async () => {
+      // A read that fails AND the file gone: the deletion is the more specific, more recent fact.
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "read_client_config") return Promise.reject(new Error("parse error"));
+        return Promise.resolve(undefined);
+      });
+      setup({ fileMissing: true });
+
+      expect(await screen.findByText(i18n.t("connection.editView.file_missing"))).toBeInTheDocument();
+      expect(screen.queryByText(L.loadError)).not.toBeInTheDocument();
+    });
+
+    it("renders the ordinary editable form when the file is still there", async () => {
+      setup({ fileMissing: false });
+
+      await screen.findByLabelText(L.passwordAria);
+      expect(screen.queryByText(i18n.t("connection.editView.file_missing"))).not.toBeInTheDocument();
+    });
+  });
 });

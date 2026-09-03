@@ -117,10 +117,13 @@ describe("RuleEntryRow", () => {
     expect(screen.getByText("geosite:google")).toBeInTheDocument();
   });
 
-  it("renders with block action (shows both direct and proxy move targets)", () => {
-    renderRow({ currentAction: "block" });
-    expect(screen.getByLabelText("Переместить в Напрямую")).toBeInTheDocument();
+  // Была версия «строка в блоке „Заблокировать“ показывает обе стрелки». Блокировка удалена
+  // 2026-09-03, блоков осталось два — значит у каждого ровно ОДНА цель переноса. Лишняя стрелка
+  // означала бы, что в `moveTargets` вернулось направление, которого на вкладке нет.
+  it("offers exactly one move arrow — there are two blocks, so one destination", () => {
+    renderRow({ currentAction: "direct" });
     expect(screen.getByLabelText("Переместить в VPN")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Переместить в / })).toHaveLength(1);
   });
 
   // The move arrows' D-06 tests.
@@ -134,11 +137,10 @@ describe("RuleEntryRow", () => {
   // repo-level machine check is .planning/phases/24-*/scripts/hover-reveal-guard.sh.
 
   it("exposes every move arrow by role and accessible name", () => {
-    renderRow({ currentAction: "block" });
+    renderRow({ currentAction: "proxy" });
     // Queried by ROLE + accessible name, never by title: a `title` attribute is an unreliable
     // accessible name, so this lookup only succeeds while each arrow carries a real aria-label.
     expect(screen.getByRole("button", { name: "Переместить в Напрямую" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Переместить в VPN" })).toBeInTheDocument();
   });
 
   it("move arrow is keyboard reachable and performs the same move a click does", async () => {
@@ -158,7 +160,7 @@ describe("RuleEntryRow", () => {
   });
 
   it("no element wrapping a move arrow carries a zero-opacity gate", () => {
-    renderRow({ currentAction: "block" });
+    renderRow({ currentAction: "proxy" });
     const arrow = screen.getByRole("button", { name: "Переместить в Напрямую" });
     // The class-level twin of hover-reveal-guard.sh: neither the arrow nor anything wrapping it
     // may start invisible.

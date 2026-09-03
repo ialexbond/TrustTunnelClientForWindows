@@ -91,8 +91,15 @@ class NativeCommunicationPigeonCodec: FlutterStandardMessageCodec, @unchecked Se
 
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
 protocol NativeVpnInterface {
-  func start(serverName: String, config: String) throws
+  func start(config: String) throws
   func stop() throws
+  /// Export log files from the VPN process(es).
+  ///
+  /// Returns a list of absolute paths to snapshot files in a temporary
+  /// directory. The caller is responsible for cleaning up these files.
+  func exportLogs() throws -> [String]
+  /// Clear all log files from the VPN process(es).
+  func clearLogs() throws
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -105,10 +112,9 @@ class NativeVpnInterfaceSetup {
     if let api = api {
       startChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
-        let serverNameArg = args[0] as! String
-        let configArg = args[1] as! String
+        let configArg = args[0] as! String
         do {
-          try api.start(serverName: serverNameArg, config: configArg)
+          try api.start(config: configArg)
           reply(wrapResult(nil))
         } catch {
           reply(wrapError(error))
@@ -129,6 +135,37 @@ class NativeVpnInterfaceSetup {
       }
     } else {
       stopChannel.setMessageHandler(nil)
+    }
+    /// Export log files from the VPN process(es).
+    ///
+    /// Returns a list of absolute paths to snapshot files in a temporary
+    /// directory. The caller is responsible for cleaning up these files.
+    let exportLogsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.com_adguard_testapp.NativeVpnInterface.exportLogs\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      exportLogsChannel.setMessageHandler { _, reply in
+        do {
+          let result = try api.exportLogs()
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      exportLogsChannel.setMessageHandler(nil)
+    }
+    /// Clear all log files from the VPN process(es).
+    let clearLogsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.com_adguard_testapp.NativeVpnInterface.clearLogs\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      clearLogsChannel.setMessageHandler { _, reply in
+        do {
+          try api.clearLogs()
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      clearLogsChannel.setMessageHandler(nil)
     }
   }
 }

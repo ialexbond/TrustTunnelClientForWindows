@@ -154,13 +154,169 @@ pub fn auth_plan(auth_method: Option<&str>, _has_key: bool, _has_password: bool)
     }
 }
 
-// ─── Portable data directory (next to exe) ─────────
+// ─── The application's data root ──────────────────────────────────────────────
+//
+// WHERE THE DATA LIVES
+//   `user_data_dir()` resolves to THE EXECUTABLE'S OWN DIRECTORY. On a normal install that is
+//   `%LOCALAPPDATA%\TrustTunnel Client Pro\` — the per-user folder the NSIS installer creates,
+//   named after the product. Every runtime artifact sits beside the binary that reads it: the
+//   client `.toml` configs, `configs.json`, `ssh_credentials.json`, `known_hosts.json`, the
+//   routing rules, the geodata, the logs and the WebView2 profile.
+//
+// WHY IT IS *NOT* A SEPARATE `%LOCALAPPDATA%\TrustTunnel\ClientPro`
+//   Phase 30.1 plan 08 moved it there. The move was REVERTED on 2026-08-28. Two independent
+//   reasons, and the first alone is sufficient:
+//
+//   1. THE DECISION, and it is final. The folder a user finds under `%LOCALAPPDATA%`
+//      must carry the product's own name — «TrustTunnel Client Pro», one folder — not an
+//      invented vendor\edition pair. That is a product call, not an engineering trade. Do not
+//      reintroduce the split, and do not keep half of it "just in case".
+//
+//   2. THE MOVE SHIPPED A REGRESSION on a real Windows install. `configs.json` stores each server
+//      as an ABSOLUTE path. The first-launch migration copied that file as an opaque blob
+//      without rewriting the paths inside it, so all five entries still pointed at the old
+//      root. The path-confinement guard — which follows THIS helper by construction, see
+//      `user_data_dir` below — then refused every one of them and «Подключить» did nothing, in
+//      silence. The same migration also copied the `.toml` files, which the folder-as-truth
+//      reconciler adopted as brand-new servers: ten manifest rows for five real servers, of
+//      which the UI showed the dead twin. Diagnosed in full, 33 verified findings, in
+//      `.planning/phases/30.1-*/30.1-REGRESSION.md`.
+//
+// THE MOVE IS DEFERRED, NOT ABANDONED — AND THE REASON FOR IT STILL STANDS
+//   Plan 08's argument was measured, not assumed, and it has not been refuted:
+//
+//       C:\Program Files
+//         S-1-5-32-545 (BUILTIN\Users) | ReadAndExecute, Synchronize | Allow | inherit=None
+//         S-1-5-32-545 (BUILTIN\Users) | 0xA0000000 (GENERIC_READ|GENERIC_EXECUTE)
+//                                      | Allow | inherit=ContainerInherit, ObjectInherit
+//                                              propagate=InheritOnly
+//       %LOCALAPPDATA%
+//         no S-1-5-32-545 ACE at all
+//
+//   The second Program Files ACE is inherit-only over BOTH child containers and child objects,
+//   so once the install moves to Program Files (D-03), a data root beside the executable would
+//   be readable by every account on the machine — the plaintext credential store included.
+//   That is a real confidentiality problem and it is why the data root MUST move.
+//
+//   It must move WITH the install relocation, not before it. Phases 31/32 own both. Shipping
+//   the data move alone bought the regression above and none of the benefit, because the
+//   install has not moved and today's root — `%LOCALAPPDATA%\TrustTunnel Client Pro` — already
+//   has a per-user ACL. When it does move, the migration must REWRITE the absolute paths inside
+//   `configs.json` rather than copy it; that is the defect that made this revert necessary, and
+//   it is recorded here so the next attempt does not rediscover it in production.
 
-pub fn portable_data_dir() -> std::path::PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+/// Where the data root was resolved FROM. Reported by diagnostics so a machine on which the
+/// primary lookup failed says so out loud instead of silently degrading.
+///
+/// Kept through the revert deliberately. The lookup is simpler now, but it can still fail —
+/// `current_exe()` returns `Err` on a platform or a sandbox that will not answer — and the
+/// fallback below is genuinely degraded, so a diagnostics bundle must be able to say which of
+/// the two answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataRootOrigin {
+    /// The executable's own directory — the expected answer on every install.
+    ExecutableDir,
+    /// The process working directory, because `current_exe()` could not be resolved.
+    ///
+    /// This is DEGRADED and the user must be told: for a shell-launched or logon-task-launched
+    /// process the working directory is unpredictable and frequently `C:\Windows\System32`, so
+    /// the app would look for the user's servers somewhere they are not — and, worse, write new
+    /// ones there. Silently falling back here is how "my servers disappeared" happens with no
+    /// error anywhere; naming the origin in diagnostics is what makes it explicable.
+    WorkingDirFallback,
+    /// A test override. Only reachable under `cfg(test)`.
+    #[cfg(test)]
+    TestOverride,
+}
+
+/// The PURE resolution rule: given whatever `current_exe()` answered, where does the data go?
+///
+/// Split out from [`user_data_dir_with_origin`] for one reason — the production branch of that
+/// function is `cfg(not(test))`, so a unit test cannot reach it. This helper is compiled in
+/// both builds, so the rule itself ("the root is the directory the executable sits in, and
+/// nothing is appended to it") is directly assertable instead of being taken on trust. It does
+/// no I/O; creating the directory is the caller's job.
+///
+/// `pub(crate)` for one further reason: `lifecycle.rs` asserts the Rust↔NSIS agreement on the
+/// uninstaller's pid path, and half of that agreement is "the data root IS the executable's
+/// directory, which the installer spells `$INSTDIR`". That half has to be assertable from
+/// outside this module.
+pub(crate) fn resolve_data_root(
+    exe: Option<std::path::PathBuf>,
+) -> (std::path::PathBuf, DataRootOrigin) {
+    match exe.as_deref().and_then(|p| p.parent()) {
+        Some(dir) => (dir.to_path_buf(), DataRootOrigin::ExecutableDir),
+        None => (std::path::PathBuf::from("."), DataRootOrigin::WorkingDirFallback),
+    }
+}
+
+/// Resolve the data root and report which source answered.
+///
+/// Kept separate from [`user_data_dir`] so diagnostics can report a degraded origin without
+/// re-deriving it.
+pub fn user_data_dir_with_origin() -> (std::path::PathBuf, DataRootOrigin) {
+    #[cfg(test)]
+    {
+        // Test isolation, and the reason it is `cfg(test)`-gated rather than a plain env read:
+        // an environment variable that redirects where the app keeps its SSH credentials is an
+        // injection surface, and this binary runs elevated (`requireAdministrator`). Gating it
+        // to the test build removes the question entirely — the production binary contains no
+        // such branch.
+        //
+        // The DEFAULT under test is a per-process temp directory, not whatever the production
+        // rule would answer. Under `cargo test --lib` the executable is the test binary, so the
+        // production rule points at `target/debug/deps` — shared by every test in the run, and
+        // the same directory on a second concurrent `cargo test`. Tests that write configs and
+        // credential files would collide there; worse, a test binary ever run from an INSTALL
+        // directory would write into the user's live data. The sandbox removes both.
+        if let Ok(o) = std::env::var("TT_DATA_DIR_OVERRIDE") {
+            if !o.is_empty() {
+                return (ensure_dir(std::path::PathBuf::from(o)), DataRootOrigin::TestOverride);
+            }
+        }
+        let sandbox = std::env::temp_dir().join(format!("tt-test-data-{}", std::process::id()));
+        (ensure_dir(sandbox), DataRootOrigin::TestOverride)
+    }
+
+    #[cfg(not(test))]
+    {
+        let (root, origin) = resolve_data_root(std::env::current_exe().ok());
+        (ensure_dir(root), origin)
+    }
+}
+
+/// Create the root if it is missing and hand back the same path either way.
+///
+/// Best-effort on purpose: a caller that genuinely needs the directory (every writer) reports
+/// its own error with far better context than a path helper could. What this buys is that the
+/// directory EXISTS by the time the first writer runs — `save_sidecar_pid` uses a bare
+/// `fs::write`, and `std::fs::canonicalize` (which every path-confinement root goes through)
+/// fails outright on a missing directory, which would silently widen the guard to its
+/// un-canonicalized fallback.
+fn ensure_dir(p: std::path::PathBuf) -> std::path::PathBuf {
+    let _ = std::fs::create_dir_all(&p);
+    p
+}
+
+/// The application's data root. Every artifact the app writes at runtime lives here.
+///
+/// This is the single funnel: ~40 call sites and, critically, EVERY path-confinement root
+/// (`commands/paths.rs`, `commands/config.rs`) derives from it, so the guards follow the data
+/// automatically. That coupling is load-bearing IN BOTH DIRECTIONS, which is the lesson plan
+/// 08 paid for: a guard left pointing at the old root refuses every config the app just wrote,
+/// and DATA left pointing at the old root is refused by a guard that correctly moved. Whenever
+/// this helper's answer changes, the data must be brought with it — see the deferral note above.
+///
+/// The name is kept from plan 08 on purpose even though the destination is reverted: it is the
+/// single accessor the whole crate goes through, and the rename is what made the conversion
+/// compiler-checked. Reverting the *name* would only re-scatter the lookup.
+///
+/// The read-only shipped resources (the sidecar binary, `wintun.dll`, the vcruntime DLLs) are
+/// resolved separately even though they land in the same place today; see
+/// `commands/vpn.rs::own_sidecar_path`, which resolves them from the executable directly
+/// because it must stay byte-identical to what the spawner computes.
+pub fn user_data_dir() -> std::path::PathBuf {
+    user_data_dir_with_origin().0
 }
 
 // ── TOFU Host Key Verification ───────────────────
@@ -249,15 +405,18 @@ pub struct EndpointSettings {
     pub cert_chain_path: String,
     #[serde(default)]
     pub cert_key_path: String,
-    // D-10 (06-09): the 407/405 auth-failure chooser (top-level, default 407; 405|407),
-    // value-constrained by the EXISTING sanitize::validate_auth_status_code (no duplicate
-    // validator). Schema-exact per CONFIGURATION.md v1.0.33.
+    // D-10 (06-09): the auth-failure code chooser (top-level, default 407), value-constrained by
+    // the EXISTING sanitize::validate_auth_status_code (no duplicate validator). Schema-exact per
+    // CONFIGURATION.md at the pinned tag — v1.1.0 since SRV-01, where the accepted set is
+    // 403|404|405|407 (upstream widened it in v1.0.41). The install wizard still offers only
+    // 407/405: widening the validator matched it to the endpoint, it did not add a setting.
     #[serde(default = "default_407")]
     pub auth_failure_status_code: u16,
     // CAMOUFLAGE REMOVED: the reverse-proxy / camouflage fields (reverse_proxy_enable,
     // reverse_proxy_auto, reverse_proxy_address, reverse_proxy_path_mask,
-    // reverse_proxy_h3_compat) were removed along with the rest of the camouflage feature —
-    // it does not work on the prebuilt core (v1.0.33). build_intended_vpn_toml no longer
+    // reverse_proxy_h3_compat) were removed along with the rest of the camouflage feature,
+    // dropped against the then-pinned v1.0.33 — see the CAMOUFLAGE REMOVED record at the top of
+    // `ssh/deploy.rs` for what the v1.1.0 pin does and does not change. build_intended_vpn_toml no longer
     // emits a `[reverse_proxy]` section. Serde has no deny_unknown_fields, so a frontend
     // still sending the old `reverseProxy*` keys is harmlessly ignored.
     // Best-effort GeoIP country code (serde camelCase → JS key `countryCode`) used ONLY
@@ -288,7 +447,7 @@ fn default_true() -> bool { true }
 // ─── Known Hosts (TOFU) ───────────────────────────
 
 fn known_hosts_path() -> std::path::PathBuf {
-    portable_data_dir().join("known_hosts.json")
+    user_data_dir().join("known_hosts.json")
 }
 
 fn load_known_hosts() -> std::collections::HashMap<String, String> {
@@ -993,6 +1152,85 @@ pub(crate) async fn exec_command_cancellable(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── D-03 C: the data root is not the install root ──
+
+    /// The defect in one line: the helper used to return the executable's own directory, so
+    /// every credential the app persisted lived inside the install root. Under Program Files
+    /// that directory grants BUILTIN\Users read (measured, see the module comment), which would
+    /// have made this a credential-disclosure regression.
+    ///
+    /// The data root IS the directory the executable sits in, with nothing appended.
+    ///
+    /// The subject is the pure rule rather than `user_data_dir()` itself, because the production
+    /// branch of the resolver is `cfg(not(test))` and a unit test cannot reach it. Asserted on a
+    /// SYNTHETIC exe path so the assertion does not depend on where the test binary happens to
+    /// live, and spelled with the real install-directory name so a reintroduced vendor/edition
+    /// split — `…\TrustTunnel\ClientPro` — fails here by name rather than by accident.
+    #[test]
+    fn the_data_root_is_the_directory_the_executable_sits_in() {
+        let install = std::path::Path::new("C:\\Users\\u\\AppData\\Local\\TrustTunnel Client Pro");
+        let (root, origin) = resolve_data_root(Some(install.join("trusttunnel.exe")));
+
+        assert_eq!(
+            root,
+            install,
+            "the data root must be the executable's own directory — nothing may be appended to it \
+             (a vendor/edition split is what shipped the 30.1 connect regression)"
+        );
+        assert_eq!(origin, DataRootOrigin::ExecutableDir);
+    }
+
+    /// An unresolvable executable must be reported, not swallowed.
+    ///
+    /// The fallback is the process working directory, which for a shell- or logon-task-launched
+    /// process is unpredictable and frequently `C:\Windows\System32`. Landing there silently
+    /// presents to the user as «my servers disappeared» with no error anywhere, so diagnostics
+    /// must be able to name the degraded origin.
+    #[test]
+    fn an_unresolvable_executable_reports_a_degraded_origin() {
+        let (root, origin) = resolve_data_root(None);
+
+        assert_eq!(root, std::path::Path::new("."));
+        assert_eq!(
+            origin,
+            DataRootOrigin::WorkingDirFallback,
+            "a failed executable lookup must be distinguishable in diagnostics from the normal case"
+        );
+    }
+
+    /// The root must EXIST by the time a caller uses it. `save_sidecar_pid` writes with a bare
+    /// `fs::write` (no `create_dir_all`), and every path-confinement root goes through
+    /// `std::fs::canonicalize`, which fails outright on a missing directory and silently widens
+    /// the guard to its un-canonicalized fallback.
+    #[test]
+    fn the_data_root_exists_after_resolution() {
+        let root = user_data_dir();
+        assert!(root.is_dir(), "the data root must exist and be a directory: {}", root.display());
+    }
+
+    /// Pro and Light still never share a data root, and now it is the INSTALL that separates
+    /// them: each edition installs into its own directory, so each resolves its own root.
+    ///
+    /// This is the property `lifecycle::SIDECAR_PID_BASENAME` (D-07) was the belt-and-braces
+    /// half of — one edition's stale-cleanup must never be able to kill the other edition's live
+    /// VPN. The per-edition basename stays regardless; this pins the root half.
+    #[test]
+    fn the_two_editions_resolve_different_data_roots() {
+        let local = std::path::Path::new("C:\\Users\\u\\AppData\\Local");
+        let (pro, _) = resolve_data_root(Some(
+            local.join("TrustTunnel Client Pro").join("trusttunnel.exe"),
+        ));
+        let (light, _) = resolve_data_root(Some(
+            local.join("TrustTunnel Client Light").join("trusttunnel.exe"),
+        ));
+
+        assert_ne!(
+            pro, light,
+            "Pro and Light must not share a data root — a shared root lets one edition's cleanup \
+             reach the other edition's live VPN state"
+        );
+    }
 
     // ── host-key-changed detection (D-09, Gemini #11) ──
 

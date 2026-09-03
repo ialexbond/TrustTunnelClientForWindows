@@ -153,4 +153,68 @@ describe("ConfigQr", () => {
       });
     });
   });
+
+  // ── G-30.1-01 (30.1 UAT, T-14): the config file is deleted while this window is open ──────────
+  //
+  // The same class as the settings pane, decided differently and on purpose. This window is a
+  // TRANSFER surface: the deeplink was built before the deletion and is still a valid bundle for the
+  // receiving device — the file may well have been deleted BECAUSE it was being moved. So the link
+  // stays and the user is told. Only a deletion that lands before the link exists leaves nothing to
+  // hand over, and then there is nothing to retry either.
+  describe("G-30.1-01 — the config file is deleted while the QR is open", () => {
+    // Resolved INSIDE each test, not at describe-registration time: the suite pins the locale to ru
+    // in `beforeEach`, which has not run yet while the describe body is being evaluated.
+    const warning = () => i18n.t("connection.qr.file_missing");
+    const noLink = () => i18n.t("connection.qr.file_missing_no_link");
+
+    it("keeps the QR and the link, and says the file is gone", async () => {
+      vi.mocked(invoke).mockResolvedValue(MOCK_DEEPLINK);
+      render(<ConfigQr isOpen config={CONFIG} onClose={vi.fn()} fileMissing />);
+
+      expect(await screen.findByText(warning())).toBeInTheDocument();
+      // The thing the window exists for is NOT snatched away mid-scan.
+      expect(await screen.findByRole("button", { name: QR_ARIA })).toBeInTheDocument();
+      const linkField = screen.getByLabelText("Ссылка конфигурации") as HTMLInputElement;
+      await waitFor(() => expect(linkField.value).toBe(MOCK_DEEPLINK));
+    });
+
+    it("the link stays COPYABLE — a deleted file does not invalidate a link already built", async () => {
+      vi.mocked(invoke).mockResolvedValue(MOCK_DEEPLINK);
+      render(<ConfigQr isOpen config={CONFIG} onClose={vi.fn()} fileMissing />);
+
+      await screen.findByText(warning());
+      fireEvent.click(await screen.findByRole("button", { name: "Скопировать ссылку" }));
+      await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(MOCK_DEEPLINK));
+    });
+
+    it("warns rather than errors when the link is in hand — nothing has failed", async () => {
+      vi.mocked(invoke).mockResolvedValue(MOCK_DEEPLINK);
+      render(<ConfigQr isOpen config={CONFIG} onClose={vi.fn()} fileMissing />);
+
+      const banner = await screen.findByText(warning());
+      // The warning variant, not the error one: the error palette would claim the transfer broke.
+      expect(banner.closest("[role='alert']")).toHaveClass("bg-[var(--color-status-connecting-bg)]");
+    });
+
+    it("says there is nothing to build when the file went BEFORE the link, and offers no retry", async () => {
+      // Deliberately never resolves: the link has not arrived, and now the file is gone.
+      vi.mocked(invoke).mockReturnValue(new Promise(() => {}) as never);
+      render(<ConfigQr isOpen config={CONFIG} onClose={vi.fn()} fileMissing />);
+
+      expect(await screen.findByText(noLink())).toBeInTheDocument();
+      // Re-asking the backend to read a file that is not there changes nothing.
+      expect(screen.queryByRole("button", { name: "Повторить попытку" })).toBeNull();
+      // And no loading skeleton pretending a link is still on its way.
+      expect(screen.queryByTestId("qr-skeleton")).toBeNull();
+    });
+
+    it("says nothing about a deletion while the file is still on disk", async () => {
+      vi.mocked(invoke).mockResolvedValue(MOCK_DEEPLINK);
+      render(<ConfigQr isOpen config={CONFIG} onClose={vi.fn()} />);
+
+      await screen.findByRole("button", { name: QR_ARIA });
+      expect(screen.queryByText(warning())).toBeNull();
+      expect(screen.queryByText(noLink())).toBeNull();
+    });
+  });
 });

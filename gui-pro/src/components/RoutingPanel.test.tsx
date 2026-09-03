@@ -270,7 +270,15 @@ describe("RoutingPanel", () => {
 
   // ── Error banner ──
 
-  it("shows error banner when routing state has error", async () => {
+  // D-02 (30.1 blocker 2) REWRITTEN. This case used to assert `getByText(/Load failed/)` — i.e.
+  // that the BACKEND'S OWN ERROR STRING is shown to the user. That is the behaviour being removed:
+  // the real message on this path is the serde parse error, which is English, unbounded, and can
+  // quote the rules file's own bytes. The gate passed while the property it implied («the user is
+  // told something useful») did not hold.
+  //
+  // The surviving fact — a failed load is SURFACED rather than swallowed — is asserted here
+  // against the localized state instead of against the raw string.
+  it("surfaces a failed load as a localized state, not as the backend's raw message", async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "load_routing_rules") {
         throw new Error("Load failed");
@@ -289,29 +297,53 @@ describe("RoutingPanel", () => {
 
     render(<RoutingPanel {...defaultProps} />);
     await waitFor(() => {
-      expect(screen.getByText(/Load failed/)).toBeInTheDocument();
+      expect(screen.getByText(i18n.t("routing.unreadable.title"))).toBeInTheDocument();
     });
+    expect(screen.queryByText(/Load failed/)).not.toBeInTheDocument();
   });
 
-  // ── Block routing (feature toggle) ──
+  // ── Site blocking is removed (2026-09-03) ──
+  //
+  // Здесь стояли три теста: карточка скрыта по умолчанию, показывается, когда файл правил говорит
+  // «блокировка включена», и скрыта, когда файл говорит обратное. Функция удалена целиком, поэтому
+  // остаётся ОДНО свойство, и оно самое важное: карточки нет ни при каких сохранённых данных.
+  //
+  // Условия теста нарочно те, при которых старая сборка карточку ПОКАЗЫВАЛА: и старый ключ
+  // localStorage со «включено», и `block_enabled: true` в файле правил. Именно так выглядит машина
+  // владельца прямо сейчас. Если карточка когда-нибудь вернётся сама — этот тест покраснеет.
+  it("never shows the block card — not even with the old toggle on and the file saying enforced", async () => {
+    localStorage.setItem("tt_feature_toggles", JSON.stringify({ blockRouting: true }));
+    const base = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation(async (...call) => {
+      if (call[0] === "load_routing_rules") {
+        return {
+          ...((await base(...call)) as object),
+          block: [{ id: "b1", type: "domain", value: "ads.example.com", label: null }],
+          block_enabled: true,
+        };
+      }
+      return base(...call);
+    });
 
-  it("does not show block routing card by default (feature off)", async () => {
     render(<RoutingPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Режим VPN")).toBeInTheDocument();
     });
     expect(screen.queryByText("Заблокировать")).not.toBeInTheDocument();
+    // Сохранённая запись пользователя тоже никуда не рисуется — её бережёт бэкенд, а не экран.
+    expect(screen.queryByText("ads.example.com")).not.toBeInTheDocument();
+    // …и это не «панель вообще не отрисовалась»: карточек правил ровно две, и это те две.
+    // Считаем по шапкам-кнопкам самих карточек (`aria-expanded`), а не по тексту: слова
+    // «Напрямую» / «Через VPN» встречаются ещё и подписями плиток пресетов, и поиск по тексту
+    // молча зацепил бы их.
+    const cardHeaders = screen.getAllByRole("button", { expanded: true });
+    expect(cardHeaders.map((h) => h.textContent)).toEqual([
+      expect.stringContaining("Напрямую"),
+      expect.stringContaining("Через VPN"),
+    ]);
   });
 
-  it("shows block routing card when feature toggle is enabled", async () => {
-    localStorage.setItem("tt_feature_toggles", JSON.stringify({ blockRouting: true, processFilter: false }));
-    render(<RoutingPanel {...defaultProps} />);
-    await waitFor(() => {
-      expect(screen.getByText("Заблокировать")).toBeInTheDocument();
-    });
-  });
-
-  // ── Process filter (feature toggle) ──
+  // ── Process filter ──
 
   it("does not show process filter by default (feature off)", async () => {
     render(<RoutingPanel {...defaultProps} />);
@@ -322,7 +354,9 @@ describe("RoutingPanel", () => {
   });
 
   it("shows process filter section when feature toggle is enabled", async () => {
-    localStorage.setItem("tt_feature_toggles", JSON.stringify({ blockRouting: false, processFilter: true }));
+    // `tt_feature_toggles` больше никем не читается: хранилище тумблеров удалено вместе с
+    // единственным жившим в нём тумблером (блокировка сайтов). Строку, писавшую сюда несуществующий
+    // `processFilter`, убрали — она ничего не включала уже давно.
     render(<RoutingPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Режим VPN")).toBeInTheDocument();
@@ -403,6 +437,173 @@ describe("RoutingPanel", () => {
       });
       // No live cancel; the status strip's only action button in this area is the inert spinner.
       expect(screen.queryByRole("button", { name: /Отмена/ })).not.toBeInTheDocument();
+    });
+  });
+
+  // ── D-02 (30.1 blocker 2): the unreadable-rules state and the way out ─────
+
+  describe("when routing_rules.json cannot be read", () => {
+    function mockBrokenLoad() {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "load_routing_rules") {
+          throw new Error("Failed to parse routing_rules.json: expected `,` at line 12 column 3");
+        }
+        if (cmd === "get_geodata_status") {
+          return {
+            downloaded: false,
+            geoip_exists: false,
+            geosite_exists: false,
+            geoip_categories_count: 0,
+            geosite_categories_count: 0,
+          };
+        }
+        if (cmd === "get_iplist_groups") return [];
+        return null;
+      });
+    }
+
+    it("shows a distinct unreadable state instead of an empty rule list", async () => {
+      // The panel used to render its normal body with zero entries — indistinguishable from a user
+      // who simply has no rules. «Пусто» and «сломано» are different facts and only one of them
+      // asks the user to do something.
+      mockBrokenLoad();
+      render(<RoutingPanel {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toBeInTheDocument();
+      });
+      expect(screen.getByRole("alert").textContent).toMatch(/маршрутизац/i);
+      // The ordinary body must NOT be on screen: showing the rule blocks with nothing in them is
+      // precisely the lie being removed.
+      expect(screen.queryByText("Режим VPN")).not.toBeInTheDocument();
+    });
+
+    it("does not show the parser's English message", async () => {
+      // D-29 / the i18n rule: what the serde error says is developer detail. It is also unbounded
+      // and can quote the file's own bytes.
+      mockBrokenLoad();
+      render(<RoutingPanel {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+      expect(document.body.textContent).not.toMatch(/expected `,`/);
+      expect(document.body.textContent).not.toMatch(/Failed to parse/);
+    });
+
+    it("offers the reset BEHIND a confirmation that names what is destroyed", async () => {
+      // The reset throws the user's rule list away. Doing that on a single click, from a screen
+      // they landed on because something already went wrong, is the reversible-looking control
+      // over an irreversible action that D-01 rejected.
+      mockBrokenLoad();
+      render(<RoutingPanel {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+      const resetButton = screen.getByRole("button", { name: /Сбросить правила/i });
+      // Nothing is written by merely arriving on the screen or by opening the dialog.
+      expect(
+        vi.mocked(invoke).mock.calls.filter((c) => c[0] === "save_routing_rules"),
+      ).toHaveLength(0);
+
+      fireEvent.click(resetButton);
+
+      // Queried by TEXT, the way `ConfirmDialog.test.tsx` does: `ConfirmDialog` has not opted into
+      // Modal's `role="dialog"` (that migration is per-caller and several modals are still
+      // outstanding), so there is no dialog role to query. Logged in the phase's deferred items —
+      // widening a shared primitive's a11y contract is not this plan's to do quietly.
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t("routing.unreadable.confirm_title"))).toBeInTheDocument();
+      });
+      // The confirmation has to say what is LOST, not just ask «вы уверены?».
+      const confirmBody = screen.getByText(i18n.t("routing.unreadable.confirm_body"));
+      expect(confirmBody.textContent).toMatch(/удалены безвозвратно/i);
+      // Still nothing written — the dialog is open, the user has not agreed.
+      expect(
+        vi.mocked(invoke).mock.calls.filter((c) => c[0] === "save_routing_rules"),
+      ).toHaveLength(0);
+    });
+
+    it("writes nothing when the user cancels the confirmation", async () => {
+      // The other half of «behind a confirmation»: backing out must leave the file alone. A dialog
+      // whose Cancel still destroys the list would be worse than no dialog, because it would have
+      // promised otherwise.
+      mockBrokenLoad();
+      render(<RoutingPanel {...defaultProps} />);
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole("button", { name: /Сбросить правила/i }));
+      await waitFor(() =>
+        expect(screen.getByText(i18n.t("routing.unreadable.confirm_title"))).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^Отмена$/ }));
+
+      await waitFor(() =>
+        expect(screen.queryByText(i18n.t("routing.unreadable.confirm_title"))).not.toBeInTheDocument(),
+      );
+      expect(
+        vi.mocked(invoke).mock.calls.filter((c) => c[0] === "save_routing_rules"),
+      ).toHaveLength(0);
+      // And the user is still on the unreadable state, not dropped somewhere else.
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    it("writes an empty rules document only after the user confirms", async () => {
+      mockBrokenLoad();
+      render(<RoutingPanel {...defaultProps} />);
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole("button", { name: /Сбросить правила/i }));
+      await waitFor(() =>
+        expect(screen.getByText(i18n.t("routing.unreadable.confirm_title"))).toBeInTheDocument(),
+      );
+
+      // After the confirm the reload must succeed, or the user stays stranded on the error state.
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "load_routing_rules") {
+          return {
+            direct: [],
+            proxy: [],
+            block: [],
+            process_mode: "exclude",
+            processes: [],
+            block_enabled: false,
+          };
+        }
+        if (cmd === "get_geodata_status") {
+          return {
+            downloaded: false,
+            geoip_exists: false,
+            geosite_exists: false,
+            geoip_categories_count: 0,
+            geosite_categories_count: 0,
+          };
+        }
+        if (cmd === "get_iplist_groups") return [];
+        return null;
+      });
+
+      // The dialog's CTA carries its own label, distinct from the trigger, so «нажал кнопку на
+      // экране» and «подтвердил в диалоге» can never be confused for one another here.
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("routing.unreadable.confirm_cta") }),
+      );
+
+      await waitFor(() => {
+        const saves = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "save_routing_rules");
+        expect(saves.length).toBeGreaterThan(0);
+      });
+      const saves = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "save_routing_rules");
+      const payload = (saves[saves.length - 1][1] as { rules: Record<string, unknown> }).rules;
+      expect(payload.direct).toEqual([]);
+      expect(payload.proxy).toEqual([]);
+      // Ключей удалённой блокировки в сбросе нет — их бережёт бэкенд, и пустой массив отсюда лёг бы
+      // поверх сохранённого списка пользователя (см. useRoutingState.test.ts).
+      expect("block" in payload).toBe(false);
+
+      // And the panel comes back — the reset is a way OUT, not a nicer error screen.
+      await waitFor(() => {
+        expect(screen.getByText("Режим VPN")).toBeInTheDocument();
+      });
     });
   });
 });

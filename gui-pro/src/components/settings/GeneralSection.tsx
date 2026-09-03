@@ -210,7 +210,10 @@ export function GeneralSection({ onSaved, onSaveFailed }: Props) {
   // Phase 23 (D-12/D-13): this setting used to be a session-local switch on the Routing card that
   // only drove a 30-min timer while that tab was mounted — so the databases never actually updated
   // by themselves. The cadence now lives in a Rust background scheduler, which cannot read
-  // localStorage; hence the two Tauri commands instead of the usual useFeatureToggles pattern.
+  // localStorage; hence the two Tauri commands instead of a window-local switch. (That comparison
+  // used to name `useFeatureToggles`, the app's localStorage toggle store. It was deleted on
+  // 2026-09-03 with its only key, «Блокировка сайтов» — pointing at it now would send a reader
+  // looking for a file that is not there.)
   // Initialised `true`, not `false`: the read is async and the setting defaults ON, so a `false`
   // seed would flash a wrong OFF state on every mount.
   const [geodataAutoUpdate, setGeodataAutoUpdate] = useState(true);

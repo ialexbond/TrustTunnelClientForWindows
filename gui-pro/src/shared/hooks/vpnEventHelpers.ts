@@ -1,5 +1,6 @@
 import type { LogEntry } from "../types";
 import type { i18n as I18nType } from "i18next";
+import { formatError } from "../utils/formatError";
 
 // Phase 17 (17-05, CA-1) — the ONE shared helper module for the per-signal VPN event hooks.
 //
@@ -35,6 +36,22 @@ export const REASON_CODE_I18N: Record<string, string> = {
   // still be alive holding the killswitch, so the message must tell the user honestly instead of
   // leaking the raw token.
   "disconnect-failed": "errors.disconnect_failed",
+  // D-02 (30.1 milestone review, blocker 2): `routing_rules.json` exists but cannot be parsed, so
+  // the backend REFUSED the connect rather than proceeding with an empty rule set and reporting
+  // «Подключено». The message names the file as the cause and points at the Routing tab, because
+  // that is where the recovery lives — the reset belongs beside the rules it destroys, not on this
+  // surface. Following Phase 28 D-05, no new control is minted here.
+  //
+  // The serde error is deliberately NOT interpolated: it is English, unbounded, and can quote the
+  // file's own bytes. The token is the whole payload (D-09/D-29).
+  "routing-rules-unreadable": "errors.routing_rules_unreadable",
+  // 30.1 regression defect 1: the CA-2 path-confinement guard refused the connect because the
+  // `.toml` is not inside the folder the app keeps its configs in. The backend never contacted
+  // the server, so the generic «Не удалось выполнить подключение к серверу» this used to fall
+  // back to named the wrong culprit entirely. The message names the FILE and tells the user the
+  // one thing that fixes it (add the server again), because there is no control that can move a
+  // file the app is forbidden to touch.
+  "config-outside-data-dir": "errors.config_outside_data_dir",
 };
 
 // F16 (14-UAT round 2): the C++ sidecar emits a handful of FIXED English phrases on the
@@ -64,6 +81,28 @@ export function makeLocalizeError(i18n: I18nType) {
     const key = REASON_CODE_I18N[error] ?? CORE_MESSAGE_I18N[error];
     return key ? i18n.t(key) : error;
   };
+}
+
+/**
+ * Localize a REJECTED VPN command (the `invoke(...)` catch channel), not a status event.
+ *
+ * 30.1 regression defect 1 — the second half of «the refusal speaks Russian». A refused connect
+ * reaches the user twice: once as a terminal `Error` status carrying a reason code (localized by
+ * `makeLocalizeError` above) and once as the rejected promise of `invoke("vpn_connect")`, whose
+ * value every catch block funnelled straight into `setError(formatError(e))`. The backend now
+ * returns the SAME reason code on both channels, so both must run through the same map — a fix
+ * applied to only one of them shows the Russian sentence in the snackbar and the raw ASCII token
+ * in the red banner, which is worse than the English sentence it replaced.
+ *
+ * `unknown` in, because catch blocks receive `unknown`; `formatError` does the Error/string
+ * unwrapping and guarantees a string comes out. Anything unmapped passes through UNCHANGED —
+ * the same SAFETY-03 seam the status channel has: older sanitized backend messages, SSH
+ * sentences and plugin errors keep rendering as they do today.
+ */
+export function localizeVpnError(error: unknown, i18n: I18nType): string {
+  const raw = formatError(error);
+  const key = REASON_CODE_I18N[raw] ?? CORE_MESSAGE_I18N[raw];
+  return key ? i18n.t(key) : raw;
 }
 
 /**

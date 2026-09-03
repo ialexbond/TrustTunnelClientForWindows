@@ -16,10 +16,15 @@ use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
 
 /// Path where an incoming deep-link URL is staged for the frontend's startup poll
-/// (`poll_pending_deeplink`). Lives next to the exe (per-user install dir, writable).
+/// (`poll_pending_deeplink`). Lives in the per-user data root.
+///
+/// D-03 C: this doc comment used to read "lives next to the exe (per-user install dir,
+/// writable)". That premise DIED when the install moved to Program Files — the install
+/// directory is no longer a per-user writable location — and a comment that outlives its premise
+/// is precisely how the next reader puts the file back where it cannot be written. The staging
+/// file is user-written runtime state, so it moves with the rest of the data.
 fn deeplink_pending_path() -> std::path::PathBuf {
-    let exe = std::env::current_exe().unwrap_or_default();
-    exe.parent().unwrap_or(std::path::Path::new(".")).join(".pending_deeplink")
+    crate::ssh::user_data_dir().join(".pending_deeplink")
 }
 
 /// Cold-start capture: if THIS process was launched by the protocol handler
@@ -125,8 +130,10 @@ pub fn check_url_protocols() -> bool {
 /// Returns the URL and deletes the file, or None if no pending URL.
 #[tauri::command]
 pub fn poll_pending_deeplink() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let pending = exe.parent()?.join(".pending_deeplink");
+    // D-03 C: reads through the SAME helper the writer uses. This site used to re-derive the
+    // path from `current_exe()`, so writer and reader were two independent answers to "where is
+    // the staging file" — a drift that would present as deep links silently never arriving.
+    let pending = deeplink_pending_path();
     if pending.exists() {
         let url = std::fs::read_to_string(&pending).ok()?;
         let _ = std::fs::remove_file(&pending);

@@ -925,6 +925,36 @@ pub fn give_up_reason(queue_exhausted: bool) -> &'static str {
     }
 }
 
+/// Which code does the terminal write carry — the RECORDED cause, or the generic give-up?
+/// (D-02, 30.1 milestone review blocker 2)
+///
+/// `give_up_reason` above answers «how did this walk end». It cannot answer «why», because a
+/// walk that ends the same way can end it for reasons that send the user to different screens.
+/// A corrupt `routing_rules.json` fails every candidate identically; reporting «ни один сервер
+/// не ответил» would send somebody to check their servers when their servers are fine and their
+/// rule list is the thing that needs repairing.
+///
+/// **THE ALLOWLIST IS NARROW ON PURPOSE, AND IT MUST STAY THAT WAY.** Only codes WE mint are
+/// preferred. The recorded cause also carries the C++ core's own fixed English phrases
+/// («Authorization failed», «VPN adapter creation failed»…) — see `lifecycle::is_terminal_reason`,
+/// which matches on exactly those strings. Preferring "any recorded cause" would put one of those
+/// English sentences into `set_vpn_status`, and the presentation boundary passes unmapped values
+/// through UNCHANGED by design (`vpnEventHelpers.ts`, the SAFETY-03 seam). The result would be raw
+/// English on a Russian screen — a localisation regression introduced by a truthfulness fix, which
+/// is a bad trade in both directions. Widening this list therefore means proving the new value has
+/// a row in `REASON_CODE_I18N` first.
+///
+/// Pure, and its truth table is exhaustive, because the guard above is only worth what its test
+/// is worth.
+pub fn terminal_reason_for_give_up(recorded: Option<&str>, queue_exhausted: bool) -> &'static str {
+    match recorded {
+        Some(c) if c == crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON => {
+            crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON
+        }
+        _ => give_up_reason(queue_exhausted),
+    }
+}
+
 /// Outcome of one run of the bounded reconnect loop (D-02 / D-04 / Codex HIGH).
 ///
 /// Returned by the pure-ish `run_reconnect_loop` core so the tests can assert the
@@ -1338,7 +1368,7 @@ pub(crate) fn build_failover_queue(reason_code: &str, origin_path: &str) -> Vec<
     }
 
     let entries: Vec<crate::lifecycle::FailoverCandidate> =
-        match crate::commands::manifest::read_manifest(&crate::ssh::portable_data_dir()) {
+        match crate::commands::manifest::read_manifest(&crate::ssh::user_data_dir()) {
             Ok(manifest) => manifest
                 .configs
                 .into_iter()
@@ -2392,7 +2422,16 @@ pub fn start_reconnect_supervisor(
                 // is «none of your servers answered»; a one-server queue is the unchanged «this
                 // server would not come back». Same guards above either way — only the code and
                 // the log line differ.
-                let reason = give_up_reason(walk.queue_exhausted);
+                //
+                // D-02 (30.1 blocker 2): a RECOGNISED recorded cause wins over both. The slot is
+                // the same one every attempt already writes its failure into, and the only value
+                // preferred is one of ours — see `terminal_reason_for_give_up` for why the
+                // allowlist may not be widened to «any recorded cause».
+                let recorded = last_error_arc
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                let reason = terminal_reason_for_give_up(recorded.as_deref(), walk.queue_exhausted);
                 let marker = if walk.queue_exhausted {
                     format!(
                         "failover exhausted: {} candidates, {per_candidate} attempt(s) each, none answered",
@@ -3669,6 +3708,162 @@ mod reconnect_supervisor_tests {
         assert_eq!(outcome, SupervisorOutcome::GaveUp);
         assert_eq!(calls.get(), 1, "terminal reason must stop after the FIRST attempt");
         assert_eq!(sleeps.get(), 0, "no inter-attempt sleep on a terminal short-circuit");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_rules_file_stops_the_loop_after_one_attempt() {
+        // D-02 (30.1 blocker 2), the budget half. `respawn_sidecar` records this cause in the
+        // shared slot and bails; `try_connect` reads that slot; the loop short-circuits on a
+        // terminal cause. Without the registration in `lifecycle::is_terminal_reason` the loop
+        // would spend its whole budget re-reading a file that is byte-identical every time —
+        // about a minute per attempt of «Переподключение…» that could not possibly succeed.
+        let calls = Cell::new(0u32);
+        let sleeps = Cell::new(0u32);
+        let outcome = run_reconnect_loop(
+            7,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+            |_attempt| {
+                calls.set(calls.get() + 1);
+                async {
+                    (
+                        false,
+                        crate::lifecycle::FAST_FAIL_GRACE + Duration::from_secs(1),
+                        Some(crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON.to_string()),
+                    )
+                }
+            },
+            || false,
+            || 7,
+            |_attempt| {},
+            || {
+                sleeps.set(sleeps.get() + 1);
+                async {}
+            },
+        )
+        .await;
+
+        assert_eq!(outcome, SupervisorOutcome::GaveUp);
+        assert_eq!(
+            calls.get(),
+            1,
+            "a corrupt rules file is identical on every read — the loop must stop after ONE \
+             attempt rather than burn the reconnect budget on it",
+        );
+        assert_eq!(sleeps.get(), 0);
+    }
+
+    #[test]
+    fn the_terminal_write_prefers_our_own_recorded_cause_and_nothing_else() {
+        use crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON;
+
+        // D-02. Exhaustive truth table over BOTH inputs, in the style of the module's other
+        // decision functions — the guard is only worth what its table is worth.
+        //
+        // Column 1: the ONE preferred value. It wins on both walk shapes, because «your rule file
+        // is unreadable» is true whether the walk had one server or five, and «ни один сервер не
+        // ответил» would send the user to check servers that are perfectly healthy.
+        for exhausted in [false, true] {
+            assert_eq!(
+                terminal_reason_for_give_up(Some(ROUTING_RULES_UNREADABLE_REASON), exhausted),
+                ROUTING_RULES_UNREADABLE_REASON,
+                "the recorded cause must survive to the terminal write (queue_exhausted={exhausted})",
+            );
+        }
+
+        // Column 2: EVERYTHING else falls back to the walk-shape answer. The first five rows are
+        // the C++ core's own fixed English phrases, and they are the reason this allowlist is
+        // narrow: `vpnEventHelpers.ts` passes unmapped values through UNCHANGED (SAFETY-03), so
+        // preferring one of these would print «Authorization failed» on a Russian screen. The
+        // core's phrases already have their own localisation path via CORE_MESSAGE_I18N on the
+        // status they were actually raised on — they must not be re-surfaced through this seam.
+        let must_not_be_preferred = [
+            None,
+            Some("Authorization failed"),
+            Some("VPN adapter creation failed"),
+            Some("Configuration parse error. Check your config file."),
+            Some("Server refused the connection"),
+            Some("Failed to start VPN tunnel"),
+            Some("tunnel-lost"),
+            Some("internet-lost"),
+            Some("sidecar-exit"),
+            Some("no-internet"),
+            Some("connect-timeout"),
+            Some("recovery-timeout"),
+            Some(RECONNECT_GAVE_UP_REASON),
+            Some(FAILOVER_EXHAUSTED_REASON),
+            Some(""),
+            Some("some unrecognised failure"),
+            // A near-miss on our own code: preference is EQUALITY, never a prefix or a contains.
+            Some("routing-rules-unreadable-ish"),
+            Some("routing-rules"),
+        ];
+        for recorded in must_not_be_preferred {
+            assert_eq!(
+                terminal_reason_for_give_up(recorded, false),
+                RECONNECT_GAVE_UP_REASON,
+                "a one-server walk must keep reporting «this server would not come back» for \
+                 recorded={recorded:?}",
+            );
+            assert_eq!(
+                terminal_reason_for_give_up(recorded, true),
+                FAILOVER_EXHAUSTED_REASON,
+                "an exhausted queue must keep reporting «none of your servers answered» for \
+                 recorded={recorded:?}",
+            );
+        }
+
+        // And the preference cannot silently widen: every value it DOES prefer must have a row in
+        // the frontend's reason map, or it reaches a Russian screen as raw text. Asserted here as
+        // the rule; the map itself is pinned on the frontend side.
+        assert!(
+            ROUTING_RULES_UNREADABLE_REASON.is_ascii()
+                && ROUTING_RULES_UNREADABLE_REASON.contains('-')
+                && !ROUTING_RULES_UNREADABLE_REASON.contains(' '),
+            "a preferred value must be a kebab TOKEN, not a sentence — sentences are what the \
+             core emits and what must never be preferred here",
+        );
+    }
+
+    #[test]
+    fn the_give_up_arm_still_lands_on_error_and_still_tears_the_sidecar_down() {
+        // D-02 names the state an aborted reconnect lands in: TERMINAL `Error` carrying the code,
+        // with the arm's existing teardown having run so no child keeps the WinTUN adapter and the
+        // killswitch. The reason CHOICE is proven by the truth table above; this pins the two
+        // facts around it, which are what make «terminal Error» a real state rather than a label.
+        //
+        // A source guard because the arm lives inside a spawned task that owns a live AppHandle —
+        // there is no seam to call it from a unit test, and the R3 teardown it performs is exactly
+        // the kind of line a later refactor drops without any test noticing.
+        let source = include_str!("./connectivity.rs");
+        // BUILT AT RUNTIME, and this is not style. `include_str!` embeds this very test in the
+        // source it searches, so a literal needle matches ITSELF — measured: the locate-first arm
+        // reported 2 hits on the first run. Assembling it here keeps the guard's subject to the
+        // production arm alone. (Same trap, same fix, as `updater.rs::function_body`.)
+        let needle = format!("SupervisorOutcome::{}{} => {{", "Gave", "Up");
+        let needle = needle.as_str();
+        let hits = source.matches(needle).count();
+        assert_eq!(
+            hits, 1,
+            "cannot measure the terminal arm: {hits} matches for `{needle}`, expected exactly 1 — \
+             renamed, removed or duplicated. This is a FAILURE, not a pass.",
+        );
+        let arm = source.split(needle).nth(1).unwrap_or("");
+        let arm = &arm[..arm.find("\n            }\n").unwrap_or(arm.len())];
+
+        assert!(
+            arm.contains("terminal_reason_for_give_up(recorded.as_deref(), walk.queue_exhausted)"),
+            "the terminal arm must choose its code through the cause-preference function, or a \
+             refusal the user was told about becomes a generic «не удалось переподключиться»",
+        );
+        assert!(
+            arm.contains("VpnStatus::Error"),
+            "the aborted reconnect must land on a NAMED terminal state, not simply stop",
+        );
+        assert!(
+            arm.contains("teardown_session_sidecar(&app).await"),
+            "the terminal arm must release the sidecar — leaving it alive fail-closes ALL traffic \
+             behind a killswitch with no working tunnel until the app restarts (R3)",
+        );
     }
 
     // ── Phase 28 (D-02 / D-05 / D-06): the failover queue walk ──────────────

@@ -4,6 +4,7 @@ mod commands;
 mod connectivity;
 mod diagnostics;
 mod dns_guard;
+mod domain_scope;
 mod geodata;
 mod geodata_scheduler;
 mod geodata_v2ray;
@@ -27,13 +28,43 @@ use tauri::RunEvent;
 
 use commands::{AppState, begin_shutdown, kill_sidecar_from_state};
 
+/// Basename of the "start the app minimised to tray" marker file.
+///
+/// Named once so the writer and the two readers below cannot drift; before D-03 C each of the
+/// three re-derived the path from `current_exe()` independently.
+const START_MINIMIZED_MARKER: &str = ".start_minimized";
+
+/// One-time startup work that MUST happen before Tauri and WebView2 initialize.
+///
+/// Called from `main()`. One step: point the WebView2 profile at the app's data root.
+///
+/// It sits in `main()` rather than in the Tauri `.setup()` hook because WebView2 reads the
+/// variable ONCE, at startup, and immediately opens and locks the directory it is given.
+///
+/// The profile is the app's whole browser-side storage — feature toggles, failover exclusions,
+/// language, theme, tab memory. It is resolved through the shared helper rather than re-derived
+/// here so it can never disagree with where the rest of the data lives; its failure mode is not
+/// an error dialog but AMNESIA, the app quietly forgetting every setting the user chose.
+///
+/// THERE IS NO DATA MIGRATION HERE, AND THAT IS THE POINT. Phase 30.1 plan 08 briefly moved the
+/// data root to `%LOCALAPPDATA%\TrustTunnel\ClientPro` and adopted the old contents into it on
+/// first launch. Both are reverted (see the note above `user_data_dir` in `ssh/mod.rs`): the
+/// data root is the install directory, which is where the data already is, so there is nothing
+/// to adopt FROM. Do not reintroduce an adoption pass without the root move it serves — a
+/// migration that copies `configs.json` without rewriting the absolute paths inside it is
+/// exactly what broke every connect on a real Windows install.
+pub fn init_data_root_early() {
+    let webview_data = ssh::user_data_dir().join("webview_data");
+    std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_data);
+}
+
 #[tauri::command]
 fn set_start_minimized(enabled: bool) -> Result<(), String> {
-    let flag_path = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("no parent dir")?
-        .join(".start_minimized");
+    // Resolved through the SHARED helper, not from `current_exe()` here. The writer, the Tauri
+    // reader and the window-reveal decision in `.setup()` must be three uses of one answer: this
+    // command reports success through a `Result` the front end shows, so a third independent
+    // lookup would let the switch claim a state the next launch does not honour.
+    let flag_path = ssh::user_data_dir().join(START_MINIMIZED_MARKER);
     if enabled {
         std::fs::write(&flag_path, "1").map_err(|e| e.to_string())?;
     } else {
@@ -44,25 +75,27 @@ fn set_start_minimized(enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn get_start_minimized() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|d| d.join(".start_minimized")))
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    start_minimized_requested()
+}
+
+/// Shared reader for the start-minimised marker — used by the Tauri command above and by the
+/// window-reveal decision in `.setup()`. Two independent copies of this lookup are how the two
+/// answers drift.
+fn start_minimized_requested() -> bool {
+    ssh::user_data_dir().join(START_MINIMIZED_MARKER).exists()
 }
 
 /// Marker for the one-time "the app keeps running in the tray" hint.
 ///
-/// Sits in `portable_data_dir()` — which IS the exe's own directory, the same place the configs,
-/// logs and dns snapshot live (the NSIS installer is per-user, into LocalAppData, so this is
-/// writable without admin). An earlier version of this comment claimed the data dir was separate
-/// from the exe dir; it is not.
+/// Sits in `ssh::user_data_dir()`, the app's data root — the same place the configs, logs and
+/// dns snapshot live. Resolved through that helper rather than spelled out here, so this marker
+/// follows the root wherever it goes (phases 31/32 move it with the install relocation).
 ///
 /// Scope of the guarantee: the hint is shown once and never again for as long as this directory
-/// survives. An installer that wipes the install directory would let it appear one more time —
+/// survives. An installer that wipes the data root would let it appear one more time —
 /// acceptable, since the point is to stop nagging on every LAUNCH, which is what actually happened.
 fn tray_hint_marker() -> std::path::PathBuf {
-    ssh::portable_data_dir().join("tray_hint_shown")
+    ssh::user_data_dir().join("tray_hint_shown")
 }
 
 /// Has the tray hint already been shown to this user, ever?
@@ -282,16 +315,15 @@ pub fn run() {
             // probe), so it runs inline like the sweeps above.
             autostart::reconcile_autostart_on_startup(app.handle());
 
-            // Show window unless start_minimized flag file exists next to exe
+            // Show window unless the start-minimised marker exists in the per-user data root.
             if let Some(window) = app.get_webview_window("main") {
                 // Force decorations off (window-state plugin may restore old value)
                 window.set_decorations(false).ok();
 
-                let start_minimized = std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|d| d.join(".start_minimized")))
-                    .map(|p| p.exists())
-                    .unwrap_or(false);
+                // D-03 C: reads through the SHARED helper rather than re-deriving the path from
+                // `current_exe()`. The third copy of this lookup is how the Settings switch and
+                // the actual reveal decision would come to disagree.
+                let start_minimized = start_minimized_requested();
                 if !start_minimized {
                     // Same shared restore path as every other reveal route, so a launch can never
                     // produce a window that is "shown" but minimized (the window-state plugin does
@@ -892,7 +924,6 @@ pub fn run() {
             routing_rules::migrate_legacy_exclusions,
             routing_rules::resolve_and_apply,
             routing_rules::update_vpn_mode,
-            routing_rules::cleanup_hosts_block,
             processes::list_running_processes,
             // Phase 24 (D-01) — real Windows application icons for the process filter. Separate
             // from list_running_processes on purpose: the picker must open instantly, so icons are
@@ -991,8 +1022,6 @@ pub fn run() {
                 dns_guard::restore_system_dns();
                 // Flush pending log entries before exit
                 logging::shutdown_logging();
-                // Clean up hosts file blocked entries
-                routing_rules::cleanup_hosts_block().ok();
             }
         });
 }

@@ -12,7 +12,7 @@
 //! Security invariants this module holds:
 //!   * D-29 — the manifest stores NO password; never log `.toml` content / secrets.
 //!     `summarize()` reads name/host/user only, never `endpoint.password`.
-//!   * V12 — every path-taking op validates against `portable_data_dir()`
+//!   * V12 — every path-taking op validates against `user_data_dir()`
 //!     (reuse `config.rs::validate_app_path`); delete only manifest-tracked files
 //!     inside the data dir.
 
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 
 /// WR-01: process-wide serialization for the manifest read-modify-write funnel.
 ///
@@ -108,7 +108,7 @@ fn force_last_expected_write(instant: Option<Instant>) {
 
 // ─── PP-6: single data-dir watcher owns both FE signals ──────────────────────
 //
-// Before PP-6 there were TWO OS watchers on the SAME `portable_data_dir`: `start_configs_watcher`
+// Before PP-6 there were TWO OS watchers on the SAME `user_data_dir`: `start_configs_watcher`
 // (app-wide, emits `configs-changed` for the list) and `watch_config_file` (config.rs, emits
 // `config-file-changed {exists,path}` for the ACTIVE file's external-delete/restore lifecycle).
 // Two `notify` watchers on one directory is the redundant OS-watcher PP-6 flags. PP-6 collapses
@@ -535,7 +535,7 @@ pub fn summarize_config(path: String) -> Result<ConfigSummary, String> {
 /// The path-validation-free summary reader. Callers that have ALREADY validated the path
 /// (or that read only files they themselves discovered inside the data dir, e.g. the
 /// migration scan and the in-process `list_configs`) use this. Tests use it directly with
-/// tempdir fixtures (which legitimately live outside `portable_data_dir()`).
+/// tempdir fixtures (which legitimately live outside `user_data_dir()`).
 fn summarize_unchecked(path: &str) -> Result<ConfigSummary, String> {
     let content =
         std::fs::read_to_string(path).map_err(|e| format!("Failed to read config: {e}"))?;
@@ -988,7 +988,7 @@ fn net_bracket_delta(line: &str) -> i32 {
 // ─── Manifest mutation funnel (Tauri commands) ───────────────────────────────
 //
 // Each command reads the manifest → mutates in memory → write_manifest_atomic. Every
-// path-taking op validates against portable_data_dir() first (V12). These are registered
+// path-taking op validates against user_data_dir() first (V12). These are registered
 // in lib.rs in THIS plan so no later wave edits lib.rs for manifest ops.
 
 /// Run the startup migration. The frontend reads the legacy `tt_config_path` from
@@ -998,7 +998,7 @@ pub fn migrate_configs(legacy_active_path: Option<String>) -> Result<Vec<ConfigS
     // WR-01: serialize the read-modify-write window so a startup migration cannot race a
     // concurrent user mutation (e.g. a fast delete/rename) and lose an update.
     let _guard = lock_manifest();
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     migrate_to_manifest(&dir, legacy_active_path.as_deref())?;
     // We already hold the lock and migration just reconciled the folder — read via the lock-free
     // core, NOT `list_configs()` (which now takes the lock itself for its folder reconcile and would
@@ -1101,7 +1101,7 @@ fn reconcile_folder_with_manifest(dir: &Path) {
 /// the manifest stores NO password. The last-used entry is surfaced first.
 #[tauri::command]
 pub fn list_configs() -> Result<Vec<ConfigSummary>, String> {
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     // Folder-as-truth: adopt any orphaned config .toml + prune vanished files BEFORE the read, so a
     // file in the folder always shows and a file removed from the folder always disappears.
     reconcile_folder_with_manifest(&dir);
@@ -1185,7 +1185,7 @@ pub fn add_config(app: tauri::AppHandle, path: String) -> Result<(), String> {
     // WR-01: hold the funnel lock across read→mutate→write so a concurrent mutation
     // cannot overwrite this add with a stale manifest copy (lost update).
     let _guard = lock_manifest();
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     let mut manifest = read_manifest(&dir)?;
     prune_missing(&mut manifest); // IN-55: drop ghosts so order/dedup are truthful
     add_entry(&mut manifest, &path)?;
@@ -1357,7 +1357,7 @@ pub fn start_configs_watcher(app: tauri::AppHandle) {
     use notify::{Event, EventKind, RecursiveMode, Watcher};
     use tauri::Emitter;
 
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     if std::fs::create_dir_all(&dir).is_err() {
         eprintln!("[configs] data dir unavailable; watcher not started");
         return;
@@ -1470,11 +1470,11 @@ pub fn username_for_config(path: &str) -> Option<String> {
 /// resurfaced (e.g. as the import copy name «<old> (копия)», IN-26).
 pub fn sync_entry_name_from_file(path: &str) -> Result<(), String> {
     let _guard = lock_manifest();
-    sync_entry_name_in_dir(&portable_data_dir(), path)
+    sync_entry_name_in_dir(&user_data_dir(), path)
 }
 
 /// Testable core of `sync_entry_name_from_file` against an explicit dir (the command wraps this
-/// with the funnel lock + `portable_data_dir()`).
+/// with the funnel lock + `user_data_dir()`).
 fn sync_entry_name_in_dir(dir: &Path, path: &str) -> Result<(), String> {
     let new_name = match current_display_name(path) {
         Some(n) => n,
@@ -1514,7 +1514,7 @@ pub fn delete_config(app: tauri::AppHandle, id: String) -> Result<(), String> {
     use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     delete_config_in_dir(&dir, &id)?;
 
     // The manifest is the source of truth for WHICH configs exist, so anything keyed by config id
@@ -1533,7 +1533,7 @@ pub fn delete_config(app: tauri::AppHandle, id: String) -> Result<(), String> {
 }
 
 /// Testable core of `delete_config` against an explicit dir (the command wraps this with
-/// the funnel lock + `portable_data_dir()` + `list_configs`). Splitting it out lets the
+/// the funnel lock + `user_data_dir()` + `list_configs`). Splitting it out lets the
 /// WR-03 regression test drive the orphan-on-failure path with a tempdir + a locked file
 /// without touching the process-global data dir.
 fn delete_config_in_dir(dir: &Path, id: &str) -> Result<(), String> {
@@ -1595,42 +1595,59 @@ fn delete_config_in_dir(dir: &Path, id: &str) -> Result<(), String> {
 
     let removed_last_used = removed.iter().any(|(_, e)| e.last_used);
 
-    // WR-03: delete each on-disk file, and if ANY file cannot be removed, RE-INSERT its entry so
-    // the manifest still tracks the file we could not remove (never orphan a password-bearing
-    // `.toml`) and surface the error. V12: only delete a file that validates inside the data dir; a
-    // path pointing outside is dropped from the list without attempting a delete. A NotFound error
-    // is success-equivalent (the file is already gone). Files that DID delete stay removed; only the
-    // failed one is re-tracked, then we fail — matching the single-delete WR-03 contract.
-    let mut first_err: Option<String> = None;
-    let mut reinsert: Vec<(usize, ConfigEntry)> = Vec::new();
-    for (pos, entry) in &removed {
-        // Confinement before removal (never delete outside the data dir — D-06). Prefer the canonical
-        // V12 validator; FALL BACK to a lexical parent-dir check when canonicalize DRIFTS
-        // (junction/subst/OneDrive-redirect of the portable folder). Phase 19 UAT: the old code
-        // SILENTLY skipped remove_file on a validate miss — the entry was already dropped from the
-        // manifest, so the card vanished from the app while the `.toml` stayed in the folder forever (a
-        // UI-only removal, the "не удаляется из папки" report). Now a validate-miss on a file
-        // still lexically inside the data dir is STILL removed, and a path confined by NEITHER check is
-        // treated as a delete FAILURE (re-insert + surface the error) — never a silent orphan.
-        let confined = validate_path_in_dir(&entry.path, dir).is_ok()
+    // ── PRE-FLIGHT: confinement for the WHOLE sweep, before a single file is touched ──
+    //
+    // 30.1 regression defect 3. This loop used to decide confinement per entry INSIDE the delete
+    // loop and `continue` past an unconfined one — and then delete the next entry, and only then
+    // return `Err`. The user pressed «Удалить», was told the delete FAILED, and a real config
+    // file with the endpoint password in it was gone anyway; the card came back pointing at the
+    // file that could not be removed, so every retry took the identical path and the card became
+    // permanently undeletable. "Report failure after destroying something" is the worst of both
+    // outcomes: the user does not know to stop trusting what is on screen.
+    //
+    // Deciding it up front makes the confinement half genuinely ALL-OR-NOTHING. Nothing has been
+    // written to disk at this point — `manifest` is a local copy and `write_manifest_atomic` has
+    // not run — so returning here leaves the manifest and every `.toml` exactly as they were.
+    //
+    // Confinement itself is unchanged (D-06 / V12): prefer the canonical validator, FALL BACK to
+    // a lexical parent-dir check when canonicalize DRIFTS (junction/subst/OneDrive-redirect of
+    // the portable folder). Phase 19 UAT: an old version SILENTLY skipped remove_file on a
+    // validate miss, so the card vanished from the app while the `.toml` stayed in the folder
+    // forever (the "не удаляется из папки" report) — a validate-miss on a file still
+    // lexically inside the data dir is STILL removed, and a path confined by NEITHER check is a
+    // delete FAILURE, never a silent orphan.
+    let confined = |entry: &ConfigEntry| {
+        validate_path_in_dir(&entry.path, dir).is_ok()
             || Path::new(&entry.path)
                 .parent()
                 .map(|par| same_dir_lexical(par, dir))
-                .unwrap_or(false);
-        if !confined {
-            reinsert.push((*pos, entry.clone()));
-            if first_err.is_none() {
-                first_err =
-                    Some("Failed to delete config file: path is outside the app folder".into());
-            }
-            continue;
-        }
+                .unwrap_or(false)
+    };
+    if removed.iter().any(|(_, entry)| !confined(entry)) {
+        return Err("Failed to delete config file: path is outside the app folder".into());
+    }
+
+    // WR-03: delete each on-disk file, and if ANY file cannot be removed, RE-INSERT its entry so
+    // the manifest still tracks the file we could not remove (never orphan a password-bearing
+    // `.toml`) and surface the error. A NotFound error is success-equivalent (the file is
+    // already gone).
+    //
+    // 30.1 defect 3, the io half. The loop STOPS at the first failure and re-inserts every entry
+    // it has not yet deleted, instead of walking on. A filesystem has no transactional delete, so
+    // files removed BEFORE the failure stay removed — that residue is unavoidable. What is not
+    // unavoidable, and is what this fixes, is continuing to destroy files after learning that the
+    // operation is already going to be reported as failed. The trigger needs no exotic setup:
+    // two ordinary same-server twins and one file held open by an editor or an antivirus scan.
+    let mut first_err: Option<String> = None;
+    let mut reinsert: Vec<(usize, ConfigEntry)> = Vec::new();
+    for (i, (_pos, entry)) in removed.iter().enumerate() {
         if let Err(e) = std::fs::remove_file(&entry.path) {
             if e.kind() != std::io::ErrorKind::NotFound {
-                reinsert.push((*pos, entry.clone()));
-                if first_err.is_none() {
-                    first_err = Some(format!("Failed to delete config file: {e}"));
-                }
+                first_err = Some(format!("Failed to delete config file: {e}"));
+                // This entry AND every entry after it stay tracked: their files are still on
+                // disk, and an entry-less `.toml` is an orphaned credential (WR-03).
+                reinsert.extend(removed[i..].iter().cloned());
+                break;
             }
         }
     }
@@ -1665,7 +1682,7 @@ pub fn duplicate_config(app: tauri::AppHandle, id: String) -> Result<(), String>
     use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     let mut manifest = read_manifest(&dir)?;
     prune_missing(&mut manifest); // IN-55: drop ghosts so the copy name/order are truthful
     let src = manifest
@@ -2127,7 +2144,7 @@ pub fn rename_config(app: tauri::AppHandle, id: String, name: String) -> Result<
     use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     let mut manifest = read_manifest(&dir)?;
     // WR-02: re-validate the frontend-supplied name at the trust boundary (V13 /
     // defence-in-depth). A direct `invoke("rename_config", {id, name})` bypasses the
@@ -2192,7 +2209,7 @@ pub fn set_last_used(app: tauri::AppHandle, id: String) -> Result<(), String> {
     use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     let mut manifest = read_manifest(&dir)?;
     let exists = manifest.configs.iter().any(|c| c.id == id);
     if !exists {
@@ -2256,7 +2273,7 @@ pub fn reorder_configs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), St
     use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     let mut manifest = read_manifest(&dir)?;
 
     // Rank each supplied id by its position in the sequence (0-based). Ids not present in
@@ -3750,6 +3767,179 @@ included_routes = ["0.0.0.0/0"]
         // The readable sibling was untouched (the failed target has no identity, so no sweep).
         assert!(sibling.exists(), "an unrelated sibling must not be swept when the target fails");
         cleanup(&tmp);
+    }
+
+    // ─── 30.1 regression defect 3: a delete is ALL-OR-NOTHING ────────────────────────────
+    //
+    // The sweep deletes every non-copy entry sharing the target's (host,user) identity. Its loop
+    // used to `continue` past an entry it could not delete and go on deleting the NEXT one, then
+    // return `Err` at the end. So the user pressed «Удалить», was told the delete FAILED, and a
+    // real config file — password inside — was gone anyway. The card they meant to remove was
+    // re-inserted and became permanently undeletable, because every retry took the same path.
+    //
+    // REACHABILITY (the question this fix had to answer before touching code). The regression
+    // diagnosis found it on a machine whose migration had produced twins across two data roots.
+    // That migration is REVERTED and its code is gone, so no writer in the app can put an
+    // out-of-root path into the manifest today. But the shape does NOT depend on two roots:
+    //   * same-(host,user) non-copy twins arise from the app's OWN history — the legacy
+    //     `trusttunnel_client.toml` beside a `TrustTunnel_<user>.toml` is the pair the B6 sweep
+    //     was written for, and `delete_sweep_still_removes_a_genuine_twin` above pins that it
+    //     fires on exactly that shape;
+    //   * an ordinary `remove_file` failure on one of them — a read-only attribute, a lock held
+    //     by an editor or an antivirus scan, an ACL — is all the loop needs to walk past one file
+    //     and destroy the next.
+    // Both tests below therefore stay: the first covers the unconfined path the code still has an
+    // explicit branch for (the manifest is a plain JSON file in a user-writable folder), the
+    // second covers the variant that needs nothing but two ordinary twins.
+
+    /// An unconfined entry anywhere in the sweep must delete NOTHING. Not «delete what it can and
+    /// report failure» — that is the defect: the user is told nothing happened while a file is
+    /// gone for good.
+    ///
+    /// The fixture reproduces the diagnosed layout exactly: the unconfined entry sits at position
+    /// 0 and the user's own confined card at position 1, which is the order in which the old loop
+    /// hit the `continue` first and the `remove_file` second.
+    #[test]
+    fn delete_sweep_with_an_unconfined_entry_deletes_no_file_at_all() {
+        let tmp = tempdir();
+        let outside_dir = tmp.parent().unwrap().join(format!(
+            "tt_manifest_outside_{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        // Byte-identical twins: same host + user, so ONE identity group and no «(копия)» marker
+        // on either — exactly what a copied config produces.
+        let content = sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A");
+        let outside = write_toml(&outside_dir, "TrustTunnel_swift-fox.toml", &content);
+        let inside = write_toml(&tmp, "TrustTunnel_swift-fox.toml", &content);
+
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "stale".into(), name: "Россия".into(), path: outside.to_string_lossy().to_string(), order: 0, last_used: false, copy: false },
+                    ConfigEntry { id: "live".into(), name: "Россия".into(), path: inside.to_string_lossy().to_string(), order: 1, last_used: true, copy: false },
+                ],
+            },
+        )
+        .unwrap();
+
+        let result = delete_config_in_dir(&tmp, "live");
+
+        let inside_survived = inside.exists();
+        let outside_survived = outside.exists();
+        let after = read_manifest(&tmp).unwrap();
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir(&outside_dir);
+        cleanup(&tmp);
+
+        assert!(
+            result.is_err(),
+            "a sweep it cannot carry out in full must FAIL — silently deleting the half it can \
+             reach is the UI-only removal Phase 19 already rejected once"
+        );
+        assert!(
+            inside_survived,
+            "THE DEFECT: the confined twin's file was destroyed while the delete reported \
+             failure. The user is told nothing happened and their config — password included — \
+             is gone, and the card comes back pointing at the file that could not be removed"
+        );
+        assert!(
+            outside_survived,
+            "a file outside the data dir must never be touched (D-06)"
+        );
+        assert_eq!(
+            after.configs.len(),
+            2,
+            "an all-or-nothing refusal must leave the manifest exactly as it found it"
+        );
+    }
+
+    /// The same all-or-nothing property, with no out-of-root path in sight: two ordinary twins
+    /// inside the data dir, one of which cannot be removed. The loop must stop at the first
+    /// failure instead of walking on and destroying the next file.
+    ///
+    /// Windows-only because the fixture needs a deterministic `remove_file` failure on a file
+    /// that is still READABLE — a swept sibling has to be parseable or it would not be in the
+    /// sweep at all, which rules out the directory trick the sibling tests above use.
+    ///
+    /// The lock is a real one: a handle opened with `share_mode(FILE_SHARE_READ)`, i.e. readable
+    /// by anyone but not deletable, which is exactly what an open editor, a backup agent or an
+    /// antivirus scan holds. It is NOT the read-only attribute — Rust's `remove_file` clears that
+    /// and retries on Windows, so a read-only fixture deletes fine and the test would have passed
+    /// against the defect (measured: the first draft of this test did exactly that).
+    #[cfg(windows)]
+    #[test]
+    fn delete_sweep_stops_at_the_first_undeletable_file_and_spares_the_rest() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+
+        let tmp = tempdir();
+        let content = sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A");
+        // Position 0 — the legacy filename, held open by "another process". Non-copy, readable,
+        // same identity, so the sweep includes it and reaches it FIRST.
+        let locked = write_toml(&tmp, "trusttunnel_client.toml", &content);
+        let _lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&locked)
+            .expect("the lock handle must open");
+        // Position 1 — the card the user actually clicked. Perfectly deletable, which is why the
+        // old loop deleted it after failing on the one above.
+        let target = write_toml(&tmp, "TrustTunnel_swift-fox.toml", &content);
+
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "locked".into(), name: "Россия".into(), path: locked.to_string_lossy().to_string(), order: 0, last_used: false, copy: false },
+                    ConfigEntry { id: "target".into(), name: "Россия".into(), path: target.to_string_lossy().to_string(), order: 1, last_used: true, copy: false },
+                ],
+            },
+        )
+        .unwrap();
+
+        // Guard against a vacuous fixture, in both directions. If the lock does not actually
+        // block deletion the whole test degenerates into an ordinary successful sweep and would
+        // pass against the defect; if it also blocked READING, the file would have no identity
+        // and would never enter the sweep, which is a different vacuous pass.
+        assert!(
+            std::fs::remove_file(&locked).is_err(),
+            "the fixture is deletable — the share-mode lock did not take and this test would pass \
+             vacuously"
+        );
+        assert!(
+            identity_key_of(&locked.to_string_lossy()).is_some(),
+            "the locked file must still be READABLE, or it carries no identity and never enters \
+             the sweep this test is about"
+        );
+
+        let result = delete_config_in_dir(&tmp, "target");
+
+        let target_survived = target.exists();
+        let after = read_manifest(&tmp);
+        // Release the lock before the tempdir teardown, or the directory cannot be removed.
+        drop(_lock);
+        cleanup(&tmp);
+
+        assert!(result.is_err(), "a sweep with an undeletable member must fail");
+        assert!(
+            target_survived,
+            "THE DEFECT, with no migration involved: the loop walked past the file it could not \
+             delete and destroyed the next one, then reported failure. Two ordinary twins and one \
+             locked file is all it takes"
+        );
+        let after = after.unwrap();
+        assert_eq!(
+            after.configs.len(),
+            2,
+            "both entries must still be tracked — a file left on disk with no manifest entry is \
+             an orphaned password-bearing .toml (WR-03)"
+        );
     }
 
     /// Truth (IN-01): repeated last-used switches keep orders dense (0..n), never climbing

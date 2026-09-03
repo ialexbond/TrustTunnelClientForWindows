@@ -236,13 +236,46 @@ export function AutoModeSettings({
   // While a switch is in flight, every switch is held.
   const switchDisabled = locked || order.length === 1;
 
-  // Persist the current top-to-bottom id order to the manifest. Optimistic on purpose: the local
-  // order already reflects the move, and a transient persist failure leaves it where the user put it
-  // rather than snapping the row back under their hand.
-  const persistOrder = (next: ConfigSummary[]) => {
-    void invoke("reorder_configs", { ids: next.map((c) => c.id) }).catch(() => {
-      // optimistic: keep the local order on a transient persist failure
-    });
+  // Item 9 (30.1 review): the arrangement as it stood BEFORE the current drag began. A drag mutates
+  // the arrangement on every `dragenter`, so by the time a drop is refused the pre-drag order is no
+  // longer anywhere in scope; captured at `dragstart`, it can be restored. A keyboard move needs no
+  // ref — it reads the pre-move arrangement straight out of its own render closure.
+  const arrangementBeforeDrag = useRef<string[]>([]);
+
+  // Persist the current top-to-bottom id order to the manifest.
+  //
+  // The RENDER stays optimistic on purpose: the local order already reflects the move, so the row
+  // does not snap back under the user's hand while the IPC is in flight.
+  //
+  // The CONFIRMATION is not optimistic any more (item 9, 30.1 review). This was a fire-and-forget
+  // write with an empty catch, and both call sites fired `onSaved` — «Настройки сохранены» —
+  // unconditionally right after it. A refused reorder therefore reported a success it never achieved
+  // and left the user reading a queue order the failover engine does not use, silently, for the rest
+  // of the session. Now the confirmation waits for the write, and a refusal reconciles the visible
+  // order back to where it was and reports itself instead.
+  //
+  // This is deliberately the SAME reconcile-and-report pair `savedToRust` already applies to the
+  // master toggle and the participation set (`reconcileFailoverFromRust` + `onSaveFailed`), not a
+  // third shape: a refused reorder and a refused failover write are the same event to the user.
+  // The difference is only where the truth is read back from — the reorder's pre-move arrangement is
+  // known locally, so no extra round-trip to Rust is needed to restore it.
+  //
+  // `previous` is the arrangement BEFORE the gesture, including the empty array that means «never
+  // rearranged» — restoring that correctly hands the list back to the manifest's own order.
+  const persistOrder = (next: ConfigSummary[], previous: string[], moved: ConfigSummary) => {
+    void invoke("reorder_configs", { ids: next.map((c) => c.id) })
+      .then(() => {
+        onSaved?.();
+      })
+      .catch(() => {
+        setArrangement(previous);
+        // Correct the live region too. It has just announced the row's NEW position, and leaving
+        // that standing after the move was refused is the same false claim in the channel a screen
+        // reader user hears — so it is re-announced against the order actually restored. No new copy
+        // is minted for this: the honest sentence is the one that describes where the row really is.
+        setAnnounce(movedMessage(applyQueueArrangement(previous, orderedConfigs), moved));
+        onSaveFailed?.();
+      });
   };
 
   /** The position a row holds among PARTICIPATING rows, or 0 when it is out of the queue. */
@@ -287,11 +320,15 @@ export function AutoModeSettings({
     const next = [...order];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
+    // Item 9: the pre-move arrangement, so a refused write can put the list back. Read from this
+    // render's closure, which is the arrangement the move is being applied to.
+    const previousArrangement = arrangement;
     setArrangement(next.map((c) => c.id));
-    persistOrder(next);
     setAnnounce(movedMessage(next, moved));
     pendingFocusId.current = id;
-    onSaved?.();
+    // Item 9: `onSaved` used to fire here, unconditionally, whether or not the write landed. The
+    // confirmation now belongs to `persistOrder`, which fires it only when Rust accepted the order.
+    persistOrder(next, previousArrangement, moved);
   };
 
   // After a keyboard move re-renders the new order, return focus to the moved row.
@@ -495,6 +532,9 @@ export function AutoModeSettings({
                     event.preventDefault();
                     return;
                   }
+                  // Item 9: snapshot the arrangement before this drag starts mutating it on every
+                  // `dragenter`, so a refused drop can be put back where the user found it.
+                  arrangementBeforeDrag.current = arrangement;
                   setDragId(cfg.id);
                   event.dataTransfer.effectAllowed = "move";
                 }}
@@ -519,12 +559,12 @@ export function AutoModeSettings({
                   // live-region pushes per drop in dev, and called `onSaved` (→ a setState in
                   // `SnackBarProvider`) from inside a render pass.
                   const current = orderRef.current;
-                  persistOrder(current);
                   setAnnounce(movedMessage(current, cfg));
                   setDragId(null);
-                  // A drag is a move too, so it confirms exactly like a keyboard move; otherwise the
-                  // same action would be announced and confirmed on one path and silent on the other.
-                  onSaved?.();
+                  // Item 9: a drag is a move too, so it confirms exactly like a keyboard move — and
+                  // now that means the SAME deferral: `onSaved` used to fire here unconditionally,
+                  // and it is `persistOrder` that owns it, on a write Rust actually accepted.
+                  persistOrder(current, arrangementBeforeDrag.current, cfg);
                 }}
                 onDrop={() => setDragId(null)}
               />

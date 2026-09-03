@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { formatError } from "../utils/formatError";
+import { localizeVpnError } from "./vpnEventHelpers";
+import { samePath } from "../utils/samePath";
 import type { VpnStatus, VpnConfig } from "../types";
 import type { ConnectOutcome } from "../ipc/events";
 import type { i18n as I18nType } from "i18next";
@@ -74,7 +75,7 @@ export function useVpnActions({
         logLevel: config.logLevel,
       })) as ConnectOutcome | null | undefined;
     } catch (e) {
-      setError(formatError(e));
+      setError(localizeVpnError(e, i18n));
       setStatus("error");
     }
   }, [config, i18n, setError, setStatus]);
@@ -84,9 +85,9 @@ export function useVpnActions({
       setStatus("disconnecting");
       await invoke("vpn_disconnect");
     } catch (e) {
-      setError(formatError(e));
+      setError(localizeVpnError(e, i18n));
     }
-  }, [setError, setStatus]);
+  }, [i18n, setError, setStatus]);
 
   const handleReconnect = useCallback(async () => {
     if (status !== "connected" && status !== "connecting") return;
@@ -148,6 +149,29 @@ export function useVpnActions({
     // the teardown is exactly what makes the no-dwell behavior work. The "disconnected"
     // still fires and still resolves the reconnect promise below (that listener keys
     // on reconnectResolve.current, not on the visible status).
+    // Item 7 (30.1 review): arm the teardown-settled resolver BEFORE the vpn_disconnect invoke and
+    // await it after — the F-8 (Fable-5) shape `switchTo` has used since Phase 14 (see the identical
+    // block on its teardown leg: same file, same ref, same 5000 ms safety timer).
+    //
+    // WHY IT MATTERS HERE. Rust emits the terminal Disconnected from INSIDE the teardown, BEFORE
+    // vpn_disconnect's IPC promise resolves. This path used to build the promise AFTER that await,
+    // so the real event always arrived with `reconnectResolve.current` still null, nothing was
+    // listening for it, and the wait could only ever end via the 5 s backstop — «Сохранить и
+    // переподключиться» burned five seconds on the HAPPY path, every single time. F-8 fixed exactly
+    // this for the switch leg and was never carried over. The two teardown paths are now one
+    // pattern: change one, change the other.
+    const teardownSettled = new Promise<void>((resolve) => {
+      reconnectResolve.current = resolve;
+      // Safety timeout: a teardown that never emits (a wedged sidecar) still releases the wait after
+      // 5 s. This is a BACKSTOP, not the normal path — deleting it is NOT the fix for the stall above.
+      setTimeout(() => {
+        if (reconnectResolve.current === resolve) {
+          reconnectResolve.current = null;
+          resolve();
+        }
+      }, 5000);
+    });
+
     try {
       await invoke("vpn_disconnect");
     } catch (e) {
@@ -157,6 +181,11 @@ export function useVpnActions({
       // 5s safety timeout and only THEN surface an error (via handleConnect hitting
       // the "VPN is already running" guard on a still-alive sidecar). Abort cleanly
       // instead: show the error now and stop, do NOT proceed to the wait + reconnect.
+      // Item 7 / F-8: the resolver armed above is now orphaned — no Disconnected will fire for a
+      // rejected teardown. It self-cleans exactly as it does on switchTo's reject path: the 5 s
+      // safety timer nulls it (`reconnectResolve.current === resolve`), or the next teardown
+      // overwrites it. A stray Disconnected in that window resolves only the abandoned,
+      // un-awaited promise — harmless.
       // AUDIT-2026-06-11 #8: the reconnect flow is over — drop the mark so the
       // no-dwell guard stops suppressing future "disconnected" events.
       clearManualReconnectMark();
@@ -164,23 +193,14 @@ export function useVpnActions({
       // suppression intent now; otherwise a stale true would swallow the next genuine user
       // «Отключено» until the Rust terminal-outcome backstop clears it.
       clearSwitchPending();
-      setError(formatError(e));
+      setError(localizeVpnError(e, i18n));
       setStatus("error");
       return;
     }
 
     // Wait for the actual "disconnected" event (sidecar fully torn down) before we
-    // reconnect — the safety timeout resolves after 5s if the event never comes.
-    await new Promise<void>((resolve) => {
-      reconnectResolve.current = resolve;
-      // Safety timeout: if disconnect event never comes, resolve after 5s
-      setTimeout(() => {
-        if (reconnectResolve.current === resolve) {
-          reconnectResolve.current = null;
-          resolve();
-        }
-      }, 5000);
-    });
+    // reconnect — the safety timeout armed above resolves after 5s if it never comes.
+    await teardownSettled;
 
     // AUDIT-2026-06-11 #8: teardown is done (the "disconnected" event fired or the
     // 5s wait elapsed) — clear the mark BEFORE reconnecting. From here handleConnect
@@ -223,6 +243,7 @@ export function useVpnActions({
   }, [
     status,
     handleConnect,
+    i18n,
     reconnectResolve,
     setStatus,
     setError,
@@ -240,7 +261,14 @@ export function useVpnActions({
   const markLastUsed = useCallback(async (path: string): Promise<void> => {
     try {
       const list = await invoke<Array<{ id: string; path: string }>>("list_configs");
-      const match = list?.find((c) => c.path === path);
+      // Raw-path-comparison class (30.1 class sweep — site 1 of 3). The path the connect flow
+      // carries and the path the manifest stores are the SAME FILE routinely spelled differently
+      // on Windows (`C:\…` vs `C:/…`, `c:` vs `C:`), so a byte `===` found no entry and the
+      // last-used marker was silently skipped — and because this step is best-effort by design,
+      // nothing ever surfaced. Sites 2 and 3 of the class are `useAutoConnect`'s last-used
+      // reconciliation and `useConfigLifecycle`'s external-delete watcher; all three now compare
+      // through `samePath`.
+      const match = list?.find((c) => samePath(c.path, path));
       if (match) {
         await invoke("set_last_used", { id: match.id });
       }
@@ -349,7 +377,7 @@ export function useVpnActions({
           // Phase 13 (BL-01): drop the suppression intent — no Disconnected will fire, so a
           // stale true must not swallow a later genuine user «Отключено».
           void invoke("set_switch_or_reconnect_pending", { pending: false });
-          setError(formatError(e));
+          setError(localizeVpnError(e, i18n));
           setStatus("error");
           // Phase 14 (14-04): the teardown rejected — the switch never reached B, so report
           // failure. The App revert re-points to the previous config A (which is still the
@@ -409,7 +437,7 @@ export function useVpnActions({
           return { ok: false, superseded: true };
         }
       } catch (e) {
-        setError(formatError(e));
+        setError(localizeVpnError(e, i18n));
         setStatus("error");
         // Phase 14 (14-04): B failed to connect — report failure so the App reverts to the
         // previous config A (D-05). The status is already `error`; the App's revert re-points

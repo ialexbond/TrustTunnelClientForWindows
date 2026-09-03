@@ -782,7 +782,7 @@ function App() {
     // hero). The lifecycle hook skips the wipe (and defers the delete side-effects) while switching.
     isSwitching,
   });
-  useAutoConnect({ config, status, setStatus, setError, seedConfigPing: seedRetainedPing });
+  useAutoConnect({ config, status, setStatus, setError, seedConfigPing: seedRetainedPing, i18n });
 
   // ─── Failover lives in Rust (27 D-06, plan 28-09) ───
   // Phase 12's `useAutoSwitch` engine used to be mounted here: a timer that re-read the active

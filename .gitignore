@@ -1,5 +1,6 @@
 cmake-build-*/
 build/
+env/
 .idea/
 .vscode/
 .DS_Store
@@ -7,6 +8,8 @@ CMakeUserPresets.json
 pyvenv.cfg
 .clangd/
 /.cache/
+
+target/
 
 # Conan and conan-cmake create some files in-tree by design
 conan.lock
@@ -67,3 +70,16 @@ gui-pro/coverage/
 AGENTS.md
 GEMINI.md
 .hex-skills/
+
+# Design-hook cache (generated per session by the impeccable tooling, never source).
+.impeccable/
+
+# C++ core build trees (local only — the sidecar is committed as a binary, not built in CI).
+build-msvc*/
+build-v115-src/
+
+# Version files generated at build time from templates by cmake/version.cmake
+# and setup_wizard/build.rs (see cmake/version.cmake). Never committed.
+trusttunnel/include/vpn/trusttunnel/version.h
+trusttunnel/trusttunnel_client.rc
+trusttunnel/setup_wizard/resources/setup_wizard.rc

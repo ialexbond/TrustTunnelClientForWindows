@@ -10,13 +10,14 @@ import i18n from "../../shared/i18n";
 //     onAdd: (action, value) => string | null,   // = useRoutingState.addEntry
 //     ensureGroupCache: (groupId: string) => void,// prefetch+cache an iplist_group before it resolves
 //     geodataDownloaded: boolean,                 // gates geosite-backed tiles
-//     blockRoutingEnabled: boolean,               // gates block-target (ads/trackers) tiles
 //   }
 //
 // Backings are fixed by 22-RESEARCH §C: YouTube → `geosite:youtube` (no prefetch), Игры →
-// `iplist_group:games` (needs prefetch), Россия → a `ru` backing landing in `direct`, Реклама и
-// трекеры → a block-target backing.
-import { PresetGrid } from "./PresetGrid";
+// `iplist_group:games` (needs prefetch), Россия → a `ru` backing landing in `direct`.
+//
+// The `blockRoutingEnabled` prop and the two block-target tiles it gated («Реклама и трекеры»,
+// «Телеметрия Windows») were removed on 2026-09-03 along with site blocking itself.
+import { PresetGrid, PRESET_TILES } from "./PresetGrid";
 import type { RoutingRules, RuleEntry } from "./useRoutingState";
 
 // jsdom does not implement scrollIntoView (portals / focus rings may call it)
@@ -28,7 +29,6 @@ function makeRules(overrides?: Partial<RoutingRules>): RoutingRules {
   return {
     direct: [],
     proxy: [],
-    block: [],
     process_mode: "exclude",
     processes: [],
     ...overrides,
@@ -54,7 +54,6 @@ describe("PresetGrid (Wave 0 RED — contract for Plan 22-04)", () => {
   function renderGrid(overrides?: {
     rules?: RoutingRules;
     geodataDownloaded?: boolean;
-    blockRoutingEnabled?: boolean;
   }) {
     return render(
       <PresetGrid
@@ -62,7 +61,6 @@ describe("PresetGrid (Wave 0 RED — contract for Plan 22-04)", () => {
         onAdd={onAdd}
         ensureGroupCache={ensureGroupCache}
         geodataDownloaded={overrides?.geodataDownloaded ?? true}
-        blockRoutingEnabled={overrides?.blockRoutingEnabled ?? true}
       />,
     );
   }
@@ -81,10 +79,27 @@ describe("PresetGrid (Wave 0 RED — contract for Plan 22-04)", () => {
     expect(onAdd).toHaveBeenCalledWith("proxy", "geosite:youtube");
   });
 
-  it("lands the ads/trackers preset in the block block", () => {
+  // ── site blocking is gone: no tile may aim at a card the tab does not have ──
+  //
+  // Была история «плитка „Реклама и трекеры“ приземляется в блок „Заблокировать“». Блокировка сайтов
+  // удалена 2026-09-03, и обе плитки-в-блокировку удалены вместе с ней — они НЕ переставлены на
+  // «Через VPN»: пустить рекламную сеть в туннель — не то же самое, что её не пускать, и плитка,
+  // тихо делающая другое, врала бы в один клик.
+  it("no preset tile aims at a destination the Routing tab does not have", () => {
+    // Проверяется КАЖДАЯ плитка набора, а не заранее известные две: новая плитка с целью, которой
+    // нет на вкладке, обязана уронить этот тест, а не проскользнуть мимо перечисления.
+    expect(PRESET_TILES.length).toBeGreaterThan(0);
+    for (const tile of PRESET_TILES) {
+      expect(["direct", "proxy"]).toContain(tile.target);
+    }
+  });
+
+  it("the two block-target tiles are gone from the grid entirely", () => {
     renderGrid();
-    fireEvent.click(screen.getByRole("button", { name: /Реклама/i }));
-    expect(onAdd).toHaveBeenCalledWith("block", expect.any(String));
+    expect(screen.queryByRole("button", { name: /Реклама/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Телеметрия/i })).not.toBeInTheDocument();
+    // …и это не «сетка вообще ничего не рисует»: соседняя плитка на месте.
+    expect(screen.getByRole("button", { name: /YouTube/i })).toBeInTheDocument();
   });
 
   // ── (b) idempotent re-add is a no-op (D-06) ────────────────────────────────
@@ -129,22 +144,7 @@ describe("PresetGrid (Wave 0 RED — contract for Plan 22-04)", () => {
     expect(ensureGroupCache).not.toHaveBeenCalled();
   });
 
-  // ── (e) gating (Pitfall #1 / #3) ───────────────────────────────────────────
-  it("HIDES block-target tiles entirely when block routing is off (owner D-2/F-3)", () => {
-    // Was: shown-but-disabled. Now: the block card is hidden, so a block-target preset has
-    // nowhere to land → it is not rendered at all. Both block tiles disappear; non-block stay.
-    renderGrid({ blockRoutingEnabled: false });
-    expect(screen.queryByRole("button", { name: /Реклама/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Телеметрия/i })).not.toBeInTheDocument();
-    // A non-block tile is still present.
-    expect(screen.getByRole("button", { name: /YouTube/i })).toBeInTheDocument();
-  });
-
-  it("shows block-target tiles when block routing is on", () => {
-    renderGrid({ blockRoutingEnabled: true });
-    expect(screen.getByRole("button", { name: /Реклама/i })).toBeInTheDocument();
-  });
-
+  // ── (e) gating (Pitfall #3) ────────────────────────────────────────────────
   it("disables geosite-backed tiles when geodata is not downloaded", () => {
     renderGrid({ geodataDownloaded: false });
     const tile = screen.getByRole("button", { name: /YouTube/i });

@@ -207,9 +207,33 @@ export function useConfigMutations({
         // the TTL now covers only the short delete → reload round-trip.
         markSelfDelete(config.path);
         if (activeConfigPath) markSelfDelete(activeConfigPath);
-        await invoke("delete_config", { id: config.id });
+        // G-30.1-01 (30.1 UAT, T-14), the third surface of the class: the delete CONFIRMATION is
+        // also a window open against one specific config, and the file can leave the disk while it
+        // sits there. What happened then: the folder-as-truth reconcile inside `list_configs` had
+        // already pruned the manifest entry, so `delete_config` answered «Config not found in
+        // manifest» — a raw English backend string, thrown at a user whose only crime was
+        // confirming an outcome he already had.
+        //
+        // Deliberately NOT an early return: the disconnect decision above is untouched (this is a
+        // UI-truthfulness fix, not a lifecycle change), and `delete_config` is still ATTEMPTED so
+        // its side work — the same-server twin sweep, prune_failover_exclusions — still runs
+        // whenever the entry is in fact still there. Only its «not found» failure is absorbed, and
+        // only when the disk has been asked and answered that the file is gone. A check that
+        // rejects answers `null`, not `false`, so an unrelated failure still surfaces as before.
+        const alreadyGone =
+          (await invoke<boolean>("config_file_exists", { configPath: config.path }).catch(() => null)) ===
+          false;
+        try {
+          await invoke("delete_config", { id: config.id });
+        } catch (e) {
+          if (!alreadyGone) throw e;
+        }
         await reload();
-        pushSnack(t("connection.snackbar.config_deleted"));
+        pushSnack(
+          alreadyGone
+            ? t("connection.snackbar.config_already_gone")
+            : t("connection.snackbar.config_deleted"),
+        );
       } catch (e) {
         pushSnack(formatError(e), "error");
       } finally {

@@ -243,13 +243,94 @@ fi
 /// `host` is validated upstream by `validate_ssh_host` before it reaches here (no
 /// shell metacharacters), so it is safe to interpolate. Pure fn → unit-testable under
 /// `cargo test --lib` without a live server.
-pub(crate) fn build_uninstall_extras(sudo: &str, host: &str, ssh_port: u16) -> String {
-    format!(
-        r#"echo "=== Step 5b: Remove Let's Encrypt state ({host}) ==="
-{sudo}certbot delete --cert-name {host} --non-interactive 2>/dev/null || true
-{sudo}rm -rf /etc/letsencrypt/live/{host} /etc/letsencrypt/archive/{host} /etc/letsencrypt/renewal/{host}.conf 2>/dev/null || true
+/// Item 15 (30.1 milestone review) — the domain our install issued its Let's Encrypt
+/// certificate for, read out of the server's own `/opt/trusttunnel/hosts.toml`.
+///
+/// The deploy writes exactly one `[[main_hosts]]` entry (`deploy.rs`) whose `hostname` is
+/// the same value it passes to `certbot certonly -d …`, and certbot names the lineage
+/// after it. So this entry — not the SSH address — is what the teardown must delete.
+///
+/// Soft-fail by design: an empty, absent or unparseable file returns `None`, and the
+/// caller then omits the certbot arm entirely rather than guessing.
+pub(crate) fn parse_issued_domain_from_hosts_toml(content: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        #[serde(default)]
+        hostname: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct HostsFile {
+        #[serde(default)]
+        main_hosts: Vec<Entry>,
+    }
+    toml::from_str::<HostsFile>(content)
+        .ok()?
+        .main_hosts
+        .into_iter()
+        .map(|e| e.hostname)
+        .find(|h| !h.trim().is_empty())
+        .map(|h| h.trim().to_string())
+}
 
-echo "=== Step 5c: Remove TrustTunnel ufw rules BY COMMENT (ownership-scoped) ==="
+/// Is this a value we may interpolate into a `certbot delete --cert-name …`?
+///
+/// Whitelist-first, per CLAUDE.md SAFETY-01: `validate_fqdn_sni` accepts ONLY
+/// `[A-Za-z0-9.-]`, so every shell metacharacter is rejected by omission. A value read
+/// back from the server is untrusted input — the same reasoning as the `ignoreip` client
+/// address in `server_security.rs`, which is validated before it lands in a config file.
+///
+/// Two further shape rules, both about honesty rather than safety:
+/// - it must contain a dot: a bare label is not a domain Let's Encrypt would issue for;
+/// - it must not be a bare IPv4/IPv6 literal: Let's Encrypt does not issue for addresses,
+///   so a lineage by that name cannot exist and deleting it would be theatre.
+fn is_deletable_cert_name(domain: &str) -> bool {
+    let d = domain.trim();
+    if d.is_empty() || validate_fqdn_sni(d).is_err() {
+        return false;
+    }
+    if d.contains(':') {
+        return false; // IPv6 literal (also already rejected by the whitelist)
+    }
+    if d.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return false; // IPv4 literal
+    }
+    d.contains('.')
+}
+
+pub(crate) fn build_uninstall_extras(
+    sudo: &str,
+    ssh_port: u16,
+    issued_domain: Option<&str>,
+) -> String {
+    // Item 15 (30.1 milestone review): Step 5b is keyed to the domain the certificate was
+    // ACTUALLY issued for, NOT to `host` (the address this SSH session dialled). Keyed to
+    // the host it deleted a lineage name that never existed whenever the two differed —
+    // a no-op that only pretended to clean up, leaving the real certificate, its archive
+    // and its renewal job on the server.
+    //
+    // With no issued domain (or one that cannot be a Let's Encrypt lineage) the block is
+    // OMITTED ENTIRELY rather than falling back to `host`: a delete for a name that was
+    // never issued is exactly the pretend-cleanup this finding is about.
+    //
+    // The SSH host is no longer a parameter at all. Keeping it would leave a value that
+    // this builder must never key a deletion to — and an unused parameter that LOOKS
+    // load-bearing is the same "the signature promises more than the code does" smell as
+    // the defect itself. `ssh_port` stays: the sacred re-assert below genuinely needs it.
+    let le_block = match issued_domain {
+        Some(domain) if is_deletable_cert_name(domain) => {
+            let domain = domain.trim();
+            format!(
+                r#"echo "=== Step 5b: Remove Let's Encrypt state ({domain}) ==="
+{sudo}certbot delete --cert-name {domain} --non-interactive 2>/dev/null || true
+{sudo}rm -rf /etc/letsencrypt/live/{domain} /etc/letsencrypt/archive/{domain} /etc/letsencrypt/renewal/{domain}.conf 2>/dev/null || true
+
+"#
+            )
+        }
+        _ => String::new(),
+    };
+    format!(
+        r#"{le_block}echo "=== Step 5c: Remove TrustTunnel ufw rules BY COMMENT (ownership-scoped) ==="
 # Delete ONLY rules whose comment marks them as ours. install_firewall tags rules
 # with 'SSH (TrustTunnel)' / 'VPN (TrustTunnel)' / 'TrustTunnel VPN' / 'TrustTunnel
 # QUIC' / 'HTTP cert renewal (TrustTunnel)', and the deploy stage with
@@ -616,7 +697,7 @@ fi"#
 /// The FINAL unconditional SACRED SSH-port re-assert stays LAST for EVERY selection combo
 /// (D-INV-1) — the MTProto/BBR folds are placed BEFORE it so the SSH allow is the last word.
 ///
-/// The arg list mirrors the deploy artifact chain (dir/svc/host/ports) plus the two Phase 18
+/// The arg list mirrors the deploy artifact chain (dir/svc/ports) plus the two Phase 18
 /// inputs (selection + snapshot); bundling them into a struct would not aid readability here,
 /// so we allow the lint exactly as `derive_partial` above does.
 #[allow(clippy::too_many_arguments)]
@@ -624,7 +705,6 @@ pub(crate) fn build_uninstall_script(
     sudo: &str,
     dir: &str,
     svc: &str,
-    host: &str,
     ssh_port: u16,
     telemt_port: u16,
     mtproto_is_ours: bool,
@@ -635,6 +715,10 @@ pub(crate) fn build_uninstall_script(
     ufw_pkg_ours: bool,
     fail2ban_pkg_ours: bool,
     bbr_prior_marker: Option<&str>,
+    // Item 15 (30.1 milestone review): the domain the Let's Encrypt certificate was
+    // ACTUALLY issued for, read back from the server's own hosts.toml before the script
+    // is built. Distinct from `host`, which is only the address THIS SSH session dialled.
+    issued_domain: Option<&str>,
     selection: &UninstallSelection,
     snapshot: Option<&super::snapshot::PreInstallSnapshot>,
 ) -> String {
@@ -642,7 +726,7 @@ pub(crate) fn build_uninstall_script(
     // — see build_uninstall_extras doc. host already whitelist-validated upstream.
     // ssh_port = the port THIS session is riding (SshParams.port); made SACRED so the
     // firewall/fail2ban teardown can never close the admin out (post-UAT brick fix).
-    let uninstall_extras = build_uninstall_extras(sudo, host, ssh_port);
+    let uninstall_extras = build_uninstall_extras(sudo, ssh_port, issued_domain);
     // Step 0: stop an in-progress deploy (kill OUR recorded process group + heal
     // dpkg) so a mid-install cancel leaves a clean, re-runnable server — never
     // touches the system's own apt (05-UAT 2026-06-09).
@@ -977,6 +1061,33 @@ pub async fn uninstall_server(
         super::server_bbr::parse_bbr_prior_marker(&out)
     };
 
+    // Item 15 (30.1 milestone review): read back the domain the Let's Encrypt certificate
+    // was ACTUALLY issued for. The teardown used to delete `--cert-name {params.host}` —
+    // the address THIS SSH session dialled — but the deploy issues the certificate with
+    // `certbot certonly -d {settings.hostname}` (deploy.rs), and certbot names the lineage
+    // after that domain. A user who connects by IP (or by a different name) and issues for
+    // `vpn.example.com` therefore got a delete for a lineage that never existed: a no-op
+    // that only pretended to clean up, leaving the real cert, its archive and its renewal
+    // job behind on the server.
+    //
+    // The issued domain is SERVER-side state, so it must be read back — the client does
+    // not hold it. `hosts.toml` is our own install's record of what we issued for, which
+    // is also why we do NOT enumerate `/etc/letsencrypt/` and delete what we find: an
+    // admin's own unrelated lineages live there too, and this teardown is ownership-scoped
+    // by design (see `build_uninstall_extras` doc). The read must happen HERE, before the
+    // script runs, because the script removes {dir} — and therefore hosts.toml — itself.
+    //
+    // Soft-fail: an unreadable/absent hosts.toml yields None and the certbot arm is
+    // omitted rather than falling back to the SSH host. `build_uninstall_extras` validates
+    // the value through the whitelist family before it reaches any command text (D-INV-3).
+    let issued_domain = {
+        let (out, _) = exec_command(
+            &handle, app,
+            &format!("{sudo}cat {ENDPOINT_DIR}/hosts.toml 2>/dev/null || echo ''"),
+        ).await.unwrap_or_default();
+        parse_issued_domain_from_hosts_toml(&out)
+    };
+
     // Run full uninstall as a single script for reliability. The script body is built
     // by the pure, unit-testable `build_uninstall_script` (06-16 C-18: pinned to the
     // deploy.rs COCOON MANIFEST by a symmetry test). host is validated upstream by
@@ -985,13 +1096,13 @@ pub async fn uninstall_server(
         sudo,
         ENDPOINT_DIR,
         ENDPOINT_SERVICE,
-        &params.host,
         params.port,
         telemt_port,
         mtproto_is_ours,
         ufw_pkg_ours,
         fail2ban_pkg_ours,
         bbr_prior_marker.as_deref(),
+        issued_domain.as_deref(),
         &selection,
         snapshot.as_ref(),
     );
@@ -1708,7 +1819,8 @@ mod tests {
     use super::{
         build_fail2ban_deprovision, build_pkg_marker_probe, build_probe_script,
         build_stop_in_progress, build_ufw_deprovision, build_uninstall_extras,
-        build_uninstall_script, derive_partial, parse_pkg_marker_probe, UninstallSelection,
+        build_uninstall_script, derive_partial, parse_issued_domain_from_hosts_toml,
+        parse_pkg_marker_probe, UninstallSelection,
     };
     use super::super::snapshot::PreInstallSnapshot;
 
@@ -1848,7 +1960,7 @@ mod tests {
         // here we pin the EXTRAS to the cert/firewall tail of that lifecycle (the
         // systemd unit removal lives in the outer script; the LE + firewall removal
         // is what build_uninstall_extras owns). Assert the LE + both firewall layers.
-        let s = build_uninstall_extras("sudo ", "example.com", 2222);
+        let s = build_uninstall_extras("sudo ", 2222, Some("example.com"));
         assert!(s.contains("certbot delete"), "LE certbot delete missing");
         assert!(s.contains("/etc/letsencrypt/live/example.com"), "LE live dir removal missing");
         assert!(s.contains("ufw status numbered"), "ownership-scoped ufw removal missing");
@@ -1860,7 +1972,7 @@ mod tests {
 
     #[test]
     fn uninstall_extras_removes_letsencrypt_state() {
-        let s = build_uninstall_extras("sudo ", "example.com", 2222);
+        let s = build_uninstall_extras("sudo ", 2222, Some("example.com"));
         // certbot delete for the host AND rm -rf of the LE state dirs.
         assert!(s.contains("certbot delete --cert-name example.com"));
         assert!(s.contains("/etc/letsencrypt/live/example.com"));
@@ -1870,7 +1982,7 @@ mod tests {
 
     #[test]
     fn uninstall_extras_deletes_iptables_by_tag_not_by_port_shape() {
-        let s = build_uninstall_extras("sudo ", "example.com", 2222);
+        let s = build_uninstall_extras("sudo ", 2222, Some("example.com"));
         // iptables removal must carry the ownership TAG on the -D for 80 AND 443.
         assert!(s.contains("iptables -D INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment trusttunnel-managed"));
         assert!(s.contains("iptables -D INPUT -p tcp --dport 443 -j ACCEPT -m comment --comment trusttunnel-managed"));
@@ -1896,7 +2008,7 @@ mod tests {
 
     #[test]
     fn uninstall_extras_deletes_ufw_by_comment_not_by_spec() {
-        let s = build_uninstall_extras("sudo ", "example.com", 2222);
+        let s = build_uninstall_extras("sudo ", 2222, Some("example.com"));
         // ufw removal must scope to OUR comments via `ufw status numbered`.
         assert!(s.contains("ufw status numbered"));
         assert!(s.contains("trusttunnel-acme"));
@@ -1913,7 +2025,7 @@ mod tests {
         // 'pre-existing admin service (TrustTunnel)'). Those rules keep the ADMIN's
         // own services reachable through the ufw WE enabled; deleting them while ufw
         // stays active (user unchecked «Брандмауэр») firewalls the admin's service off.
-        let s = build_uninstall_extras("sudo ", "example.com", 2222);
+        let s = build_uninstall_extras("sudo ", 2222, Some("example.com"));
         // The sweep pipeline carries an explicit exclusion for the pre-allow tag,
         // alongside the existing SSH-port exclusion.
         assert!(
@@ -1938,13 +2050,194 @@ mod tests {
         // injection vector. (The script's own ufw loop legitimately uses `$(...)`/`;`
         // — that is OUR shell, not attacker-controlled host content.)
         let host = "vpn-1.example.com";
-        let s = build_uninstall_extras("sudo ", host, 2222);
+        let s = build_uninstall_extras("sudo ", 2222, Some(host));
         assert!(s.contains(&format!("--cert-name {host}")));
         assert!(s.contains(&format!("/etc/letsencrypt/renewal/{host}.conf")));
         // The validated host carries no metacharacters of its own.
         assert!(!host.contains(';'));
         assert!(!host.contains('`'));
         assert!(!host.contains('$'));
+    }
+
+    // ── Item 15 (30.1 milestone review): the teardown deletes the certificate that was
+    //    ACTUALLY issued. Step 5b used to be keyed to `host` — the address the SSH
+    //    session dialled — while the deploy issues with `certbot certonly -d
+    //    {settings.hostname}`. Connect by IP, issue for a domain, and the uninstall
+    //    deleted a lineage name that never existed: the real certificate, its archive and
+    //    its renewal job all survived a "full" uninstall. ──
+
+    #[test]
+    fn le_teardown_names_the_issued_domain_not_the_ssh_host() {
+        // The realistic shape: the user connected by IP and issued for a domain.
+        let s = build_uninstall_extras("sudo ", 2222, Some("vpn.example.com"));
+        assert!(
+            s.contains("certbot delete --cert-name vpn.example.com"),
+            "certbot must delete the issued lineage; got:\n{s}"
+        );
+        for dir in ["live", "archive"] {
+            assert!(
+                s.contains(&format!("/etc/letsencrypt/{dir}/vpn.example.com")),
+                "LE {dir} path must be keyed to the domain; got:\n{s}"
+            );
+        }
+        assert!(s.contains("/etc/letsencrypt/renewal/vpn.example.com.conf"), "got:\n{s}");
+        // And the SSH address must not appear as a certificate name anywhere.
+        assert!(!s.contains("--cert-name 203.0.113.7"), "got:\n{s}");
+        assert!(!s.contains("/etc/letsencrypt/live/203.0.113.7"), "got:\n{s}");
+    }
+
+    #[test]
+    fn le_teardown_omits_itself_entirely_when_no_domain_was_issued() {
+        // No domain → NO certbot lines. Deleting a certificate name that was never
+        // issued is a no-op that only pretends to clean up, and falling back to the SSH
+        // host is exactly how this defect was born.
+        let s = build_uninstall_extras("sudo ", 2222, None);
+        assert!(!s.contains("certbot delete"), "certbot arm must be omitted; got:\n{s}");
+        assert!(!s.contains("/etc/letsencrypt/"), "no LE path removal at all; got:\n{s}");
+        assert!(!s.contains("Step 5b"), "the banner goes with the block; got:\n{s}");
+        // The rest of the teardown is unaffected.
+        assert!(s.contains("ufw status numbered"), "got:\n{s}");
+        assert!(s.contains("--comment trusttunnel-managed"), "got:\n{s}");
+    }
+
+    #[test]
+    fn le_teardown_rejects_a_domain_that_fails_the_whitelist() {
+        // A value read back from the server is UNTRUSTED input. Whitelist-first
+        // (validate_fqdn_sni accepts only [A-Za-z0-9.-]), so every shell metacharacter is
+        // rejected by omission and the hostile value never reaches the command text.
+        let hostile = [
+            "evil.com; rm -rf /",
+            "$(id).example.com",
+            "`whoami`.example.com",
+            "a.example.com\nrm -rf /",
+            "a b.example.com",
+            "'quoted'.example.com",
+        ];
+        for value in hostile {
+            let s = build_uninstall_extras("sudo ", 2222, Some(value));
+            assert!(
+                !s.contains("certbot delete"),
+                "a value failing the whitelist must not produce a certbot arm: {value:?}"
+            );
+            assert!(
+                !s.contains(value),
+                "the rejected value must not appear in the command text at all: {value:?}"
+            );
+        }
+        // Shapes that pass the character whitelist but cannot be a Let's Encrypt lineage:
+        // Let's Encrypt does not issue for IP literals, and a bare label is not a domain.
+        for value in ["203.0.113.7", "localhost", "", "   "] {
+            let s = build_uninstall_extras("sudo ", 2222, Some(value));
+            assert!(
+                !s.contains("certbot delete"),
+                "{value:?} cannot name a Let's Encrypt lineage — the arm must be omitted"
+            );
+        }
+    }
+
+    #[test]
+    fn le_teardown_change_leaves_the_sacred_ssh_port_tail_byte_identical() {
+        // SACRED SSH-PORT INVARIANT. The firewall re-assert (Step 5c's `ufw allow
+        // {ssh_port}` before the sweep, plus the port-token exclusion) is what stops a
+        // teardown bricking the server. It sits directly below the certbot lines, so the
+        // one way this change could do real damage is by reordering it, folding it into a
+        // branch, or making it conditional on the certbot arm running.
+        //
+        // Proven by comparison rather than by promise: everything from Step 5c onward
+        // must be byte-identical across all three input shapes.
+        let ssh_port = 2222;
+        let tail = |issued: Option<&str>| -> String {
+            let s = build_uninstall_extras("sudo ", ssh_port, issued);
+            let idx = s.find("echo \"=== Step 5c").expect("Step 5c banner present");
+            s[idx..].to_string()
+        };
+        let with_domain = tail(Some("vpn.example.com"));
+        let without_domain = tail(None);
+        let with_rejected = tail(Some("evil.com; rm -rf /"));
+        assert_eq!(
+            with_domain, without_domain,
+            "the firewall tail must not vary with the presence of an issued domain"
+        );
+        assert_eq!(
+            with_domain, with_rejected,
+            "the firewall tail must not vary with a rejected domain"
+        );
+        // And the tail genuinely still carries the SSH-port guards it is being pinned for
+        // — otherwise this comparison would be three copies of nothing.
+        assert!(
+            with_domain.contains(&format!("ufw allow {ssh_port}/tcp comment 'SSH keep active session'")),
+            "the SSH allow re-assert must survive; got:\n{with_domain}"
+        );
+        assert!(
+            with_domain.contains(&format!("grep -vE '(^|[^0-9]){ssh_port}/tcp([^0-9]|$)'")),
+            "the SSH-port exclusion must survive the sweep; got:\n{with_domain}"
+        );
+        // Step 5c must come after Step 5b, in the same order as before.
+        let full = build_uninstall_extras("sudo ", ssh_port, Some("vpn.example.com"));
+        assert!(
+            full.find("Step 5b").unwrap() < full.find("Step 5c").unwrap(),
+            "certbot lines must still precede the firewall block"
+        );
+    }
+
+    #[test]
+    fn issued_domain_is_read_out_of_the_servers_own_hosts_toml() {
+        let toml = r#"
+[[main_hosts]]
+hostname = "vpn.example.com"
+cert_chain_path = "/etc/letsencrypt/live/vpn.example.com/fullchain.pem"
+private_key_path = "/etc/letsencrypt/live/vpn.example.com/privkey.pem"
+"#;
+        assert_eq!(
+            parse_issued_domain_from_hosts_toml(toml),
+            Some("vpn.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn issued_domain_soft_fails_to_none_on_absent_empty_or_corrupt() {
+        // Soft-fail so a legacy or half-removed server still uninstalls; the certbot arm
+        // is simply omitted (asserted above) rather than guessing at a lineage name.
+        assert_eq!(parse_issued_domain_from_hosts_toml(""), None);
+        assert_eq!(parse_issued_domain_from_hosts_toml("not = [ toml"), None);
+        assert_eq!(parse_issued_domain_from_hosts_toml("[[main_hosts]]\n"), None);
+        assert_eq!(
+            parse_issued_domain_from_hosts_toml("[[main_hosts]]\nhostname = \"\"\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_uninstall_reads_the_issued_domain_before_building_the_script() {
+        // Guards the CALL — the read has to happen in `uninstall_server`, BEFORE the
+        // script runs, because the script removes {dir} and hosts.toml with it. A helper
+        // that exists but is never called is the failure mode two of this phase's other
+        // findings had.
+        let source = include_str!("./server_install.rs");
+        let body = source
+            .split("pub async fn uninstall_server")
+            .nth(1)
+            .and_then(|s| s.split("\n// ═══").next())
+            .unwrap_or("");
+        assert!(
+            !body.is_empty(),
+            "uninstall_server not found — this guard has lost its subject"
+        );
+        let read_at = body
+            .find("parse_issued_domain_from_hosts_toml(")
+            .expect("the issued domain must be read back in uninstall_server");
+        let build_at = body
+            .find("build_uninstall_script(")
+            .expect("the script build site must be present");
+        assert!(
+            read_at < build_at,
+            "the hosts.toml read must precede the script build — the script deletes the \
+             very file it is read from"
+        );
+        assert!(
+            body.contains("issued_domain.as_deref()"),
+            "the read-back value must actually be threaded into the builder"
+        );
     }
 
     // ── build_uninstall_script: the COMPLETE uninstall body, COCOON-complete
@@ -1957,7 +2250,7 @@ mod tests {
         // (it is a DIRECTORY — `rm -f` cannot remove it, the root cause) and the
         // removal must come BEFORE `systemctl daemon-reload` so the reload re-reads
         // units without our drop-in.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222, 0, false, false, false, None, Some("example.com"), &UninstallSelection::restore_all(), None);
         assert!(
             s.contains("rm -rf /etc/systemd/system/trusttunnel.service.d"),
             "must rm -rf the .service.d drop-in dir (rm -f cannot remove a dir): {s}"
@@ -1979,7 +2272,7 @@ mod tests {
         // C-16: the cert-renew helper deploy.rs writes to /usr/local/sbin must be
         // removed. The glob must be prefixed with `trusttunnel` (OUR files only) —
         // never a bare /usr/local/sbin/* that could match a foreign admin script.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222, 0, false, false, false, None, Some("example.com"), &UninstallSelection::restore_all(), None);
         assert!(
             s.contains("/usr/local/sbin/trusttunnel*"),
             "must remove the orphaned /usr/local/sbin/trusttunnel* cert-renew helper: {s}"
@@ -1997,7 +2290,7 @@ mod tests {
         // ownership-marker branches. Admin-shared certbot/curl/iptables are STILL
         // never purged. M-01: the purge is now snapshot-gated too, so use a snapshot
         // that PROVES the packages were absent before us (None/legacy ⇒ no purge).
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), Some(&snapshot_all_ours()));
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222, 0, false, false, false, None, Some("example.com"), &UninstallSelection::restore_all(), Some(&snapshot_all_ours()));
         // The ufw/fail2ban purges exist…
         assert!(s.contains("apt-get purge -y fail2ban"), "fail2ban smart-purge missing");
         assert!(s.contains("apt-get purge -y ufw"), "ufw smart-purge missing");
@@ -2026,7 +2319,7 @@ mod tests {
         // which the install_firewall comments NEVER contain (they are 'SSH (TrustTunnel)',
         // 'TrustTunnel VPN/QUIC', 'HTTP cert renewal …') → on a live server NO ufw rule was
         // ever removed. The sweep must match the comments install_firewall actually writes.
-        let s = build_uninstall_extras("sudo ", "example.com", 2222);
+        let s = build_uninstall_extras("sudo ", 2222, Some("example.com"));
         assert!(
             s.contains("grep -iE 'trusttunnel|HTTP cert renewal'"),
             "ufw sweep must match the real install_firewall comments (trusttunnel / HTTP cert renewal)"
@@ -2049,7 +2342,7 @@ mod tests {
         // must EXCLUDE it by an ANCHORED port token (so 22 never matches 2222), and the
         // port must be re-asserted `ufw allow` both before the sweep and as the final
         // word — so a marker-less / admin-pre-active ufw can never leave SSH closed.
-        let extras = build_uninstall_extras("sudo ", "example.com", 2222);
+        let extras = build_uninstall_extras("sudo ", 2222, Some("example.com"));
         assert!(
             extras.contains(r#"grep -vE '(^|[^0-9])2222/tcp([^0-9]|$)'"#),
             "sweep must exclude the SSH port by anchored token (not a bare digit): {extras}"
@@ -2059,7 +2352,7 @@ mod tests {
             "must re-assert the SSH allow BEFORE the sweep (survives a conntrack flush)"
         );
 
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222, 0, false, false, false, None, Some("example.com"), &UninstallSelection::restore_all(), None);
         let reassert = "ufw allow 2222/tcp comment 'SSH keep active session'";
         // Re-asserted at least twice: pre-sweep (in extras) AND as the final word.
         assert!(
@@ -2082,7 +2375,7 @@ mod tests {
         // sweep orphan f2b chains ONLY when the daemon is not active. M-01: the
         // we-installed (unban --all + purge) branch requires a snapshot proving fail2ban
         // was absent before us — pass one (None/legacy takes the conservative branch).
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), Some(&snapshot_all_ours()));
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222, 0, false, false, false, None, Some("example.com"), &UninstallSelection::restore_all(), Some(&snapshot_all_ours()));
         let unban = s.find("fail2ban-client unban --all").expect("must unban-all in the we-installed branch");
         let stop = s.find("systemctl stop fail2ban").expect("must stop fail2ban");
         assert!(unban < stop, "unban-all must come BEFORE systemctl stop (a live daemon is needed to unban)");
@@ -2100,7 +2393,7 @@ mod tests {
         // Behavior-preserving: the extraction into build_uninstall_script must keep
         // the same lifecycle (Step 0..7 + VERIFY) AND interpolate the
         // ownership-scoped extras (no broad firewall delete introduced).
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222, 0, false, false, false, None, &UninstallSelection::restore_all(), None);
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222, 0, false, false, false, None, Some("example.com"), &UninstallSelection::restore_all(), None);
         // Step 0 stop-in-progress (interpolated build_stop_in_progress)
         assert!(s.contains("/tmp/tt_deploy.pid"), "Step 0 stop-in-progress must be interpolated");
         // Step 1 stop/disable, Step 2 kill, Step 4 rm dir, Step 5 cron
@@ -2135,8 +2428,8 @@ mod tests {
         // paths participate in the symmetry check. (Snapshot absence no longer authorizes the
         // folds — the marker is the sole authority.)
         let s = build_uninstall_script(
-            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
-            8443, true, false, false, Some("cubic"), &UninstallSelection::restore_all(), Some(&snapshot_all_ours()),
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222,
+            8443, true, false, false, Some("cubic"), Some("example.com"), &UninstallSelection::restore_all(), Some(&snapshot_all_ours()),
         );
         let owned: &[&str] = &[
             // ENDPOINT_DIR — all config + certs + binaries (Step 4)
@@ -2216,8 +2509,8 @@ mod tests {
         // SNAPSHOT-gated ownership path exclusively (the 18-09/18-10 marker paths have their
         // own dedicated tests below).
         build_uninstall_script(
-            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
-            telemt_port, false, false, false, None, selection, snapshot,
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222,
+            telemt_port, false, false, false, None, Some("example.com"), selection, snapshot,
         )
     }
 
@@ -2229,8 +2522,8 @@ mod tests {
         mtproto_is_ours: bool,
     ) -> String {
         build_uninstall_script(
-            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
-            telemt_port, mtproto_is_ours, false, false, None, selection, snapshot,
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222,
+            telemt_port, mtproto_is_ours, false, false, None, Some("example.com"), selection, snapshot,
         )
     }
 
@@ -2244,8 +2537,8 @@ mod tests {
         bbr_prior_marker: Option<&str>,
     ) -> String {
         build_uninstall_script(
-            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
-            0, false, ufw_pkg_ours, fail2ban_pkg_ours, bbr_prior_marker, selection, snapshot,
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222,
+            0, false, ufw_pkg_ours, fail2ban_pkg_ours, bbr_prior_marker, Some("example.com"), selection, snapshot,
         )
     }
 
@@ -2259,8 +2552,8 @@ mod tests {
         bbr_marker: Option<&str>,
     ) -> String {
         build_uninstall_script(
-            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222,
-            telemt_port, true, false, false, bbr_marker, selection, snapshot,
+            "sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", 2222,
+            telemt_port, true, false, false, bbr_marker, Some("example.com"), selection, snapshot,
         )
     }
 

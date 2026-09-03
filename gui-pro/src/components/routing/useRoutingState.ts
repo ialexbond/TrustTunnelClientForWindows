@@ -11,7 +11,21 @@ import { formatError } from "../../shared/utils/formatError";
 // ═══════════════════════════════════════════════════════
 
 export type RuleEntryType = "domain" | "ip" | "cidr" | "geoip" | "geosite" | "iplist_group";
-export type RouteAction = "direct" | "proxy" | "block";
+
+/**
+ * Where a rule sends its traffic. TWO destinations, not three.
+ *
+ * `"block"` was the third until 2026-09-03, when site blocking by domain was removed (owner
+ * decision). It never worked: in TUN mode the C++ core can only block a name by dropping its DNS
+ * query, it answers with silence instead of NXDOMAIN — so Windows simply re-asks through another
+ * adapter — and its connection-refusal gate compares IP only. The core logged not one
+ * `[ROUTE] BLOCKED` in thirteen days of real logs.
+ *
+ * The entries users already typed are NOT deleted: the backend carries the `block` key of
+ * `routing_rules.json` forward on every save, untouched, in case the feature ever returns as a
+ * filtering DNS on the server. Nothing on this side of the bridge reads them.
+ */
+export type RouteAction = "direct" | "proxy";
 
 export interface RuleEntry {
   id: string;
@@ -40,7 +54,6 @@ export interface ProcessInfo {
 export interface RoutingRules {
   direct: RuleEntry[];
   proxy: RuleEntry[];
-  block: RuleEntry[];
   process_mode: "exclude" | "only";
   processes: string[];
 }
@@ -93,10 +106,42 @@ function detectEntryType(value: string): RuleEntryType {
 
 function parseEntryValue(raw: string): { type: RuleEntryType; value: string } {
   const type = detectEntryType(raw);
-  if (type === "geoip") return { type, value: raw.replace(/^geoip:/, "") };
-  if (type === "geosite") return { type, value: raw.replace(/^geosite:/, "") };
-  if (type === "iplist_group") return { type, value: raw.replace(/^iplist_group:/, "") };
-  return { type, value: raw };
+  return { type, value: stripWirePrefix(type, raw) };
+}
+
+/** Strip the wire prefix that belongs to `type` — and only that one. */
+function stripWirePrefix(type: RuleEntryType, raw: string): string {
+  if (type === "geoip") return raw.replace(/^geoip:/, "");
+  if (type === "geosite") return raw.replace(/^geosite:/, "");
+  if (type === "iplist_group") return raw.replace(/^iplist_group:/, "");
+  return raw;
+}
+
+/**
+ * Turn one stored entry into the shape the panel renders (item 17, 30.1 milestone review).
+ *
+ * **The persisted `type` wins when it is present.** It used to lose: the old code spread the
+ * record first and then overwrote `type` with one derived from the value alone, so an entry
+ * written by an older build — type `iplist_group` on the record, but a BARE `games` in the value
+ * because the prefix predates T-26/D-04 — came back as a plain `domain`. The group then stopped
+ * routing and stopped refreshing from its cache, while the chip on screen still looked active.
+ * That is this phase's defect in miniature: the app showing one thing and doing another.
+ *
+ * Derivation is still the fallback for a record with no type at all, and the prefix is stripped
+ * against the FINAL type rather than the derived one — otherwise trusting a persisted `domain`
+ * beside a `geoip:ru` value would strip a prefix the entry no longer claims to have.
+ *
+ * ONE function, called from BOTH doors (`load` and `importRules`). It replaces two byte-identical
+ * copies — and two copies of a rule is exactly how the next reader fixes one of them and ships the
+ * bug through the other. Each door still has its own regression case; see
+ * `useRoutingState.test.ts`.
+ */
+function normalizeEntries(entries: RuleEntry[]): RuleEntry[] {
+  return (entries || []).map((e) => {
+    const derived = parseEntryValue(e.value);
+    const type = e.type ?? derived.type;
+    return { ...e, id: e.id || nextId(), type, value: stripWirePrefix(type, e.value) };
+  });
 }
 
 function serializeEntry(entry: RuleEntry): string {
@@ -141,6 +186,13 @@ export interface UseRoutingStateReturn {
 
   // State
   loading: boolean;
+  /**
+   * D-02 (30.1 blocker 2): the rules file exists and could NOT be parsed.
+   *
+   * The panel needs this to tell «сломано» from «пусто» — the two render identically otherwise,
+   * and only one of them is the user's own doing. Not a latch: a successful reload clears it.
+   */
+  loadFailed: boolean;
   saving: boolean;
   error: string;
   dirty: boolean;
@@ -162,6 +214,12 @@ export interface UseRoutingStateReturn {
   load: () => Promise<void>;
   exportRules: () => Promise<void>;
   importRules: () => Promise<void>;
+  /**
+   * D-02: throw the rule list away and write an empty document in its place — the way out of
+   * `loadFailed`. DESTRUCTIVE and irreversible; the caller must confirm first (`RoutingPanel`
+   * does). Reuses `save_routing_rules`, so no new command and no new capability.
+   */
+  resetRules: () => Promise<void>;
 
   // GeoData
   downloadGeoData: () => Promise<void>;
@@ -190,7 +248,6 @@ export interface UseRoutingStateReturn {
 const emptyRules: RoutingRules = {
   direct: [],
   proxy: [],
-  block: [],
   process_mode: "exclude",
   processes: [],
 };
@@ -220,6 +277,14 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
   const [processListError, setProcessListError] = useState("");
 
   const [loading, setLoading] = useState(true);
+  /**
+   * D-02: the last load FAILED — the rules file exists and could not be read.
+   *
+   * Deliberately separate from `error`: an empty rule list and an unreadable rule file look
+   * identical on screen and mean opposite things, and this is the only thing that tells them
+   * apart. Never latched — a successful reload clears it.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -246,17 +311,9 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       // Backend returns RoutingRules with RuleEntry[] (not string[])
       const raw = await invoke<RoutingRules>("load_routing_rules");
 
-      // Ensure each entry has an id and strip prefix from value
-      const normalizeEntries = (entries: RuleEntry[]): RuleEntry[] =>
-        (entries || []).map((e) => {
-          const { type, value } = parseEntryValue(e.value);
-          return { ...e, id: e.id || nextId(), type, value };
-        });
-
       const loaded: RoutingRules = {
         direct: normalizeEntries(raw.direct),
         proxy: normalizeEntries(raw.proxy),
-        block: normalizeEntries(raw.block),
         process_mode: raw.process_mode || "exclude",
         processes: raw.processes || [],
       };
@@ -265,20 +322,63 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       baselineRef.current = JSON.stringify({
         direct: loaded.direct.map(serializeEntry).sort(),
         proxy: loaded.proxy.map(serializeEntry).sort(),
-        block: loaded.block.map(serializeEntry).sort(),
         process_mode: loaded.process_mode,
         processes: loaded.processes.sort(),
       });
       baselineVpnModeRef.current = vpnMode;
       setDirty(false);
+      // D-02: a fact about the LAST load, not a latch — a successful reload after a reset has to
+      // give the user their panel back.
+      setLoadFailed(false);
     } catch (e) {
+      // D-02 (30.1 blocker 2). This arm used to raise a snackbar and leave `rules` at the empty
+      // baseline, so the panel rendered its ordinary body with nothing in it — indistinguishable
+      // from somebody who has no rules. Two problems in one: the user was told «пусто» about a
+      // file that is merely broken, and the obvious response (start typing rules again) would
+      // overwrite the list they still had.
+      //
+      // The snackbar carried `formatError(e)`, i.e. the backend's raw serde message — English,
+      // unbounded, able to quote the file's own bytes. It is logged and nothing more (D-29); the
+      // user gets the localized unreadable state instead.
       console.error("Failed to load routing rules:", e);
-      pushSuccess(formatError(e), "error");
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configPath]);
+
+  /**
+   * D-02: the way out of the unreadable state — replace the broken document with an empty one.
+   *
+   * Destructive, and gated by an explicit confirmation at the CALL SITE rather than here: the
+   * panel owns the dialog (`RoutingPanel.tsx`), this owns the mechanism. Keeping the confirm out
+   * of the hook is also what lets the hook be tested without a dialog provider.
+   *
+   * Implemented through the EXISTING `save_routing_rules` command — no new Tauri command and no
+   * new capability surface, and it inherits the atomic writer from 30.1-01, so the file it leaves
+   * behind is whole or not written at all. Reloads afterwards, which is what clears `loadFailed`.
+   */
+  const resetRules = useCallback(async () => {
+    try {
+      // The wire shape, written out rather than routed through `toBackendPayload`: there are no
+      // entries to map, and an empty document has to be spelled explicitly so a future field added
+      // to the payload builder cannot silently start travelling on a RESET.
+      await invoke("save_routing_rules", {
+        rules: {
+          direct: [],
+          proxy: [],
+          process_mode: "exclude",
+          processes: [],
+        },
+      });
+      pushSuccess(t("routing.unreadable.reset_done"));
+      await load();
+    } catch (e) {
+      console.error("Failed to reset routing rules:", e);
+      pushSuccess(t("routing.unreadable.reset_failed"), "error");
+    }
+  }, [load, pushSuccess, t]);
 
   // ─── Load geodata status ────────────────────────────
 
@@ -383,7 +483,6 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     return JSON.stringify({
       direct: r.direct.map(serializeEntry).sort(),
       proxy: r.proxy.map(serializeEntry).sort(),
-      block: r.block.map(serializeEntry).sort(),
       process_mode: r.process_mode,
       processes: r.processes.slice().sort(),
     });
@@ -434,7 +533,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       // tells the user where it came from — instead of the old "already exists" dead-end, which was
       // confusing when the existing entry sat in a collapsed/hidden block the user couldn't see).
       // addEntry's own guard keeps a token out of two blocks at once, so the source block is unique.
-      const fromBlock = (["direct", "proxy", "block"] as RouteAction[]).find(
+      const fromBlock = (["direct", "proxy"] as RouteAction[]).find(
         (block) => block !== action && rules[block].some((e) => e.type === type && e.value === value)
       );
       if (fromBlock) {
@@ -591,10 +690,14 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       value: serializeEntry(e),
       entry_type: e.type,
     });
+    // The wire shape carries no `block` / `block_enabled` since site blocking was removed
+    // (2026-09-03). Whatever those keys hold in the user's `routing_rules.json` is preserved by
+    // the BACKEND on save, not echoed back through here — see `CARRIED_LEGACY_KEYS` in
+    // `routing_rules.rs`. Re-adding them to this payload would put a removed feature back on the
+    // bridge and make the browser the owner of data it does not render.
     return {
       direct: r.direct.map(mapEntry),
       proxy: r.proxy.map(mapEntry),
-      block: r.block.map(mapEntry),
       process_mode: r.process_mode,
       processes: r.processes,
     };
@@ -639,16 +742,12 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       const raw = await invoke<RoutingRules | null>("import_routing_rules");
       if (!raw) return; // User cancelled
 
-      const normalizeEntries = (entries: RuleEntry[]): RuleEntry[] =>
-        (entries || []).map((e) => {
-          const { type, value } = parseEntryValue(e.value);
-          return { ...e, id: e.id || nextId(), type, value };
-        });
-
+      // Item 17: the SAME `normalizeEntries` the load path uses. These were two byte-identical
+      // inline copies, and the import door is precisely how a fix applied to `load` alone gets
+      // undone — the user re-imports their own export and every legacy group is re-typed again.
       const imported: RoutingRules = {
         direct: normalizeEntries(raw.direct),
         proxy: normalizeEntries(raw.proxy),
-        block: normalizeEntries(raw.block),
         process_mode: raw.process_mode || "exclude",
         processes: raw.processes || [],
       };
@@ -758,6 +857,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     processListLoading,
     processListError,
     loading,
+    loadFailed,
     saving,
     error,
     dirty,
@@ -773,6 +873,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     load,
     exportRules,
     importRules,
+    resetRules,
     downloadGeoData,
     geodataDownloading,
     geodataBusy,

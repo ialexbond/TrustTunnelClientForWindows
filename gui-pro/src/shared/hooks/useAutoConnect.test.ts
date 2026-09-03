@@ -24,6 +24,13 @@ const LAST_USED_LIST = [
 
 const setStatus = vi.fn();
 const setError = vi.fn();
+// 30.1 defect 1: the hook now localizes a rejected `vpn_connect` through the shared reason-code
+// map, so it needs an i18n instance. A minimal stub is enough here — every error these tests throw
+// is an ordinary Error, which `localizeVpnError` passes through UNCHANGED without calling `t`; the
+// mapping itself is asserted in vpnEventHelpers.test.ts against the real bundle.
+const testI18n = { t: (key: string) => key } as unknown as Parameters<
+  typeof useAutoConnect
+>[0]["i18n"];
 // F29: the freeze-cache seed callback the hook calls with the honest launch ping (path, ms).
 const seedConfigPing = vi.fn();
 
@@ -44,6 +51,7 @@ const renderAutoConnect = (
         setStatus,
         setError,
         seedConfigPing,
+        i18n: testI18n,
       }),
     { initialProps },
   );
@@ -698,5 +706,49 @@ describe("useAutoConnect — Phase 11 (P11-03 / D-05): targets the manifest last
       (c) => c[0] === "vpn_connect",
     ).length;
     expect(connectCallsAfterRerender).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// The raw-path-comparison class (30.1 class sweep) — site 2 of 3.
+//
+// WR-05 prefers the APP-LEVEL active config over the manifest's last-used marker,
+// so that «what auto-connect reconnects to» equals «what the UI shows active». The
+// membership test that gates that preference was a byte `===` against the manifest
+// paths, so when the manifest spelled the same file differently the active config
+// looked absent from the list and the preference was skipped — auto-connect then
+// launched a DIFFERENT server than the one the user sees marked active.
+// ─────────────────────────────────────────────────────────────────────────
+describe("useAutoConnect — the raw-path-comparison class (30.1, site 2 of 3)", () => {
+  it("prefers the app-level active config even when the manifest spells its path differently", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    // The manifest holds two servers in Windows' native spelling and marks A last-used…
+    const list = [
+      { id: "id-a", path: "C:\\cfg\\a.toml", last_used: true },
+      { id: "id-b", path: "C:\\cfg\\b.toml", last_used: false },
+    ];
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return list;
+      return null;
+    });
+
+    // …while the app shows B as active, holding its path in the forward-slash form.
+    renderAutoConnect({
+      status: "disconnected",
+      config: { configPath: "C:/cfg/b.toml", logLevel: "info" } as VpnConfig,
+    });
+    await flush();
+
+    // Auto-connect must launch the server the user sees active. Before the sweep the membership
+    // test failed on the spelling, the preference was skipped, and it launched A instead.
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "C:/cfg/b.toml",
+      logLevel: "info",
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("vpn_connect", {
+      configPath: "C:\\cfg\\a.toml",
+      logLevel: "info",
+    });
   });
 });

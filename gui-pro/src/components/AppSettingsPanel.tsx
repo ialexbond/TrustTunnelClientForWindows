@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { GeneralSection } from "./settings/GeneralSection";
 import { AutoModeSettings } from "./settings/AutoModeSettings";
 import { AppearanceSection, type ThemeMode } from "./settings/AppearanceSection";
-import { ExperimentalSection } from "./settings/ExperimentalSection";
 import { useSnackBar } from "../shared/ui/SnackBarContext";
 
 interface Props {
@@ -66,10 +65,9 @@ export default function AppSettingsPanel({
             §Pattern 3). It groups all connection-automation prefs (auto-switch master + params +
             priority list, the MOVED startup auto-connect toggle, notifications). It owns its own
             useAppSettings/useConfigList — AppSettingsPanel only feeds onSaved, like the siblings. */}
-        {/* 28-06: «Внешний вид» and «Экспериментальные» apply their change in place (a theme, a
-            language, a window-local flag) — there is no write that can refuse, so handing them a
-            callback they could never fire would be a dead prop, and a dead prop reads as a wired
-            one.
+        {/* 28-06: «Внешний вид» applies its change in place (a theme, a language) — there is no
+            write that can refuse, so handing it a callback it could never fire would be a dead prop,
+            and a dead prop reads as a wired one.
             WR-02 (Phase-28 review): «Авто-режим» is no longer in that group. The 28-06 note said
             it «treats its one backend call, reorder_configs, as deliberately optimistic» — but
             that stopped being its only backend call in this same phase. `set_failover_settings` is
@@ -88,7 +86,11 @@ export default function AppSettingsPanel({
           language={language}
           onLanguageChange={(l) => { onLanguageChange(l); showSaved(); }}
         />
-        <ExperimentalSection />
+        {/* Здесь была четвёртая карточка — «Экспериментальные функции», предупреждающего тона, с
+            одним тумблером «Блокировка сайтов». Блокировка удалена 2026-09-03 (решение владельца:
+            она не работала и не могла работать без правки замороженного C++-ядра), а других
+            экспериментальных функций в секции не было. Пустая карточка предупреждающего тона хуже,
+            чем её отсутствие, поэтому убрана вся секция, а не только строка. */}
       </div>
     </div>
   );

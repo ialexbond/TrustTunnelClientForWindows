@@ -49,9 +49,18 @@ describe("AddRuleInput", () => {
     expect(screen.getByPlaceholderText(/domain\.com/)).toBeInTheDocument();
   });
 
-  it("shows placeholder text from i18n", () => {
+  // ROUTE-10. This used to compare the placeholder byte for byte, which proved only that a string
+  // reached the field. What the field has to TELL the user is the SCOPE of what they are about to
+  // type: a bare name now routes the site and every subdomain of it, and `*.name` — accepted by the
+  // validator since forever and advertised nowhere — is the only way left to say «subdomains only».
+  // Asserted as three properties so a future rewording stays free while the promise stays kept.
+  it("the placeholder says what a bare domain covers and advertises the wildcard form", () => {
     renderInput();
-    expect(screen.getByPlaceholderText("domain.com, IP, geoip:RU, geosite:category, iplist_group:...")).toBeInTheDocument();
+    const placeholder =
+      screen.getByRole("combobox").getAttribute("placeholder") ?? "";
+    expect(placeholder).toContain("domain.com");
+    expect(placeholder).toContain("поддомены");
+    expect(placeholder).toContain("*.domain.com");
   });
 
   it("add button is disabled when input is empty", () => {

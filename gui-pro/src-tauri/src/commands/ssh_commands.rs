@@ -285,7 +285,28 @@ pub async fn security_install_firewall(
     Ok(serde_json::Value::Null)
 }
 
-ssh_pool_command!(security_install_fail2ban, ssh::install_fail2ban);
+// Blocker 3 (30.1 milestone review): security_install_fail2ban — manual (extra ssh_port
+// param), exactly like security_install_firewall above. The Control Panel security door
+// is the SECOND caller of install_fail2ban (the wizard is the first); нужен реальный SSH
+// port, чтобы jail сторожил тот порт, на котором сервер действительно слушает, а не alias
+// `ssh` (= 22). Macro-bound it could not see the port, so a server hardened onto a
+// non-standard port got a jail watching nothing while the UI reported it protected.
+#[tauri::command]
+pub async fn security_install_fail2ban(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    ssh::install_fail2ban(&app, &handle, port).await?;
+    Ok(serde_json::Value::Null)
+}
 ssh_pool_command!(security_uninstall_fail2ban, ssh::uninstall_fail2ban);
 ssh_pool_command!(security_start_fail2ban, ssh::start_fail2ban);
 ssh_pool_command!(security_stop_fail2ban, ssh::stop_fail2ban);
@@ -738,7 +759,7 @@ use keyring::Entry;
 const KEYRING_SERVICE: &str = "TrustTunnel";
 
 fn ssh_creds_path() -> std::path::PathBuf {
-    ssh::portable_data_dir().join("ssh_credentials.json")
+    ssh::user_data_dir().join("ssh_credentials.json")
 }
 
 /// Stable keyring entry name for an SSH (host, port, user) triple.

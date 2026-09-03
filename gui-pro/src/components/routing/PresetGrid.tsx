@@ -10,8 +10,6 @@ import {
   Clapperboard,
   MessagesSquare,
   ShieldAlert,
-  Megaphone,
-  EyeOff,
   Check,
   Plus,
   MousePointerClick,
@@ -33,27 +31,24 @@ import type { RoutingRules, RouteAction, RuleEntryType } from "./useRoutingState
 // ═══════════════════════════════════════════════════════
 
 /** Целевой блок по умолчанию, куда приземляется группа: цвет несёт смысл действия. */
-type Target = RouteAction; // "direct" | "proxy" | "block"
+type Target = RouteAction; // "direct" | "proxy"
 
 // Design-canon color mapping (verbatim from the story): the tint/color of the target block.
 // Titles come from i18n (routing.<target>Title) — the story hardcoded Russian; production localizes.
 const targetTint: Record<Target, string> = {
   direct: "var(--color-success-tint-12)",
   proxy: "var(--color-accent-tint-10)",
-  block: "var(--color-danger-tint-10)",
 };
 // Foreground (icon + caption + border) uses the THEME-AWARE -fg token, not the raw -500 primitive:
 // -500 is tuned for dark and is too light as light-theme foreground (fails WCAG — see audit §1).
 const targetColor: Record<Target, string> = {
   direct: "var(--color-success-fg)",
   proxy: "var(--color-accent-fg)",
-  block: "var(--color-danger-fg)",
 };
-// Maps a target block to its existing i18n title key (routing.directTitle / proxyTitle / blockTitle).
+// Maps a target block to its existing i18n title key (routing.directTitle / proxyTitle).
 const targetTitleKey: Record<Target, string> = {
   direct: "routing.directTitle",
   proxy: "routing.proxyTitle",
-  block: "routing.blockTitle",
 };
 
 /**
@@ -80,9 +75,16 @@ export interface PresetTile {
 }
 
 // The data-driven tile set (22-RESEARCH §C). RU → «Напрямую»; media/social/games/RF-blocked →
-// «Через VPN»; ads & Windows-telemetry → «Заблокировать». geosite backings resolve straight from
-// the .dat (no network prefetch); iplist_group backings need a fetch-on-add (Pitfall #2).
+// «Через VPN». geosite backings resolve straight from the .dat (no network prefetch); iplist_group
+// backings need a fetch-on-add (Pitfall #2).
 // Adjust freely at the render-review checkpoint (D-01a) — this const is the single source of truth.
+//
+// TWO TILES ARE GONE (2026-09-03): «Реклама и трекеры» (geosite:category-ads-all) and «Телеметрия
+// Windows» (geosite:win-spy) both landed in the «Заблокировать» block, and site blocking by domain
+// was removed — it never worked and could not without changing the frozen C++ core. They are NOT
+// re-pointed at «Через VPN»: routing an ad network through the tunnel is a different action from
+// refusing it, and a tile that quietly did the other thing would be a lie in one click. They come
+// back with the feature, if it ever returns as a filtering DNS on the user's own server.
 export const PRESET_TILES: PresetTile[] = [
   { id: "ru", labelKey: "routing.presets.tile_ru", icon: Globe, target: "direct", backing: "iplist_group:ru_whitelist" },
   { id: "youtube", labelKey: "routing.presets.tile_youtube", icon: Youtube, target: "proxy", backing: "geosite:youtube" },
@@ -92,8 +94,6 @@ export const PRESET_TILES: PresetTile[] = [
   { id: "streaming", labelKey: "routing.presets.tile_streaming", icon: Clapperboard, target: "proxy", backing: "iplist_group:video" },
   { id: "messengers", labelKey: "routing.presets.tile_messengers", icon: MessagesSquare, target: "proxy", backing: "iplist_group:messengers" },
   { id: "ruBlocked", labelKey: "routing.presets.tile_ruBlocked", icon: ShieldAlert, target: "proxy", backing: "geosite:ru-blocked" },
-  { id: "ads", labelKey: "routing.presets.tile_ads", icon: Megaphone, target: "block", backing: "geosite:category-ads-all" },
-  { id: "winSpy", labelKey: "routing.presets.tile_winSpy", icon: EyeOff, target: "block", backing: "geosite:win-spy" },
 ];
 
 const GEOSITE_PREFIX = "geosite:";
@@ -128,7 +128,7 @@ function iplistGroupId(backing: string): string {
 /** Cross-block scan for the exact (type,value) this tile's backing would add (D-06, Pitfall #4). */
 function isTileAdded(rules: RoutingRules, backing: string): boolean {
   const { type, value } = parseBacking(backing);
-  return (["direct", "proxy", "block"] as RouteAction[]).some((block) =>
+  return (["direct", "proxy"] as RouteAction[]).some((block) =>
     rules[block].some((e) => e.type === type && e.value === value),
   );
 }
@@ -142,8 +142,6 @@ export interface PresetGridProps {
   ensureGroupCache: (groupId: string) => void;
   /** Gates geosite-backed tiles: without the .dat a geosite category resolves to nothing (Pitfall #3). */
   geodataDownloaded: boolean;
-  /** Gates block-target tiles: the block card is hidden when off, so the group would vanish (Pitfall #1). */
-  blockRoutingEnabled: boolean;
 }
 
 interface TileButtonProps {
@@ -249,10 +247,9 @@ function PresetTileButton({ tile, added, disabledHint, onAdd }: TileButtonProps)
  * The production preset grid. Mounts at the top of «Маршрутизация» (between the geodata card and the
  * routing blocks). Each tile: computes its added-state from `rules` (exact backing token), lands at
  * its smart-default block on click, prefetches the cache for iplist backings (Pitfall #2), and gates
- * on geodata-downloaded (geosite) / blockRouting (block target) so a group never silently lands in a
- * hidden or empty target (Pitfalls #1/#3).
+ * on geodata-downloaded so a geosite group never silently lands as nothing (Pitfall #3).
  */
-export function PresetGrid({ rules, onAdd, ensureGroupCache, geodataDownloaded, blockRoutingEnabled }: PresetGridProps) {
+export function PresetGrid({ rules, onAdd, ensureGroupCache, geodataDownloaded }: PresetGridProps) {
   const { t } = useTranslation();
 
   const handleAdd = (tile: PresetTile) => {
@@ -265,18 +262,19 @@ export function PresetGrid({ rules, onAdd, ensureGroupCache, geodataDownloaded, 
   };
 
   // Compute the disabled reason (if any) for a tile. Only geosite-backed tiles gate here (on
-  // geodata-downloaded, Pitfall #3). Block-target tiles are NO LONGER disabled-with-a-hint when
-  // blocking is off — they are HIDDEN entirely (owner D-2/F-3, see below), so there is no block
-  // branch here. iplist backings need NO geodata (their ids are a backend list — Plan-03).
+  // geodata-downloaded, Pitfall #3). iplist backings need NO geodata (their ids are a backend list —
+  // Plan-03).
+  //
+  // There is no per-tile VISIBILITY filter any more. It existed to hide block-target tiles while the
+  // «Заблокировать» card was switched off — a tile whose destination is not on screen has nowhere to
+  // land (owner D-2/F-3). Site blocking is gone as of 2026-09-03, both of those tiles went with it,
+  // and every remaining tile targets a card that is always on the tab. A filter over a condition that
+  // can no longer be false is a guard that has quietly stopped guarding, so it is removed rather than
+  // left to pass vacuously.
   const disabledHintFor = (tile: PresetTile): string | null => {
     if (isGeositeBacking(tile.backing) && !geodataDownloaded) return t("routing.presets.geodataDisabledHint");
     return null;
   };
-
-  // Owner D-2/F-3: when block routing is OFF the block card is hidden, so a block-target preset would
-  // have nowhere to land — do NOT show a disabled tile, HIDE it outright. Block tiles reappear the
-  // moment blocking is enabled in Settings. (Non-block tiles are always listed; geosite ones may gate.)
-  const visibleTiles = PRESET_TILES.filter((tile) => tile.target !== "block" || blockRoutingEnabled);
 
   return (
     // Wrapped in a Card (canon parity, audit P-4): presets sit in the same padded panel as the
@@ -299,7 +297,7 @@ export function PresetGrid({ rules, onAdd, ensureGroupCache, geodataDownloaded, 
         }
       />
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
-        {visibleTiles.map((tile) => (
+        {PRESET_TILES.map((tile) => (
           <PresetTileButton
             key={tile.id}
             tile={tile}

@@ -348,6 +348,10 @@ export function LogsViewerModal({
           />
           {searchQuery && (
             <p
+              // 30.1-05: addressable so the plural regression test can read the
+              // rendered counter instead of calling t() directly — calling t() is
+              // how the milestone review "reproduced" a bug the app cannot reach.
+              data-testid="logs-match-count"
               className="text-caption mt-1"
               style={{ color: "var(--color-text-muted)" }}
             >

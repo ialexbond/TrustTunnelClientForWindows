@@ -288,7 +288,7 @@ pub async fn fetch_server_config(
     country_code: Option<String>,
     // Phase 19 UAT: the Users-tab «Скачать конфиг» is a SAVE-to-a-chosen-location action, NOT an
     // "add to app". When Some(true) the export stages into the OS temp dir instead of
-    // portable_data_dir(), so the folder-as-truth adoption scan (which only reads the data dir) never
+    // user_data_dir(), so the folder-as-truth adoption scan (which only reads the data dir) never
     // sees it → no unwanted Connection-tab card, and no in-place overwrite of a same-named tracked
     // config. The wizard's FINALIZE re-export omits this (None) → still writes the active config into
     // the data dir as before. (Tauri maps JS `stageToTemp`.)
@@ -496,7 +496,8 @@ pub async fn fetch_server_config(
     let mut client_toml = build_client_config(&endpoint_section, &format!("Fetched from server {server_host}"));
 
     // FIX-OO-3: upstream naming drift. The endpoint CLI's `compose_toml`
-    // (lib/src/client_config.rs v1.0.33) writes the anti-DPI hex value as
+    // (lib/src/client_config.rs — first seen at v1.0.33, re-checked at the
+    // v1.1.0 pin on 2026-09-04 and STILL the case) writes the anti-DPI hex value as
     // `client_random_prefix = "..."`, but the client sidecar parses
     // `client_random = "..."` (trusttunnel/src/config.cpp:140 — also what
     // the client-side README documents). Result: every client downloaded
@@ -571,6 +572,7 @@ pub async fn fetch_server_config(
                 Some(FetchProbeOutcome {
                     is_system_verifiable: info.is_system_verifiable,
                     pinned_pem,
+                    pin_verifiable: info.pin_verifiable,
                 })
             }
             Err(e) => {
@@ -596,7 +598,7 @@ pub async fn fetch_server_config(
     let config_dir = if stage_to_temp.unwrap_or(false) {
         std::env::temp_dir()
     } else {
-        portable_data_dir()
+        user_data_dir()
     };
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
@@ -1121,10 +1123,23 @@ pub(crate) fn apply_install_cert_policy(
         .and_then(|v| v.as_table_mut())
         .ok_or("client.toml missing [endpoint] table")?;
 
-    // skip_verification: additive contract — only write when true, never an
-    // explicit false (matches inject_advanced_into_endpoint above).
+    // skip_verification. This used to be an additive contract — write `true`, never write
+    // or clear a `false` — which was safe only because `false` used to mean "Let's Encrypt",
+    // a path whose config never carried the key in the first place.
+    //
+    // SEC-01 makes it load-bearing. A config that ALREADY says `skip_verification = true`
+    // (every self-signed install this app has ever produced) must come out of here without
+    // it once the probe has proven the endpoint verifiable — otherwise the stale `true`
+    // survives, the core keeps skipping every check, and the fix delivers exactly nothing
+    // while looking correct at every other layer.
+    //
+    // Removing rather than writing `false` is deliberate: the core reads this key as
+    // `value_or(false)` (`trusttunnel/src/config.cpp`), so absence IS false, and a config
+    // without the key cannot be misread by an older build either.
     if policy.skip_verification {
         endpoint.insert("skip_verification", toml_edit::value(true));
+    } else {
+        endpoint.remove("skip_verification");
     }
 
     // Certificate: identical leaf-vs-chain logic to inject_advanced_into_endpoint
@@ -1218,6 +1233,9 @@ pub(crate) fn parse_probe_target_from_endpoint(
 pub(crate) struct FetchProbeOutcome {
     pub is_system_verifiable: bool,
     pub pinned_pem: Option<String>,
+    /// SEC-01: the probe proved the pinned leaf verifies this endpoint under its SNI.
+    /// Only then may `skip_verification` be cleared — see `install_cert_policy_for`.
+    pub pin_verifiable: bool,
 }
 
 /// Auto-apply the self-signed cert policy on the Users-tab / DoneStep FETCH path
@@ -1283,13 +1301,58 @@ pub(crate) fn apply_fetched_self_signed_policy(
     // Self-signed (probe said not-system-verifiable) OR the probe failed
     // (degrade to skip_verification-only). In both cases we apply the self-signed
     // policy — the difference is only whether we have a leaf PEM to pin.
+    let pin_verifiable = probe.as_ref().map(|p| p.pin_verifiable).unwrap_or(false);
     let pinned_pem = probe.and_then(|p| p.pinned_pem);
 
     // custom_sni: keep the user's explicit value if present; else use the
     // endpoint hostname (never a bare IP — the hostname IS the SNI name).
     let chosen_sni = existing_sni.unwrap_or(hostname);
-    let policy = install_cert_policy_for("selfsigned", chosen_sni, pinned_pem);
+    let policy = install_cert_policy_for("selfsigned", chosen_sni, pinned_pem, pin_verifiable);
     apply_install_cert_policy(client_toml, &policy)
+}
+
+#[cfg(test)]
+mod sec01_writer_tests {
+    use super::*;
+
+    /// Truth: a config that already carries `skip_verification = true` loses it when the
+    /// policy says the endpoint is verifiable. This is the step between "decided correctly"
+    /// and "the core actually behaves differently", and it is where the fix would have
+    /// silently evaporated — every policy test still passes with the stale key left in place.
+    #[test]
+    fn a_stale_skip_verification_is_cleared_when_the_pin_is_proven() {
+        let before = "[endpoint]\nhostname = \"trusttunnel.local\"\nskip_verification = true\n";
+        let policy = install_cert_policy_for(
+            "selfsigned",
+            "trusttunnel.local",
+            Some("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n".to_string()),
+            true,
+        );
+        let after = apply_install_cert_policy(before, &policy).expect("policy must apply");
+
+        assert!(
+            !after.contains("skip_verification"),
+            "the stale skip_verification survived — the core would keep verifying nothing:\n{after}"
+        );
+        assert!(
+            after.contains("certificate"),
+            "the pin must be written; it is the trust anchor once verification is on:\n{after}"
+        );
+    }
+
+    /// Truth: the unproven path is untouched. An endpoint we could not prove keeps the key,
+    /// so nothing that works today stops working.
+    #[test]
+    fn an_unproven_endpoint_keeps_skipping_verification() {
+        let before = "[endpoint]\nhostname = \"trusttunnel.local\"\n";
+        let policy = install_cert_policy_for("selfsigned", "trusttunnel.local", None, false);
+        let after = apply_install_cert_policy(before, &policy).expect("policy must apply");
+
+        assert!(
+            after.contains("skip_verification = true"),
+            "an unprovable endpoint must keep today's behaviour verbatim:\n{after}"
+        );
+    }
 }
 
 /// Derive the install-time cert policy from the cert type (gap 5b).
@@ -1300,9 +1363,24 @@ pub(crate) fn apply_fetched_self_signed_policy(
 ///   - `letsencrypt` ⇒ OS-store path: no skip_verification, no pin,
 ///     `custom_sni = sni_or_domain` (the domain the user entered). Keeps as
 ///     close to today's effective output as possible (FIX-OO caution).
-///   - anything else (`selfsigned` / `provided`) ⇒ `skip_verification = true`,
-///     pin the probed leaf when present, `custom_sni = sni_or_domain`
-///     (domain, or "trusttunnel.local" when there is no real domain).
+///   - anything else (`selfsigned` / `provided`) ⇒ pin the probed leaf when present,
+///     `custom_sni = sni_or_domain` (domain, or "trusttunnel.local" when there is no
+///     real domain). Whether verification is left ON depends on `pin_verifiable`:
+///
+/// SEC-01. Writing `skip_verification = true` next to a pinned certificate was not a
+/// belt-and-braces pairing, it was a hole: the core reads the pin ONLY when
+/// `skip_verification` is false (`trusttunnel/src/config.cpp`), and the flag short-circuits
+/// the whole verification callback before the host-name comparison
+/// (`core/src/vpn_manager.cpp`). So the pin was dead and NOTHING was checked — no chain, no
+/// name — while the UI showed an ordinary green «Подключено». Anyone able to sit between the
+/// client and the endpoint could present any certificate at all and be accepted silently.
+///
+/// The fix cannot simply clear the flag: certificates this app issued before the SAN fix
+/// carry only a CN, which no modern verifier consults, so verification would fail and every
+/// such server would go off the air. `pin_verifiable` is therefore a PROOF obtained by
+/// handshaking against the endpoint with the leaf as the sole trust anchor
+/// (`cert_probe::fetch_endpoint_cert`). Verification is enabled only where it demonstrably
+/// works; everywhere else the old behaviour is preserved exactly.
 ///
 /// `pinned_pem` is the caller's already-probed leaf PEM (`None` on probe
 /// failure ⇒ degrade to skip_verification-only, the minimum working state).
@@ -1311,6 +1389,7 @@ pub(crate) fn install_cert_policy_for(
     cert_type: &str,
     sni_or_domain: &str,
     pinned_pem: Option<String>,
+    pin_verifiable: bool,
 ) -> InstallCertPolicy {
     if cert_type == "letsencrypt" {
         InstallCertPolicy {
@@ -1318,7 +1397,19 @@ pub(crate) fn install_cert_policy_for(
             pinned_pem: None,
             custom_sni: sni_or_domain.to_string(),
         }
+    } else if pin_verifiable && pinned_pem.is_some() {
+        // SEC-01: the probe proved this endpoint verifies against its own leaf under this
+        // SNI, so the pin becomes a real trust anchor instead of dead text.
+        InstallCertPolicy {
+            skip_verification: false,
+            pinned_pem,
+            custom_sni: sni_or_domain.to_string(),
+        }
     } else {
+        // Unproven: either the probe failed, or the certificate cannot be verified (issued
+        // before the SAN fix, or supplied by the user). Keep today's behaviour verbatim —
+        // an unverified tunnel is bad, a tunnel that cannot connect at all is worse, and
+        // flipping this blind would take every such server off the air at once.
         InstallCertPolicy {
             skip_verification: true,
             pinned_pem,
@@ -2275,6 +2366,7 @@ active
         let probe = Some(FetchProbeOutcome {
             is_system_verifiable: false,
             pinned_pem: Some(der_b64_to_pem("MAMBAgM=").unwrap()),
+            pin_verifiable: false,
         });
         let out = apply_fetched_self_signed_policy(
             &fetched_toml("trusttunnel.local", "203.0.113.141:443"),
@@ -2304,6 +2396,7 @@ active
         let probe = Some(FetchProbeOutcome {
             is_system_verifiable: true,
             pinned_pem: None,
+            pin_verifiable: false,
         });
         let out = apply_fetched_self_signed_policy(&before, probe).unwrap();
         assert_eq!(out, before, "LE config must be returned byte-for-byte unchanged");
@@ -2339,6 +2432,7 @@ active
         let probe = Some(FetchProbeOutcome {
             is_system_verifiable: false,
             pinned_pem: Some(der_b64_to_pem("MAMBAgM=").unwrap()),
+            pin_verifiable: false,
         });
         let out = apply_fetched_self_signed_policy(&toml, probe).unwrap();
         assert!(out.contains("custom_sni = \"my.custom.sni\""));

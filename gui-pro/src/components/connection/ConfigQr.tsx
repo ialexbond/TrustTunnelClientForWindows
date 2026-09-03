@@ -43,9 +43,25 @@ export interface ConfigQrProps {
   /** The config to transfer — `.name` feeds the heading, `.path` feeds the invoke arg. */
   config: ConfigSummary;
   onClose: () => void;
+  /**
+   * G-30.1-01 (30.1 UAT, T-14): this config's `.toml` has been deleted from disk while the modal was
+   * open — established by `useConfigFileGone` in `ConnectionPanel`.
+   *
+   * WHY THIS SURFACE IS TREATED DIFFERENTLY FROM `ConfigEditView`. That one is an EDITOR: its
+   * remaining action would write to a path that is gone, so the action has to go. This one is a
+   * TRANSFER surface, and the deeplink already on screen was built before the deletion and remains a
+   * perfectly valid credential bundle for the receiving device — the owner may well have deleted the
+   * file BECAUSE he was moving it. Snatching a QR away mid-scan would destroy the one thing the
+   * window exists for and gain nothing. So the link stays and a warning states the fact.
+   *
+   * The exception is a deletion that lands BEFORE the link was built: then there is nothing to hand
+   * over and nothing to retry, and the window says so instead of offering «Попробовать снова» against
+   * a file that is not there.
+   */
+  fileMissing?: boolean;
 }
 
-export function ConfigQr({ isOpen, config, onClose }: ConfigQrProps) {
+export function ConfigQr({ isOpen, config, onClose, fileMissing = false }: ConfigQrProps) {
   const { t } = useTranslation();
   const pushSuccess = useSnackBar();
 
@@ -162,7 +178,16 @@ export function ConfigQr({ isOpen, config, onClose }: ConfigQrProps) {
         {config.name}
       </p>
 
-      {deeplinkLoading ? (
+      {fileMissing && !deeplink ? (
+        // The file went before a link was ever built. Nothing to hand over, and NO «Попробовать
+        // снова» — re-asking the backend to read a file that is not there changes nothing, the same
+        // reasoning ConfigEditView records for a corrupt config and RoutingPanel for unreadable
+        // rules. The only way out is the corner × — this modal deliberately has exactly one close
+        // affordance (owner decision 2026-07-03), so no footer button is added here either.
+        <div className="mt-[var(--space-4)]">
+          <ErrorBanner variant="error" message={t("connection.qr.file_missing_no_link")} className="w-full" />
+        </div>
+      ) : deeplinkLoading ? (
         // Skeleton mirroring the final layout (QR + caption + link) MINUS the download row
         // (D-08 copy-only) — a simpler skeleton than the CP modal's.
         <div aria-busy="true" aria-label={t("common.loading")}>
@@ -189,6 +214,19 @@ export function ConfigQr({ isOpen, config, onClose }: ConfigQrProps) {
         </div>
       ) : deeplink ? (
         <>
+          {/* The link was built before the file was deleted and is still a valid bundle for the
+              receiving device, so it stays — but the user is TOLD, rather than left to work out on
+              why the card behind this window disappeared. `warning`, not `error`: nothing
+              here has failed, the link works. */}
+          {fileMissing && (
+            <div className="mt-[var(--space-4)]">
+              <ErrorBanner
+                variant="warning"
+                message={t("connection.qr.file_missing")}
+                className="w-full"
+              />
+            </div>
+          )}
           {/* QR — clickable: copies the deeplink as TEXT (writeText), with a small press animation.
               The image-clipboard path was removed — it did not work in WebView2 (see handleCopyQr). */}
           <div className="mt-[var(--space-4)] flex justify-center">

@@ -119,8 +119,15 @@ excluded_routes = [
     "192.168.0.0/16",
     "224.0.0.0/3",
 ]
-mtu_size = 1280
+mtu_size = 1350
 EOF
+  # Add optional TCP buffer size overrides
+  if [[ -n "${TCP_RECV_BUF_SIZE:-}" ]]; then
+    echo "tcp_recv_buf_size = $TCP_RECV_BUF_SIZE" >> trusttunnel_client.toml
+  fi
+  if [[ -n "${TCP_SEND_BUF_SIZE:-}" ]]; then
+    echo "tcp_send_buf_size = $TCP_SEND_BUF_SIZE" >> trusttunnel_client.toml
+  fi
   echo "TUN mode configuration created"
 else
   cat >trusttunnel_client.toml <<EOF

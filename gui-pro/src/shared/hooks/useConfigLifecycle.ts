@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { i18n as I18nType } from "i18next";
 import type { AppTab, VpnConfig, VpnStatus } from "../types";
 import { isSelfDeleting } from "../utils/selfDeleteGuard";
+import { samePath } from "../utils/samePath";
 
 interface UseConfigLifecycleParams {
   config: VpnConfig;
@@ -127,7 +128,17 @@ export function useConfigLifecycle({
   useEffect(() => {
     const unlisten = listen<{ exists: boolean; path: string }>("config-file-changed", (event) => {
       const { exists, path } = event.payload;
-      if (!exists && path === config.configPath) {
+      // Raw-path-comparison class (30.1 class sweep — site 3 of 3, and the one the milestone
+      // review never named). The watcher reports the path in whatever form the OS handed it;
+      // `config.configPath` holds whatever the connect flow stored. On Windows the same file
+      // routinely arrives as `C:\cfg\x.toml` on one side and `C:/cfg/x.toml` on the other, and a
+      // byte `===` then failed to recognise a delete of the ACTIVE config — so the active-pointer
+      // cleanup documented immediately below never ran, StatusPanel kept rendering a config that
+      // is gone, and its «Подключить» invoked vpn_connect on a deleted file. `samePath` normalizes
+      // separator style and case, which is exactly the latitude wanted and no more: a delete of a
+      // genuinely different config still falls through to the branch below.
+      // Sites 1 and 2 of the class: `useVpnActions.markLastUsed`, `useAutoConnect`.
+      if (!exists && samePath(path, config.configPath)) {
         // Config file was deleted.
         // B2 (16-UAT round 2): an IN-APP delete (ConnectionPanel «Удалить») removes the `.toml`
         // via delete_config → fs remove, which the ACTIVE-config watcher sees as this same
