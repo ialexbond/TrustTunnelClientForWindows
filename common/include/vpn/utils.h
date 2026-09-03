@@ -63,11 +63,9 @@ typedef AG_ARRAY_OF(const char) VpnStr;
 #define VPNSTR_INIT(c_string) {c_string, (c_string) ? uint32_t(strlen(c_string)) : 0}
 
 // QUIC defaults
-static constexpr size_t QUIC_LOCAL_CONN_ID_LEN = 16;
 static constexpr uint64_t QUIC_CONNECTION_WINDOW_SIZE = 100ul * 1024 * 1024;
 static constexpr uint64_t QUIC_STREAM_WINDOW_SIZE = 1ul * 1024 * 1024;
 static constexpr uint64_t QUIC_MAX_STREAMS_NUM = 4ul * 1024;
-static constexpr size_t QUIC_MAX_UDP_PAYLOAD_SIZE = 1350;
 static constexpr uint8_t QUIC_H3_ALPN_PROTOS[] = {2, 'h', '3'};
 
 // TCP defaults
@@ -182,8 +180,12 @@ private:
  * Default settings for vpn
  */
 struct VpnDefaultSettings {
-    bool post_quantum_group_enabled; /**< Default state for post-quantum group in TLS handshakes */
-    bool handler_profiling_enabled;  /**< Default state for handler profiling */
+    bool post_quantum_group_enabled;            /**< Default state for post-quantum group in TLS handshakes */
+    bool handler_profiling_enabled;             /**< Default state for handler profiling */
+    bool exclusions_tcp_early_ack_enabled;      /**< Default state for TCP early ACK for exclusions */
+    bool exclusions_preresolve_enabled;         /**< Default state for pre-resolving exclusions in background */
+    uint32_t exclusions_preresolve_max_queries; /**< Default max number of exclusion domains to pre-resolve */
+    const char *exclusions_scannable_ports;     /**< Default comma-separated list of scannable ports with ranges */
 };
 
 /**
@@ -240,6 +242,9 @@ uint64_t socket_address_pair_hash(const SocketAddress &src, const SocketAddress 
  */
 SocketAddressStorage sockaddr_from_str(const char *str);
 
+/** Default timeout, in seconds, for the endpoint resolution helpers below. */
+inline constexpr size_t DEFAULT_GAI_TIMEOUT_SECS = 15;
+
 /**
  * Resolve a host:port string to socket addresses
  *
@@ -252,9 +257,25 @@ SocketAddressStorage sockaddr_from_str(const char *str);
  *   - hostname:port
  *
  * @param str string to resolve
+ * @param timeout maximum time to wait for the resolution, in seconds
  * @return resolved socket addresses (may contain both IPv4 and IPv6), empty on failure
  */
-std::vector<SocketAddressStorage> resolve_endpoint_address(const char *str);
+std::vector<SocketAddressStorage> resolve_endpoint_address(const char *str, size_t timeout = DEFAULT_GAI_TIMEOUT_SECS);
+
+/**
+ * Resolve several host:port strings to socket addresses concurrently.
+ *
+ * Each string is handled like `resolve_endpoint_address`, but all hostname resolutions run in
+ * parallel and share a single overall deadline, so the whole batch never blocks longer than one
+ * resolution would. Strings that fail to parse, fail to resolve, or exceed the deadline yield an
+ * empty result in the corresponding slot.
+ *
+ * @param strs strings to resolve
+ * @param timeout maximum time to wait for the whole batch, in seconds
+ * @return one result vector per input string, in the same order
+ */
+std::vector<std::vector<SocketAddressStorage>> resolve_endpoint_addresses(
+        const std::vector<std::string> &strs, size_t timeout = DEFAULT_GAI_TIMEOUT_SECS);
 
 /**
  * Get bound socket address storage from file descriptor

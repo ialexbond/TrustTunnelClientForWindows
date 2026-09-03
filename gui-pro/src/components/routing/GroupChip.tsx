@@ -18,29 +18,25 @@ interface GroupChipProps {
 const chipTint: Record<RouteAction, string> = {
   direct: "var(--color-success-tint-12)",
   proxy: "var(--color-accent-tint-10)",
-  block: "var(--color-danger-tint-10)",
 };
 
 const chipColor: Record<RouteAction, string> = {
   direct: "var(--color-success-fg)",
   proxy: "var(--color-accent-fg)",
-  block: "var(--color-danger-fg)",
 };
 
 // Куда можно перенести элемент из текущего блока. Та же карта и тот же порядок, что в RuleEntryRow.tsx
 // (одиночные правила) — держать в синхроне: у чипа-группы и у обычной строки ОДИН контрол переноса.
-// block перечисляет оба направления для целостности данных, хотя блок-карта block скрыта.
+// Третьей строки (`block`) здесь больше нет — блокировка сайтов удалена 2026-09-03.
 const moveTargets: Record<RouteAction, RouteAction[]> = {
   direct: ["proxy"],
   proxy: ["direct"],
-  block: ["direct", "proxy"],
 };
 
 // Цвет стрелки-цели = цвет блока назначения (тема-зависимый -fg, как глиф). Совпадает с RuleEntryRow.
 const arrowColor: Record<RouteAction, string> = {
   direct: "var(--color-success-fg)",
   proxy: "var(--color-accent-fg)",
-  block: "var(--color-danger-fg)",
 };
 
 /**
@@ -48,8 +44,8 @@ const arrowColor: Record<RouteAction, string> = {
  * между блоками СТРЕЛКАМИ (та же анатомия, что у одиночного правила RuleEntryRow — один паттерн на всю
  * вкладку, без «многоточия»/OverflowMenu) + всегда видимое удаление (Trash2).
  *
- * Перенос: по одной кнопке-стрелке ArrowRight на каждую цель (proxy→direct: одна; block→direct+proxy:
- * две). Стрелки видны В ПОКОЕ в приглушённом состоянии и усиливаются при наведении и при фокусе с
+ * Перенос: по одной кнопке-стрелке ArrowRight на каждую цель (блоков два, значит цель одна:
+ * proxy→direct и direct→proxy). Стрелки видны В ПОКОЕ в приглушённом состоянии и усиливаются при наведении и при фокусе с
  * клавиатуры (D-06); tooltip/aria = «Переместить в …», клик зовёт onMove(entry.id, target) → moveEntry
  * (дедуп на цели живёт в moveEntry, новой логики нет).
  * Клавиатуро-доступно: каждая стрелка — обычная фокусируемая кнопка (D-02: без мышиного drag).

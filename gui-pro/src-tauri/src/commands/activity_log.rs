@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use chrono::Local;
 
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 use crate::logging::sanitize;
 
 const MAX_ACTIVITY_LOG_SIZE: u64 = 10 * 1024 * 1024; // 10 MB per D-08
@@ -15,7 +15,7 @@ const MAX_ACTIVITY_LOG_AGE_DAYS: u64 = 7; // 7 days per D-08
 static ACTIVITY_LOG: Mutex<Option<File>> = Mutex::new(None);
 
 fn activity_log_path() -> PathBuf {
-    portable_data_dir().join("logs").join("activity.log")
+    user_data_dir().join("logs").join("activity.log")
 }
 
 /// Rotate activity.log if it exceeds size limit or age limit.
@@ -52,7 +52,7 @@ fn rotate_if_needed(path: &PathBuf) -> bool {
 /// Initialize activity log at application startup.
 /// Creates the logs directory, rotates if needed, and opens the file for appending.
 pub fn init_activity_log() {
-    let logs_dir = portable_data_dir().join("logs");
+    let logs_dir = user_data_dir().join("logs");
     if fs::create_dir_all(&logs_dir).is_err() {
         eprintln!("[activity_log] Failed to create logs directory: {}", logs_dir.display());
         return;

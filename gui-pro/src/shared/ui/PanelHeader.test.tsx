@@ -67,7 +67,7 @@ describe("PanelHeader", () => {
     const { container } = render(
       <PanelHeader
         icon={<Settings className="h-4 w-4" />}
-        title="Экспериментальные функции"
+        title="Раздел с предупреждающим тоном"
         variant="warning"
       />,
     );

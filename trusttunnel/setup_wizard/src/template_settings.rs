@@ -44,6 +44,18 @@ killswitch_allow_ports = []
 post_quantum_group_enabled = {}
 
 {}
+# exclusions_tcp_early_ack_enabled = {}
+
+{}
+# exclusions_preresolve_enabled = {}
+
+{}
+# exclusions_preresolve_max_queries = {}
+
+{}
+# exclusions_scannable_ports = "{}"
+
+{}
 exclusions = []
 "#,
         Settings::doc_loglevel().to_toml_comment(),
@@ -55,6 +67,14 @@ exclusions = []
         Settings::doc_killswitch_allow_ports().to_toml_comment(),
         Settings::doc_post_quantum_group_enabled().to_toml_comment(),
         Settings::default_post_quantum_group_enabled(),
+        Settings::doc_exclusions_tcp_early_ack_enabled().to_toml_comment(),
+        Settings::default_exclusions_tcp_early_ack_enabled(),
+        Settings::doc_exclusions_preresolve_enabled().to_toml_comment(),
+        Settings::default_exclusions_preresolve_enabled(),
+        Settings::doc_exclusions_preresolve_max_queries().to_toml_comment(),
+        Settings::default_exclusions_preresolve_max_queries(),
+        Settings::doc_exclusions_scannable_ports().to_toml_comment(),
+        Settings::default_exclusions_scannable_ports(),
         Settings::doc_exclusions().to_toml_comment(),
     )
 });
@@ -144,7 +164,15 @@ excluded_routes = [{}]
 {}
 mtu_size = {}
 {}
+# tcp_recv_buf_size = 0
+{}
+# tcp_send_buf_size = 0
+{}
 change_system_dns = {}
+{}
+device_name = "{}"
+{}
+use_existing = {}
 "#,
         TunListener::doc_bound_if().to_toml_comment(),
         TunListener::default_bound_if(),
@@ -162,7 +190,13 @@ change_system_dns = {}
             .join(OS_LINE_ENDING),
         TunListener::doc_mtu_size().to_toml_comment(),
         TunListener::default_mtu_size(),
+        TunListener::doc_tcp_recv_buf_size().to_toml_comment(),
+        TunListener::doc_tcp_send_buf_size().to_toml_comment(),
         TunListener::doc_change_system_dns().to_toml_comment(),
         TunListener::default_change_system_dns(),
+        TunListener::doc_device_name().to_toml_comment(),
+        TunListener::default_device_name(),
+        TunListener::doc_use_existing().to_toml_comment(),
+        TunListener::default_use_existing(),
     )
 });

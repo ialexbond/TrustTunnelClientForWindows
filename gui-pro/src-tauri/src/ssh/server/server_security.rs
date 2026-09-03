@@ -1036,9 +1036,49 @@ fn parse_ufw_numbered(text: &str) -> Vec<FirewallRule> {
 //   FAIL2BAN — install / uninstall / control
 // ═══════════════════════════════════════════════════════════════
 
+/// Build the `[sshd]` jail body written to `/etc/fail2ban/jail.local`.
+///
+/// Blocker 3 (30.1 milestone review): this body used to hard-code `port     = ssh` — the
+/// /etc/services alias, i.e. port 22. On a server hardened onto a non-standard SSH port
+/// the jail therefore watched a port nothing listens on: brute-force attempts against the
+/// REAL port were never counted and never banned, while the wizard reported the server
+/// «защищён». Writing the numeric port the SSH session is actually using makes the claim
+/// and the behaviour agree. Note this only NARROWS what fail2ban bans — it opens and
+/// closes no firewall rule (sacred SSH-port invariant untouched; see the write-command
+/// test that asserts the generated text carries no ufw verb).
+///
+/// Extracted as a PURE function so the property "the jail watches the port SSH actually
+/// listens on" is an assertion over a string, provable without a live server — the same
+/// shape as the command-text tests further down this module.
+fn build_fail2ban_jail_local(ignoreip: &str, ssh_port: u16) -> String {
+    format!(
+        "[DEFAULT]\nbackend  = auto\nignoreip = {ignoreip}\n\n[sshd]\nenabled  = true\nport     = {ssh_port}\nfilter   = sshd\nmaxretry = 5\nbantime  = 10m\nfindtime = 10m\n"
+    )
+}
+
+/// Build the shell command that writes `jail.local`.
+///
+/// Pipe heredoc directly to `tee` — no bash -c wrapping. The quoted delimiter disables
+/// parameter expansion inside the body, so arbitrary characters are safe.
+///
+/// The delimiter is a per-call UUID (`F2BEOF_<uuid>`) matching the project-wide heredoc
+/// convention (`deploy.rs` CREDS_EOF_<uuid>, `server_config.rs`, `server_install.rs`);
+/// this was the last static one. To be precise about what that buys: a `u16` port cannot
+/// break out of a heredoc, so this is convention-matching, NOT a security fix. The value
+/// that genuinely needs guarding here is `ignoreip`, and it is validated upstream through
+/// the `is_safe_ip` whitelist before it ever reaches this builder (T-06-42).
+fn build_fail2ban_jail_write_cmd(sudo: &str, ignoreip: &str, ssh_port: u16) -> String {
+    let jail_local = build_fail2ban_jail_local(ignoreip, ssh_port);
+    let delim = format!("F2BEOF_{}", uuid::Uuid::new_v4().simple());
+    format!(
+        "{sudo}tee /etc/fail2ban/jail.local >/dev/null <<'{delim}'\n{jail_local}{delim}\n"
+    )
+}
+
 pub async fn install_fail2ban(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
+    ssh_port: u16,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Installing fail2ban...");
     let sudo = detect_sudo(handle, app).await;
@@ -1080,7 +1120,8 @@ pub async fn install_fail2ban(
     // against the strict is_safe_ip whitelist, and bake it into ignoreip with loopback.
     // Validation is MANDATORY — the value lands in a config file, so an unvalidated
     // shell-captured value would be an injection seam (T-06-42). The heredoc is quoted
-    // ('F2BEOF') so nothing in the body is shell-expanded — the IP is a literal we build.
+    // (single-quoted 'F2BEOF_<uuid>') so nothing in the body is shell-expanded — the IP
+    // is a literal we build. Body + write command live in the two pure builders above.
     let (client_ip_raw, _) = exec_command(
         handle, app,
         "echo \"${SSH_CONNECTION:-}\" | awk '{print $1}'",
@@ -1092,14 +1133,7 @@ pub async fn install_fail2ban(
         // Fallback: loopback only. The uninstall unban + orphan-chain sweep is the net.
         "127.0.0.1/8 ::1".to_string()
     };
-    let jail_local = format!(
-        "[DEFAULT]\nbackend  = auto\nignoreip = {ignoreip}\n\n[sshd]\nenabled  = true\nport     = ssh\nfilter   = sshd\nmaxretry = 5\nbantime  = 10m\nfindtime = 10m\n"
-    );
-    // Pipe heredoc directly to `tee` — no bash -c wrapping. The quoted delimiter 'F2BEOF'
-    // disables parameter expansion inside the body, so arbitrary characters are safe.
-    let cmd = format!(
-        "{sudo}tee /etc/fail2ban/jail.local >/dev/null <<'F2BEOF'\n{jail_local}F2BEOF\n"
-    );
+    let cmd = build_fail2ban_jail_write_cmd(sudo, &ignoreip, ssh_port);
     let (_, code) = exec_command(handle, app, &cmd).await?;
     if code != 0 {
         return Err("SECURITY_F2B_CONFIG_FAILED".into());
@@ -1824,6 +1858,137 @@ pub async fn firewall_set_http_port(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Blocker 3 (30.1 milestone review): the fail2ban sshd jail must name the REAL
+    //    SSH port. It used to hard-code `port = ssh`, the /etc/services alias for 22, so
+    //    on a server hardened onto a non-standard port the jail watched a port nothing
+    //    listens on — brute-force on the real port went unbanned while the wizard
+    //    reported «сервер защищён». ──
+
+    #[test]
+    fn f2b_jail_names_the_real_ssh_port_not_the_service_alias() {
+        let body = build_fail2ban_jail_local("127.0.0.1/8 ::1", 2222);
+        assert!(
+            body.contains("port     = 2222"),
+            "the sshd jail must name the numeric SSH port, got:\n{body}"
+        );
+        assert!(
+            !body.contains("port     = ssh"),
+            "the `ssh` service alias resolves to 22 and must be gone entirely:\n{body}"
+        );
+    }
+
+    #[test]
+    fn f2b_jail_names_the_port_even_when_it_is_the_default() {
+        // There must be NO path left that reaches the old behaviour — the default port
+        // is written as a number too, so `port = ssh` cannot reappear via a "22 is
+        // special" branch.
+        let body = build_fail2ban_jail_local("127.0.0.1/8 ::1", 22);
+        assert!(body.contains("port     = 22"), "got:\n{body}");
+        // NB: matched on the `port` key, not on a bare "= ssh" — `filter   = sshd` is a
+        // legitimate line in this template and must not trip the guard.
+        assert!(
+            !body.contains("port     = ssh"),
+            "the alias must not survive for port 22:\n{body}"
+        );
+    }
+
+    #[test]
+    fn f2b_jail_keeps_the_ignoreip_whitelist_and_balanced_preset() {
+        // The port change must not disturb the rest of the template: the admin's own IP
+        // stays whitelisted (the anti-self-ban net) and the values still match the
+        // frontend FAIL2BAN_PRESETS.balanced.
+        let body = build_fail2ban_jail_local("127.0.0.1/8 ::1 203.0.113.7", 2222);
+        assert!(body.contains("ignoreip = 127.0.0.1/8 ::1 203.0.113.7"), "got:\n{body}");
+        assert!(body.contains("maxretry = 5"), "got:\n{body}");
+        assert!(body.contains("bantime  = 10m"), "got:\n{body}");
+        assert!(body.contains("findtime = 10m"), "got:\n{body}");
+    }
+
+    #[test]
+    fn f2b_jail_write_cmd_carries_no_firewall_verb() {
+        // SACRED SSH-PORT INVARIANT, made machine-checkable. This change only narrows
+        // what fail2ban BANS; it must not open, close, reorder or delete a single ufw
+        // rule. If a future edit smuggles a firewall verb into the fail2ban config path,
+        // this fails rather than shipping a teardown that can brick the server.
+        let cmd = build_fail2ban_jail_write_cmd("sudo ", "127.0.0.1/8 ::1", 2222);
+        for verb in ["ufw ", " allow", " deny", " enable", " delete", "iptables"] {
+            assert!(
+                !cmd.contains(verb),
+                "the fail2ban jail write command must carry no firewall verb ({verb:?}):\n{cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn f2b_jail_write_cmd_uses_a_quoted_dynamic_heredoc_delimiter() {
+        // Convention-matching, NOT a security fix: a u16 port cannot break out of a
+        // heredoc. But this codebase writes every heredoc with a per-call UUID delimiter
+        // (deploy.rs:640, server_config.rs, server_install.rs) and this one was the last
+        // static `F2BEOF`. Kept single-quoted so the writing shell expands nothing.
+        let cmd = build_fail2ban_jail_write_cmd("sudo ", "127.0.0.1/8 ::1", 2222);
+        assert!(cmd.contains("<<'F2BEOF_"), "delimiter must be dynamic, got:\n{cmd}");
+        assert!(
+            !cmd.contains("<<'F2BEOF'"),
+            "the static F2BEOF delimiter must be replaced by a dynamic one:\n{cmd}"
+        );
+        // Two occurrences of the SAME uuid delimiter (open + close), never a mismatch.
+        let delim = cmd
+            .split("<<'")
+            .nth(1)
+            .and_then(|s| s.split('\'').next())
+            .unwrap_or_default()
+            .to_string();
+        assert!(!delim.is_empty(), "could not locate the delimiter in:\n{cmd}");
+        assert_eq!(cmd.matches(&delim).count(), 2, "delimiter must open and close once:\n{cmd}");
+    }
+
+    // ── Both doors. install_fail2ban has TWO callers; fixing one and calling the class
+    //    closed is the failure mode this phase exists to remove. The signature change
+    //    alone would let a caller pass a constant 22 and stay green, so each door is
+    //    pinned to the port IT actually connected on. ──
+
+    #[test]
+    fn wizard_door_threads_the_deploy_port_into_the_fail2ban_install() {
+        let source = include_str!("../deploy.rs");
+        let body = source
+            .split("if run_fail2ban {")
+            .nth(1)
+            .and_then(|s| s.split("provision_failed = true;").next())
+            .unwrap_or("");
+        assert!(
+            !body.is_empty(),
+            "the wizard's fail2ban call was not found — this guard has lost its subject"
+        );
+        assert!(
+            body.contains("install_fail2ban(app, &handle, params.port)"),
+            "the wizard must pass the deploy params' port, exactly like the firewall call \
+             one line above; got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn control_panel_door_threads_the_ssh_port_into_the_fail2ban_install() {
+        let source = include_str!("../../commands/ssh_commands.rs");
+        assert!(
+            !source.contains("ssh_pool_command!(security_install_fail2ban"),
+            "the Control Panel door must NOT be macro-bound — the macro cannot deliver the \
+             SSH port, which is exactly how this door stayed on port 22"
+        );
+        let body = source
+            .split("pub async fn security_install_fail2ban")
+            .nth(1)
+            .and_then(|s| s.split("\n#[tauri::command]").next())
+            .unwrap_or("");
+        assert!(
+            !body.is_empty(),
+            "security_install_fail2ban not found — this guard has lost its subject"
+        );
+        assert!(
+            body.contains("install_fail2ban(&app, &handle, port)"),
+            "the Control Panel door must pass the SSH connection's own port; got:\n{body}"
+        );
+    }
 
     // ── parse_listening_ports (occupied-ports live-fallback parser) ──
 

@@ -1,4 +1,4 @@
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -182,7 +182,7 @@ struct GeoDataMeta {
 // ─── File paths ─────────────────────────────────────
 
 fn geodata_dir() -> PathBuf {
-    let dir = portable_data_dir().join("geodata");
+    let dir = user_data_dir().join("geodata");
     std::fs::create_dir_all(&dir).ok();
     dir
 }
@@ -246,11 +246,27 @@ impl<'a> ProtobufReader<'a> {
 
     fn read_bytes(&mut self) -> Option<&'a [u8]> {
         let len = self.read_varint()? as usize;
-        if self.pos + len > self.data.len() {
+        // CHECKED, AND CHECKED FIRST (30.1 item 12). `len` comes out of the file, so it is
+        // whatever the file says — a `.dat` is downloaded, and a corrupted one arrives by
+        // accident as easily as a crafted one arrives on purpose. This was `self.pos + len`,
+        // and a varint can carry `u64::MAX`: the sum wrapped to a SMALL number, the
+        // `> self.data.len()` test below then compared that wrapped value and happily passed,
+        // and the slice that followed had an end BELOW its start. Measured on this parser: a
+        // debug build panics on the addition («attempt to add with overflow»), and the release
+        // build users actually run sets no `overflow-checks`, so it wraps silently and panics
+        // one line later on the slice range instead. Both are a crash on a hostile file.
+        //
+        // The order is the fix. Once the sum has wrapped there is nothing left to detect — the
+        // bounds test would be handed a number that has already lost the information it exists
+        // to check. Same idiom as `ssh/server/tlv_encoder.rs`'s `i.checked_add(len as usize)`,
+        // spelled with `?` rather than its `match`: that function returns `bool` and had to name
+        // its refusal value explicitly, this one already returns `Option` and `?` IS the refusal.
+        let end = self.pos.checked_add(len)?;
+        if end > self.data.len() {
             return None;
         }
-        let result = &self.data[self.pos..self.pos + len];
-        self.pos += len;
+        let result = &self.data[self.pos..end];
+        self.pos = end;
         result.into()
     }
 
@@ -259,6 +275,20 @@ impl<'a> ProtobufReader<'a> {
         String::from_utf8(bytes.to_vec()).ok()
     }
 
+    /// DELIBERATELY NOT GIVEN THE CHECKED ADDITION ABOVE, and this note is here so the next
+    /// reader does not extend that fix by analogy and call it thoroughness.
+    ///
+    /// The two fixed-width skips add a CONSTANT — 8 and 4 — to a position that is already
+    /// bounded by `self.data.len()`, i.e. by the size of a real allocation. `usize` cannot
+    /// hold an allocation large enough for `len + 8` to wrap, so there is no reachable input
+    /// that overflows here. `read_bytes` was different in kind, not in degree: its addend came
+    /// out of the FILE and could be `u64::MAX`.
+    ///
+    /// The skips can run `pos` past the end of the buffer, which is not a crash — every read
+    /// after it is bounds-checked (`read_varint` tests `pos >= data.len()`, `read_bytes` tests
+    /// the end) and simply returns `None`, which is how the callers terminate. Adding arithmetic
+    /// guards here would be an unforced edit to a parser, buying nothing and risking a
+    /// behaviour change in the one place a `.dat` is read.
     fn skip_field(&mut self, wire_type: u32) -> Option<()> {
         match wire_type {
             0 => { self.read_varint()?; }          // varint
@@ -425,14 +455,46 @@ fn format_cidr(entry: &CidrEntry) -> Option<String> {
     }
 }
 
-/// Format domain for sidecar consumption
-fn format_geo_domain(domain: &GeoDomain) -> String {
+/// Turn ONE v2ray geosite entry into the exclusion lines the C++ core can actually use.
+///
+/// # The false premise this replaces
+///
+/// Every arm of this function used to return the bare value, and the type-2 arm carried the comment
+/// *«suffix match (most common, sidecar handles this)»*. **The sidecar does not handle it.** It
+/// receives a bare name and files it as `DFMM_EXACT` — this host and its `www.` twin only
+/// (`core/src/domain_filter.cpp:74-82`). The type was parsed correctly by `parse_geo_domain` and
+/// then thrown away, so the distinction the database spends four types making was erased at the
+/// last step.
+///
+/// That single line is why presets looked inert. Measured against the real 73.7 MB `geosite.dat`:
+/// **99.76 %** of its 3 152 362 entries are type 2. `geosite:youtube` shipped `googlevideo.com` as
+/// an exact host and never matched a real video stream; `geosite:ru-blocked` missed **all 74 739**
+/// of its entries. Nothing errored — the preset simply routed nothing, which is the report
+/// «пресет ничего не делает».
+///
+/// # What each type becomes, and why
+///
+/// * **2 — `Domain` (suffix).** The name AND its subdomains, which is exactly what
+///   [`crate::domain_scope::expand_domain_rule`] writes. 99.76 % of the database.
+/// * **3 — `Full` (exact).** The value alone. The publisher chose a different type to say «this
+///   exact host»; that is a stated intent, and honouring it is not the same question as guessing at
+///   scope nobody stated. 0.23 % of the database.
+/// * **1 — `Regex`.** **Dropped.** The core has no regex mode, and a value like
+///   `^r+[0-9]+(---|\.)sn-\w{5}\.googlevideo\.com$` fails its character whitelist
+///   (`domain_filter.cpp:62-70`) and is logged as «Malformed entry detected in exceptions list»
+///   (`:108`). We were shipping input we already knew would be rejected — noise in the user's log
+///   for no routing whatsoever. 0.01 % of the database (367 entries).
+/// * **0 — `Plain` (keyword substring).** **Dropped.** The core has no substring mode either, so a
+///   bare keyword lands EXACT and can match nothing: the matcher only ever looks up dot-separated
+///   suffixes of a real hostname. There are 0 such entries in the current database — the arm is
+///   written down anyway so the choice is recorded rather than left to the `_` fallback.
+/// * **Anything else.** Dropped with the same reasoning: an unknown type is an unknown scope, and
+///   the only shapes the core understands are the two above.
+fn format_geo_domain(domain: &GeoDomain) -> Vec<String> {
     match domain.domain_type {
-        0 => domain.value.clone(),         // Plain — keyword match
-        1 => domain.value.clone(),         // Regex — pass as-is (sidecar doesn't support regex, but keep for compatibility)
-        2 => domain.value.clone(),         // Domain — suffix match (most common, sidecar handles this)
-        3 => domain.value.clone(),         // Full — exact match
-        _ => domain.value.clone(),
+        2 => crate::domain_scope::expand_domain_rule(&domain.value),
+        3 => vec![domain.value.clone()],
+        _ => Vec::new(),
     }
 }
 
@@ -1085,7 +1147,7 @@ pub fn resolve_geosite(state: &GeoDataState, category: &str) -> Result<Vec<Strin
         .ok_or(format!("GeoSite category '{}' not found", category))?;
 
     let domains: Vec<String> = entry.domains.iter()
-        .map(format_geo_domain)
+        .flat_map(format_geo_domain)
         .collect();
 
     Ok(domains)
@@ -1541,5 +1603,200 @@ mod tests {
             state.update_in_flight.try_lock().is_ok(),
             "the guard must be released when the first updater finishes"
         );
+    }
+
+    // ─── A hostile .dat may not crash the parser (30.1 item 12) ──────────────────────────
+    //
+    // `read_bytes` read a length from the file and then asked `self.pos + len > self.data.len()`.
+    // The length is attacker-controlled — a `.dat` is downloaded, and a corrupted one arrives by
+    // accident just as easily — and the addition was unchecked. A length near `usize::MAX` wraps
+    // the sum to a SMALL number, so the bounds test that was supposed to catch it compares nonsense
+    // and passes. What follows is `&self.data[pos..pos + len]`, whose end is now BELOW its start.
+    //
+    // The refusal has to happen BEFORE the comparison, because once the sum has wrapped there is
+    // nothing left to detect: the guard is being handed a number that has already lost the
+    // information it was meant to check.
+
+    /// The largest length a varint can carry, framed exactly as a `.dat` would carry it.
+    /// Ten bytes: nine continuation groups of seven set bits, then the top bit.
+    fn hostile_length_prefix() -> Vec<u8> {
+        varint(u64::MAX)
+    }
+
+    #[test]
+    fn a_length_that_wraps_the_position_is_refused() {
+        // THE ASSERTION IS `None`, NOT «it did not panic». A test that only asserts the absence of
+        // a crash passes just as happily on a parser that silently returns the wrong bytes, which
+        // is the worse of the two outcomes: a panic is at least visible.
+        let data = hostile_length_prefix();
+        let mut reader = ProtobufReader::new(&data);
+
+        assert_eq!(
+            reader.read_bytes(),
+            None,
+            "a declared length large enough to wrap `pos + len` must be refused outright"
+        );
+    }
+
+    #[test]
+    fn a_length_that_merely_exceeds_the_buffer_is_refused_exactly_as_before() {
+        // The ordinary truncated-file case, asserted so the overflow fix cannot be mistaken for a
+        // change in this behaviour. 1000 declared, four available: too long, but nowhere near a wrap.
+        let mut data = varint(1000);
+        data.extend_from_slice(&[1, 2, 3, 4]);
+        let mut reader = ProtobufReader::new(&data);
+
+        assert_eq!(reader.read_bytes(), None);
+    }
+
+    #[test]
+    fn a_well_formed_record_reads_byte_identically() {
+        // The other half of the contract: the fix refuses nothing that used to work.
+        let payload = b"RU-payload";
+        let mut data = varint(payload.len() as u64);
+        data.extend_from_slice(payload);
+        let mut reader = ProtobufReader::new(&data);
+
+        assert_eq!(reader.read_bytes(), Some(&payload[..]));
+    }
+
+    #[test]
+    fn a_geoip_dat_carrying_a_wrapping_length_parses_to_nothing_instead_of_crashing() {
+        // The same defect reached the way a user actually reaches it: through the top-level `.dat`
+        // parser, one tag and one hostile length. Before the fix this panicked and took the app's
+        // geodata load down with it.
+        let mut data = varint((1u64 << 3) | 2); // field 1, wire type 2 — a GeoIP entry
+        data.extend(hostile_length_prefix());
+
+        assert!(
+            parse_geoip_dat(&data).is_empty(),
+            "a record whose length cannot be trusted yields no entries — and no panic"
+        );
+    }
+
+    // ── ROUTE-10, the invisible half: a geosite preset must route its category ──
+    //
+    // 99.76 % of the entries in the real `geosite.dat` (3 152 362 of them, measured on the
+    // machine) are v2ray type 2 — «this name AND its subdomains». `format_geo_domain` discarded the
+    // type and wrote every entry as a bare name, which the core files as EXACT. So
+    // `geosite:youtube` shipped `googlevideo.com` as one exact host and never matched a single real
+    // video stream: the preset routed the page shell and left the video outside the tunnel. Nothing
+    // reported an error, which is why this half was worse than the hand-typed one.
+    //
+    // As in `routing_rules`, the assertions go through the transcription of the core's matcher
+    // rather than through the emitted strings: what changed is the core's verdict on those bytes.
+
+    use crate::domain_scope::core_matcher::{core_match_domain, entry_kind, EntryKind};
+
+    fn geo_domain(domain_type: u32, value: &str) -> GeoDomain {
+        GeoDomain { domain_type, value: value.to_string() }
+    }
+
+    /// Load a category into a fresh state, exactly as a parsed `.dat` would.
+    fn state_with_category(country_code: &str, domains: Vec<GeoDomain>) -> GeoDataState {
+        let state = GeoDataState::new();
+        *state.geosite_data.lock().unwrap() = Some(vec![GeoSite {
+            country_code: country_code.to_string(),
+            domains,
+        }]);
+        state
+    }
+
+    #[test]
+    fn a_type_2_entry_is_the_name_and_its_subdomains_a_type_3_entry_is_only_itself() {
+        // The two types the database actually uses, and the line between them is the whole point:
+        // type 2 (`RootDomain`) is a SUFFIX and must reach the core as both forms; type 3 (`Full`)
+        // is the publisher saying «this exact host» out loud, and honouring that is not the same
+        // question as guessing at scope nobody stated.
+        assert_eq!(
+            format_geo_domain(&geo_domain(2, "googlevideo.com")),
+            vec!["googlevideo.com".to_string(), "*.googlevideo.com".to_string()],
+        );
+        assert_eq!(
+            format_geo_domain(&geo_domain(3, "youtube.com")),
+            vec!["youtube.com".to_string()],
+        );
+    }
+
+    #[test]
+    fn the_types_the_core_cannot_use_are_dropped_instead_of_shipped() {
+        // Type 1 (Regex) — a real value from the GOOGLE category. The core's character whitelist
+        // (domain_filter.cpp:62-70) refuses it and logs «Malformed entry detected in exceptions
+        // list» (:108). Shipping input we KNOW is rejected is noise in the user's log for nothing.
+        let regex = r"^r+[0-9]+(---|\.)sn-(2x3|ni5|j5o)\w{5}\.googlevideo\.com$";
+        assert_eq!(
+            entry_kind(regex),
+            EntryKind::Malformed,
+            "premise: the core throws this away"
+        );
+        assert!(format_geo_domain(&geo_domain(1, regex)).is_empty());
+
+        // Type 0 (Plain / keyword substring) — zero entries in the current database, and the core
+        // has no substring mode at all, so a bare keyword would be stored EXACT and match nothing.
+        // Dropped for the same reason and recorded here so the choice is not silent.
+        assert!(format_geo_domain(&geo_domain(0, "youtube")).is_empty());
+    }
+
+    #[test]
+    fn a_geosite_preset_routes_the_hosts_its_category_actually_names() {
+        // The YouTube preset in miniature, with the shapes the real category holds.
+        let state = state_with_category(
+            "youtube",
+            vec![
+                geo_domain(2, "googlevideo.com"),
+                geo_domain(2, "ytimg.com"),
+                geo_domain(3, "youtu.be"),
+                geo_domain(1, r"^.+\.googlevideo\.com$"),
+            ],
+        );
+
+        let resolved = resolve_geosite(&state, "youtube").expect("the category must resolve");
+        let exclusions = resolved.join("\n");
+
+        for host in [
+            "rr1---sn-4g5edned.googlevideo.com", // THE ACTUAL VIDEO STREAM
+            "i9.ytimg.com",                      // thumbnails
+            "googlevideo.com",
+            "youtu.be",
+        ] {
+            assert!(
+                core_match_domain(&exclusions, host),
+                "the preset must route {host}; bytes written: {exclusions:?}"
+            );
+        }
+
+        // Type 3 stays exact — the publisher's stated intent survives the change.
+        assert!(
+            !core_match_domain(&exclusions, "sub.youtu.be"),
+            "a Full (type 3) entry must not silently acquire subdomains"
+        );
+
+        // And nothing we emit is input the core will throw away. Self-enumerating: it holds for
+        // every entry in the list, not just the regex this fixture happens to carry.
+        for entry in &resolved {
+            assert_ne!(
+                entry_kind(entry),
+                EntryKind::Malformed,
+                "{entry} would be logged as «Malformed entry detected in exceptions list»"
+            );
+        }
+    }
+
+    #[test]
+    fn the_expansion_costs_the_core_lines_on_disk_and_no_keys_in_memory() {
+        // The size question, answered rather than assumed (the file roughly doubles: ~584 KB to
+        // ~1.1 MB on a real rule set). `update_exclusions` merges both forms onto ONE hash-map
+        // key with |= (domain_filter.cpp:101), so the core's table does not grow — and the EXACT
+        // bit survives the merge, which is what keeps `get_resolvable_exclusions` (:205-213) and
+        // the background IP-resolution backstop working for these names.
+        let state = state_with_category("t", vec![geo_domain(2, "example.com")]);
+        let resolved = resolve_geosite(&state, "t").unwrap();
+
+        assert_eq!(resolved.len(), 2, "two lines on disk");
+        let keys: std::collections::HashSet<&str> = resolved
+            .iter()
+            .map(|e| e.strip_prefix("*.").unwrap_or(e))
+            .collect();
+        assert_eq!(keys.len(), 1, "…one key in the core's domain table");
     }
 }

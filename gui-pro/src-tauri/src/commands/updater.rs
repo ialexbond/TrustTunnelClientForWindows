@@ -249,7 +249,9 @@ fn compare_semver(a: &str, b: &str) -> i32 {
 /// Select sidecar tarball asset from release JSON `assets[]` array.
 ///
 /// Pattern: `trusttunnel-v{TAG}-linux-{arch}.tar.gz`, EXCLUDES `-dbgsym.tar.gz`
-/// (10× size: 107 MB vs 10.7 MB на v1.0.33 per 18-RESEARCH.md §Finding 1).
+/// (10× size — measured on the v1.0.33 assets: 107 MB vs 10.7 MB, 18-RESEARCH.md §Finding 1.
+/// It is the RATIO this exclusion rests on, not those two numbers, so the measurement is left
+/// dated rather than restated for every later release).
 ///
 /// Returns `(download_url, size_bytes)` или `None` если asset не найден
 /// (например unsupported arch).
@@ -351,7 +353,11 @@ pub async fn check_sidecar_version(
     let current_version = parse_version_from_output(&ver_out);
 
     // 2. GitHub API — latest release (TrustTunnel/TrustTunnel repo, verified §Finding 1)
-    let client = reqwest::Client::new();
+    // NOT `reqwest::Client::new()` (30.1 item 10). This probe shipped untimed: the same
+    // unbounded wait phase 30 removed from `check_app_update_info`, left standing in the
+    // two siblings beside it. It is one small JSON document from api.github.com, so there
+    // is no slow-but-progressing case to protect and the check-budgets fit it exactly.
+    let client = build_update_check_client(UPDATE_CHECK_CONNECT_TIMEOUT, UPDATE_CHECK_TIMEOUT)?;
     let res = client
         .get("https://api.github.com/repos/TrustTunnel/TrustTunnel/releases/latest")
         .header("User-Agent", "TrustTunnel-UpdateChecker")
@@ -564,7 +570,11 @@ fn classify_reqwest_failure(e: reqwest::Error) -> String {
 /// that connects and then stalls is the server's. reqwest reports a connect-PHASE
 /// timeout as both `is_connect()` and `is_timeout()`, which `classify_update_failure`
 /// already accounts for.
-const UPDATE_CHECK_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// `pub(crate)` since 30.1: `ssh/server/server_version.rs` is the third member of this
+/// class and takes the SAME two budgets through the SAME builder. Two constants that mean
+/// «how long a GitHub version probe may wait» would drift the moment one of them is tuned.
+pub(crate) const UPDATE_CHECK_CONNECT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10);
 
 /// The total budget for one update-check request, connect included.
 ///
@@ -584,7 +594,7 @@ const UPDATE_CHECK_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::f
 /// legitimate slow-but-progressing case to protect. `self_update`'s DOWNLOAD client
 /// is deliberately NOT given this budget — a multi-megabyte installer on a slow link
 /// would be aborted mid-transfer, which is a regression, not a hardening.
-const UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The HTTP client the app-update check and its digest fetch share.
 ///
@@ -596,7 +606,11 @@ const UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// Returns the reason code rather than the builder error: `ClientBuilder::build`
 /// fails on TLS-backend initialisation, which the user can do nothing about and
 /// which must not put a rendered error on the wire (D-29).
-fn build_update_check_client(
+///
+/// `pub(crate)` since 30.1 so the server-version probe in `ssh/server/server_version.rs`
+/// can reach it. Exporting the builder rather than copying four lines into that file is
+/// what makes «every version probe carries a budget» a property one guard can check.
+pub(crate) fn build_update_check_client(
     connect_timeout: std::time::Duration,
     total_timeout: std::time::Duration,
 ) -> Result<reqwest::Client, String> {
@@ -1102,7 +1116,10 @@ pub async fn list_sidecar_versions(
     // result still has a chance to reach `cap` after filtering.
     let per_page = cap + 5;
 
-    let client = reqwest::Client::new();
+    // NOT `reqwest::Client::new()` (30.1 item 10) — the second member of the same class
+    // as the probe in `check_sidecar_version`. One releases page on a user-initiated
+    // request; the check budgets are the right size and they live in exactly one place.
+    let client = build_update_check_client(UPDATE_CHECK_CONNECT_TIMEOUT, UPDATE_CHECK_TIMEOUT)?;
     let res = client
         .get(format!(
             "https://api.github.com/repos/TrustTunnel/TrustTunnel/releases?per_page={per_page}"
@@ -1189,6 +1206,21 @@ pub async fn self_update(
 
     // Download setup.exe with progress
     emit("download", 5, "update.connecting");
+    // DELIBERATELY UNTIMED, AND IT MUST STAY THAT WAY (30.1 item 10, the other half).
+    //
+    // Its two siblings above were just moved onto `build_update_check_client`, and the
+    // obvious next step — «sweep the third one too» — would be a regression dressed as a
+    // hardening. Those are small JSON documents; this is a multi-megabyte installer, and
+    // `UPDATE_CHECK_TIMEOUT` would abort a transfer that is slow but PROGRESSING, on
+    // exactly the connections that most need the update to arrive. See the rationale on
+    // `UPDATE_CHECK_TIMEOUT` itself.
+    //
+    // The failure this leaves open — a transfer that connects and then goes silent — is
+    // real, and it is caught where the evidence actually is: the front end sees the
+    // `update-progress` events this loop emits stop arriving, and `UpdateCard.tsx` flips
+    // the card to a closeable failure after the shared watchdog gap. A GAP between events,
+    // not a deadline for the whole download. `no_version_probe_builds_its_own_untimed_client`
+    // therefore does NOT list `self_update` as a subject.
     let client = reqwest::Client::new();
     let resp = client
         .get(&download_url)
@@ -1800,30 +1832,143 @@ mod update_check_timeout_tests {
         assert!(UPDATE_CHECK_TIMEOUT <= Duration::from_secs(60));
     }
 
+    /// Every whole-line `//` comment blanked, so a rule cannot be tripped by the
+    /// prose that DOCUMENTS it.
+    ///
+    /// This is not tidiness. Each of the four functions below now carries a comment
+    /// naming `reqwest::Client::new()` as the thing that must not come back — and an
+    /// unfiltered `contains` would read that comment as the violation, fail on the
+    /// commit that added the explanation, and teach the next reader that the guard
+    /// cries wolf. Only a line whose FIRST non-space characters are `//` is dropped:
+    /// truncating from a mid-line `//` would also swallow anything after a `"https://…"`,
+    /// and a filter must never be able to HIDE code from the rules that follow it.
+    /// (Same shape, and the same reason, as `about-hygiene.sh`'s `strip_comments`.)
+    fn strip_line_comments(body: &str) -> String {
+        body.lines()
+            .map(|l| if l.trim_start().starts_with("//") { "" } else { l })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The source span of one top-level `pub async fn`, or an explanation of why it
+    /// could not be found.
+    ///
+    /// THE NEEDLE IS BUILT AT RUNTIME AND ANCHORED AT BOTH ENDS. All three of those
+    /// are load-bearing, and the third was found by mutation rather than by reasoning.
+    ///
+    /// * Built with `format!` — the guard this replaced spelled its subject as the
+    ///   literal `"pub async fn check_app_update_info"`, which `include_str!` then
+    ///   embedded in the very source it was searching. Rename the function and the
+    ///   first hit becomes the test's own string, `body` comes back non-empty, and the
+    ///   guard passes forever over a subject that no longer exists.
+    /// * Anchored to `\n` — column zero, so an indented mention inside another test
+    ///   cannot be mistaken for a definition.
+    /// * Anchored to the opening `(` — WITHOUT IT THE RENAME ARM IS A LIE. Renaming
+    ///   `server_get_available_versions` to `server_get_available_versions_renamed`
+    ///   leaves the shorter name present as a PREFIX of the longer one, so a substring
+    ///   count still returns exactly 1, the body of the renamed function is scanned,
+    ///   and the guard reports PASS on a subject it did not find. Measured: it did
+    ///   exactly that. A locate-or-fail arm that can be satisfied by a prefix is the
+    ///   same vacuous pass it exists to prevent, one level down.
+    ///
+    /// Exactly one hit is required — zero means renamed or removed, two means
+    /// duplicated, and neither is something this guard may measure through. A future
+    /// generic signature (`pub async fn foo<T>(`) would also land on zero, which is
+    /// the right outcome: it fails loudly and asks to be looked at.
+    fn function_body(source: &str, func: &str) -> Result<String, String> {
+        let needle = format!("\npub async fn {func}(");
+        let hits = source.matches(needle.as_str()).count();
+        if hits != 1 {
+            return Err(format!(
+                "cannot measure `{func}`: {hits} top-level definitions found, expected exactly 1 — \
+                 the function was renamed, removed or duplicated and this guard has lost its \
+                 subject. This is a FAILURE, not a pass."
+            ));
+        }
+        let after = source.split(needle.as_str()).nth(1).unwrap_or("");
+        // The body ends at the next item that starts at column zero.
+        let end = ["\npub async fn ", "\npub fn ", "\nfn ", "\n#[cfg(test)]"]
+            .iter()
+            .filter_map(|t| after.find(t))
+            .min()
+            .unwrap_or(after.len());
+        Ok(strip_line_comments(&after[..end]))
+    }
+
     #[test]
-    fn the_update_check_does_not_build_an_untimed_client() {
-        // Belt to the socket test's braces, and the arm that survives a refactor:
-        // the socket test proves the BUILDER works, this proves the COMMAND uses
-        // it. Someone reintroducing `reqwest::Client::new()` inside
-        // `check_app_update_info` would leave both socket tests green.
-        let source = include_str!("./updater.rs");
-        let body = source
-            .split("pub async fn check_app_update_info")
-            .nth(1)
-            .and_then(|s| s.split("\n// ─── Phase 19").next())
-            .unwrap_or("");
+    fn no_version_probe_builds_its_own_untimed_client() {
+        // THE CLASS, NOT THE INSTANCE (30.1 item 10, CONTEXT standing rule 3).
+        //
+        // Phase 30 removed the untimed client from `check_app_update_info` and guarded
+        // that ONE function. Its three siblings kept theirs: two in this file, and a
+        // third in `server_version.rs` that the review never named and that only a
+        // sweep of the class would ever have found. A guard scoped to one member of a
+        // class is how the other members stay broken while the gate reads green.
+        //
+        // Belt to the socket test's braces: the socket test proves the BUILDER honours
+        // a budget, this proves every probe COMMAND goes through it. Neither alone is
+        // the property — a command that builds its own client leaves the socket tests
+        // perfectly green.
+        //
+        // `self_update`'s DOWNLOAD is deliberately NOT a subject here. It is untimed on
+        // purpose (see `UPDATE_CHECK_TIMEOUT`'s doc): a total budget would abort a slow
+        // but progressing multi-megabyte transfer. Its stall is caught by the front-end
+        // watchdog in `UpdateCard.tsx`, not by a deadline. Adding it to this list would
+        // read as rigour and would in fact be a regression.
+        let updater = include_str!("./updater.rs");
+        let server_version = include_str!("../ssh/server/server_version.rs");
+
+        let subjects: [(&str, &str, &str); 4] = [
+            ("commands/updater.rs", updater, "check_app_update_info"),
+            ("commands/updater.rs", updater, "check_sidecar_version"),
+            ("commands/updater.rs", updater, "list_sidecar_versions"),
+            (
+                "ssh/server/server_version.rs",
+                server_version,
+                "server_get_available_versions",
+            ),
+        ];
+
+        let mut violations: Vec<String> = Vec::new();
+        for (file, source, func) in subjects {
+            let body = match function_body(source, func) {
+                Ok(b) => b,
+                Err(why) => {
+                    violations.push(format!("{file}: {why}"));
+                    continue;
+                }
+            };
+            // Both constructors, not just the bare one. `Client::builder()` without a
+            // `.timeout(...)` is the same defect wearing a longer spelling — it is what
+            // `server_get_available_versions` actually shipped, setting only a user
+            // agent — so the rule is «no probe constructs its own client», which needs
+            // no per-site reasoning about which builder calls were remembered.
+            if body.contains("reqwest::Client::new()") {
+                violations.push(format!(
+                    "{file}::{func} constructs `reqwest::Client::new()` — no timeout of any kind, \
+                     so a server that accepts and then goes silent hangs the call for the rest of \
+                     the session"
+                ));
+            }
+            if body.contains("reqwest::Client::builder()") {
+                violations.push(format!(
+                    "{file}::{func} constructs its own `reqwest::Client::builder()` — a builder \
+                     that forgets `.timeout(..)` is the same unbounded wait; the budgets live in \
+                     ONE place and this function must take them from there"
+                ));
+            }
+            if !body.contains("build_update_check_client(") {
+                violations.push(format!(
+                    "{file}::{func} must obtain its client from `build_update_check_client(\
+                     UPDATE_CHECK_CONNECT_TIMEOUT, UPDATE_CHECK_TIMEOUT)`"
+                ));
+            }
+        }
+
         assert!(
-            !body.is_empty(),
-            "check_app_update_info not found — this guard has lost its subject"
-        );
-        assert!(
-            !body.contains("reqwest::Client::new()"),
-            "check_app_update_info must build its client through build_update_check_client — \
-             `Client::new()` configures no timeout and reopens the stuck-card defect"
-        );
-        assert!(
-            body.contains("build_update_check_client("),
-            "check_app_update_info must obtain its client from build_update_check_client"
+            violations.is_empty(),
+            "the untimed version-probe class has reopened:\n  {}",
+            violations.join("\n  ")
         );
     }
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import "../../test/tauri-mock";
 import { invoke } from "@tauri-apps/api/core";
+import { captureListeners } from "../../test/fixtures/events";
 import {
   useAppSettings,
   APP_SETTINGS_DEFAULTS,
@@ -337,5 +338,110 @@ describe("useAppSettings", () => {
     });
 
     expect(b.result.current.settings.failoverExcludedIds).toEqual(["srv-1"]);
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Item 11 (30.1 milestone review) — a failover exclusion must not outlive the
+// config it names.
+//
+// The exclusion set is a browser-side OPINION about config ids; the manifest is the
+// authority on which ids exist. Nothing in the front end ever removed an id from
+// this set — there was no `removeItem` for the key anywhere in `gui-pro/src` — so a
+// config the user opted out of and then deleted left its id behind forever. Rust
+// prunes the dead id on its side; the browser then re-supplied it on the very next
+// write. Config ids derived during migration are path-derived and CAN recur, so
+// re-importing the same file brought the server back already excluded, with no
+// switch on screen explaining why failover keeps skipping it.
+// ─────────────────────────────────────────────────────────────────────────
+describe("useAppSettings — item 11 (30.1): the exclusion set follows the manifest", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    mockInvoke.mockClear();
+    mockInvoke.mockResolvedValue(null as never);
+  });
+
+  /** Let the reconcile's list_configs round-trip and its state write settle. */
+  const settle = async () => {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  it("drops an exclusion whose config no longer exists, and does not bring it back on re-import", async () => {
+    // The user opted server B out of the queue, and all three servers still exist.
+    localStorage.setItem(
+      APP_SETTINGS_KEYS.failoverExcludedIds,
+      JSON.stringify(["cfg-b"]),
+    );
+    let live: Array<{ id: string }> = [{ id: "cfg-a" }, { id: "cfg-b" }, { id: "cfg-c" }];
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return live as never;
+      return null as never;
+    });
+
+    const events = captureListeners();
+    const { result } = renderHook(() => useAppSettings());
+    await settle();
+
+    // Nothing is pruned: B is a real server the user really did opt out of.
+    expect(result.current.settings.failoverExcludedIds).toEqual(["cfg-b"]);
+
+    // B is deleted outside the card. The manifest stops holding its id and the fs-watcher says so.
+    live = [{ id: "cfg-a" }, { id: "cfg-c" }];
+    await act(async () => {
+      events.emitEvent("configs-changed");
+    });
+    await settle();
+
+    // The browser copy follows the manifest instead of outliving it…
+    expect(result.current.settings.failoverExcludedIds).toEqual([]);
+    expect(localStorage.getItem(APP_SETTINGS_KEYS.failoverExcludedIds)).toBe("[]");
+    // …and the PRUNED set is what is mirrored back, so Rust is never re-supplied the id it removed.
+    expect(mockInvoke).toHaveBeenCalledWith("set_failover_settings", {
+      enabled: false,
+      excludedIds: [],
+    });
+
+    // The same file is re-imported and — ids being path-derived — reclaims the id `cfg-b`.
+    live = [{ id: "cfg-a" }, { id: "cfg-b" }, { id: "cfg-c" }];
+    await act(async () => {
+      events.emitEvent("configs-changed");
+    });
+    await settle();
+
+    // It participates in failover again, which is what «a newly added server participates by
+    // default» has promised since 27 D-08.
+    expect(result.current.settings.failoverExcludedIds).toEqual([]);
+  });
+
+  it("leaves the set completely alone when the manifest cannot be read", async () => {
+    // A transient read failure must NOT be mistaken for «none of these configs exist» — that
+    // would destroy the user's whole opt-out set on a hiccup, which is a worse bug than the one
+    // this reconcile fixes.
+    localStorage.setItem(
+      APP_SETTINGS_KEYS.failoverExcludedIds,
+      JSON.stringify(["cfg-b"]),
+    );
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") throw new Error("manifest unreadable");
+      return null as never;
+    });
+
+    const events = captureListeners();
+    const { result } = renderHook(() => useAppSettings());
+    await settle();
+    await act(async () => {
+      events.emitEvent("configs-changed");
+    });
+    await settle();
+
+    expect(result.current.settings.failoverExcludedIds).toEqual(["cfg-b"]);
+    expect(localStorage.getItem(APP_SETTINGS_KEYS.failoverExcludedIds)).toBe(
+      JSON.stringify(["cfg-b"]),
+    );
   });
 });

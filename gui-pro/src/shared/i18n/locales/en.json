@@ -116,12 +116,6 @@
     "network": {
       "title": "Network"
     },
-    "experimental": {
-      "title": "Experimental Features",
-      "description": "Features under development. May be unstable.",
-      "block_routing": "Site Blocking",
-      "block_routing_desc": "Show blocking section in routing."
-    },
     "app": {
       "general_title": "General",
       "general_description": "Application startup behavior",
@@ -207,6 +201,8 @@
     "no_internet": "No internet connection. Check your network.",
     "sidecar_exit": "The VPN core exited unexpectedly. Try connecting again.",
     "disconnect_failed": "Could not stop the VPN core — it may still be blocking traffic. Try disconnecting again or restart the application.",
+    "routing_rules_unreadable": "The routing rules file could not be read, so the connection was cancelled. Open the Routing tab to restore your rules.",
+    "config_outside_data_dir": "This server's configuration file is outside the application folder, so the connection was cancelled — the server was never contacted. Add the server again so the app keeps the config in its own folder.",
     "connection_failed": "Failed to connect to the server.",
     "config_parse_error": "Configuration parse error. Check your config file.",
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
@@ -311,7 +307,8 @@
       "anti_dpi_desc": "Disguises traffic to bypass deep packet inspection (DPI) systems.",
       "post_quantum_desc": "Extra encryption resistant to quantum-computer attacks.",
       "ipv6_desc": "IPv6 address support inside the tunnel.",
-      "load_error": "Could not read the config. The file is corrupt — close and import the config again."
+      "load_error": "Could not read the config. The file is corrupt — close and import the config again.",
+      "file_missing": "The configuration file has been deleted from disk, so there is nowhere left to save your changes. The configuration is already gone from the list on the «Connection» tab — close this window."
     },
     "rename": {
       "aria": "Rename config",
@@ -334,7 +331,8 @@
       "config_renamed": "Config renamed",
       "config_duplicated": "Config copy created",
       "config_deleted": "Config deleted",
-      "link_copied": "Link copied to clipboard"
+      "link_copied": "Link copied to clipboard",
+      "config_already_gone": "This configuration is already gone — its file has been deleted from disk"
     },
     "qr": {
       "title": "Configuration QR code",
@@ -343,7 +341,9 @@
       "qr_aria": "QR code — click to copy the link",
       "link_aria": "Configuration link",
       "copy_link": "Copy link",
-      "retry": "Retry"
+      "retry": "Retry",
+      "file_missing": "The configuration file has been deleted from disk — this configuration is no longer in the application. The link below still works: you can still hand it to another device.",
+      "file_missing_no_link": "The configuration file has been deleted from disk, so there is nothing left to build a link or a QR code from. The configuration is gone from the list on the «Connection» tab."
     }
   },
   "wizard": {
@@ -514,6 +514,16 @@
     "ru_domains_marker": "@@RU-domains",
     "ru_domains": "RU Domains",
     "no_config_selected": "No configuration selected",
+    "unreadable": {
+      "title": "Routing rules cannot be read",
+      "body": "The routing rules file is damaged, so the application does not know which traffic you asked it to send through the tunnel. Until the file is repaired, connecting is cancelled.",
+      "reset": "Reset rules",
+      "confirm_cta": "Yes, reset",
+      "confirm_title": "Reset the routing rules?",
+      "confirm_body": "All of your rules — Direct and Through VPN — and the program list will be deleted permanently. This action cannot be undone.",
+      "reset_done": "Routing rules have been reset",
+      "reset_failed": "Could not reset the routing rules"
+    },
     "configure_in_settings": "Configure connection in Settings tab",
     "saved_domains_found": "Found {{count}} saved domains",
     "domains_will_auto_load": "They will be automatically loaded into config after setting up a connection.",
@@ -536,14 +546,12 @@
     "mode_selective_description": "Mode: Direct. Domains below will go through VPN, all other traffic — direct.",
     "mode_general_description": "Mode: Everything via VPN. Domains below will go direct, all other traffic — through VPN.",
     "directTitle": "Direct",
-    "directDescription": "Traffic to these addresses will bypass the VPN tunnel.",
+    "directDescription": "Traffic to these addresses will bypass the VPN tunnel. A domain means the site itself and all of its subdomains.",
     "proxyTitle": "Via VPN",
-    "proxyDescription": "Traffic to these addresses will be routed through the VPN tunnel.",
-    "blockTitle": "Block",
-    "blockDescription": "Traffic to these addresses will be blocked.",
+    "proxyDescription": "Traffic to these addresses will be routed through the VPN tunnel. A domain means the site itself and all of its subdomains.",
     "redundantHint": "This is already the default behavior in the current mode. Entries are saved and will apply when the mode is switched.",
     "noEntries": "No entries",
-    "addRulePlaceholder": "domain.com, IP, geoip:RU, geosite:category, iplist_group:...",
+    "addRulePlaceholder": "domain.com (and subdomains), *.domain.com, IP, geoip:RU, geosite:, iplist_group:",
     "addRule": "Add rule",
     "duplicateEntry": "This entry already exists",
     "movedFromBlock": "Moved from “{{block}}”",
@@ -552,16 +560,15 @@
       "needsDot": "Enter a full domain (e.g. example.com)",
       "invalidCyrillic": "Cyrillic domain must include a dot (e.g. сайт.рф)",
       "invalidDomain": "Invalid domain",
-      "invalidFormat": "Allowed: domain, IP, CIDR, geoip:, geosite:",
+      "invalidFormat": "Allowed: domain (the site and all subdomains), *.domain (subdomains only), IP, CIDR, geoip:, geosite:",
       "invalidGroup": "Pick a group from the list"
     },
     "moveTo_direct": "Move to Direct",
     "moveTo_proxy": "Move to VPN",
-    "moveTo_block": "Move to Block",
     "presets": {
       "title": "Quick presets",
       "hint": "One click adds a ready-made group",
-      "note": "A preset sets an explicit route for its category and works independently of the VPN mode.",
+      "note": "A preset sets an explicit route for its whole category — domains together with their subdomains — and works independently of the VPN mode.",
       "tile_ru": "Russia",
       "tile_youtube": "YouTube",
       "tile_discord": "Discord",
@@ -570,8 +577,6 @@
       "tile_streaming": "Streaming",
       "tile_messengers": "Messengers",
       "tile_ruBlocked": "Blocked in RF",
-      "tile_ads": "Ads & trackers",
-      "tile_winSpy": "Windows telemetry",
       "geodataDisabledHint": "Download geodata",
       "ariaAdd": "Add preset “{{name}}” — {{target}}",
       "ariaAdded": "Preset “{{name}}” already added — {{target}}",
@@ -661,18 +666,15 @@
     "update_failed_integrity": "The integrity of the downloaded file could not be confirmed. The update was cancelled.",
     "last_check": "Last successful check: {{when}}",
     "when_just_now": "just now",
-    "when_minutes": "{{count}} minutes ago",
     "when_minutes_one": "{{count}} minute ago",
     "when_minutes_few": "{{count}} minutes ago",
     "when_minutes_many": "{{count}} minutes ago",
     "when_minutes_other": "{{count}} minutes ago",
-    "when_hours": "{{count}} hours ago",
     "when_hours_one": "{{count}} hour ago",
     "when_hours_few": "{{count}} hours ago",
     "when_hours_many": "{{count}} hours ago",
     "when_hours_other": "{{count}} hours ago",
     "when_yesterday": "yesterday",
-    "when_days": "{{count}} days ago",
     "when_days_one": "{{count}} day ago",
     "when_days_few": "{{count}} days ago",
     "when_days_many": "{{count}} days ago",
@@ -880,7 +882,10 @@
       "modal": {
         "title": "Server Logs",
         "search_placeholder": "Search logs… (e.g. 'error', 'connection')",
-        "match_count": "Found: {{count}} lines",
+        "match_count_one": "Found: {{count}} line",
+        "match_count_few": "Found: {{count}} lines",
+        "match_count_many": "Found: {{count}} lines",
+        "match_count_other": "Found: {{count}} lines",
         "no_matches": "No results for search query",
         "no_data": "Logs not loaded",
         "hint_filter": "Auto-highlighting: red = error, yellow = warn",
@@ -1243,8 +1248,9 @@
         "cert_subtitle_expires": "until {{date}}",
         "cert_address": "Server address: {{domain}}",
         "firewall_subtitle_active_rules_one": "{{count}} rule",
-        "firewall_subtitle_active_rules_other": "{{count}} rules",
-        "firewall_subtitle_active_rules": "{{count}} rules"
+        "firewall_subtitle_active_rules_few": "{{count}} rules",
+        "firewall_subtitle_active_rules_many": "{{count}} rules",
+        "firewall_subtitle_active_rules_other": "{{count}} rules"
       },
       "snack": {
         "fail2ban_installed": "Fail2ban installed and active",
@@ -1597,6 +1603,8 @@
     "only_routing_json": "Only a .json routing file is accepted here",
     "configs_added_n": "Added {{count}}",
     "configs_added_one": "Added {{count}} config",
+    "configs_added_few": "Added {{count}} configs",
+    "configs_added_many": "Added {{count}} configs",
     "configs_added_other": "Added {{count}} configs"
   },
   "hostKey": {

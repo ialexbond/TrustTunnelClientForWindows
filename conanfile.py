@@ -1,9 +1,10 @@
 from conan import ConanFile
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
-from conan.tools.files import patch, copy
+from conan.tools.files import patch, copy, update_conandata
 from conan.tools.apple import is_apple_os
+from conan.tools.scm import Git
 from os.path import join
-import re
+import re, os, shutil
 
 
 class VpnLibsConan(ConanFile):
@@ -17,10 +18,12 @@ class VpnLibsConan(ConanFile):
     options = {
         "with_ghc": [True, False],
         "sanitize": [None, "ANY"],
+        "capi_linux_exports": [True, False],
     }
     default_options = {
         "with_ghc": False,
         "sanitize": None,  # None means none
+        "capi_linux_exports": False,
     }
     # A list of paths to patches. The paths must be relative to the conanfile directory.
     # They are applied in case of the version equals 777 and mostly intended to be used
@@ -29,15 +32,15 @@ class VpnLibsConan(ConanFile):
     exports_sources = patch_files
 
     def requirements(self):
-        # 2026-05-24: bumped from 2.8.42 / 8.0.27 — both upstream tags were
-        # removed from AdguardTeam/{DnsLibs,NativeLibsCommon}, so the
-        # `bootstrap_conan_deps.py` git-checkout step started failing in CI
-        # ("pathspec 'v2.8.42' did not match any file(s) known to git"). The
-        # closest still-available tags are v2.8.44 / v8.1.27 — patch / minor
-        # bump respectively. Adjust further if Conan resolution surfaces an
-        # incompatibility with the rest of the recipe.
-        self.requires("dns-libs/2.8.44@adguard/oss", transitive_headers=True)
-        self.requires("native_libs_common/8.1.27@adguard/oss", transitive_headers=True)
+        # Pins come from upstream v1.1.5. Our 2026-05-24 local bump
+        # (dns-libs 2.8.44 / native_libs_common 8.1.27) is gone: it was a workaround for
+        # tags AdGuard had deleted, and it never built — 2.8.44 itself requires
+        # native_libs_common/8.0.27, so Conan refused the graph as a version conflict.
+        # v1.1.5's pair is coherent and its rewritten scripts/bootstrap_conan_deps.py
+        # checks out the pinned revision before running that revision's exporter, so it
+        # no longer breaks when upstream churns the script.
+        self.requires("dns-libs/2.10.1-1-g7748c6a7@adguard/oss", transitive_headers=True)
+        self.requires("native_libs_common/8.1.49@adguard/oss", transitive_headers=True)
 
         self.requires("brotli/1.1.0", transitive_headers=True)
         self.requires("cxxopts/3.1.1", transitive_headers=True)
@@ -52,7 +55,6 @@ class VpnLibsConan(ConanFile):
         self.requires("zlib/1.3.1", transitive_headers=True)
 
         if "mips" not in str(self.settings.arch):
-            self.requires("quiche/0.17.1@adguard/oss", transitive_headers=True)
             self.requires("openssl/boring-2024-09-13@adguard/oss", transitive_headers=True, force=True)
         else:
             self.requires("openssl/3.1.5-quic1@adguard/oss", transitive_headers=True, force=True)
@@ -67,20 +69,70 @@ class VpnLibsConan(ConanFile):
         self.options["pcre2"].build_pcre2grep = False
         self.options["dns-libs"].tcpip = False
 
+    def export(self):
+        # The exported sources carry no .git, so the build's git describe would
+        # fall back to 0.0.0-git for "local" exports. Capture the describe version
+        # now (the recipe folder still has .git) into conandata.yml for generate()
+        # to feed back into cmake/version.cmake via -DTT_CLIENT_VERSION.
+        if self.version == "local":
+            described = self._git_described_version(Git(self))
+            if described:
+                update_conandata(self, {"local_version": described})
+
+    def export_sources(self):
+        if self.version == "local":
+            git = Git(self)
+            included = git.included_files()
+            for i in included:
+                dst = os.path.join(self.export_sources_folder, i)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(i, dst)
+
+    @staticmethod
+    def _git_described_version(git):
+        # Quote the glob: Git.run executes through a shell, so an unquoted "v*"
+        # would expand against files in the recipe dir and match no tags.
+        try:
+            described = git.run('describe --tags --match "v*"').strip()
+        except Exception:
+            return ""
+        return described[1:] if described.startswith("v") else described
+
     def source(self):
-        self.run(f"git init . && git remote add origin {self.vcs_url} && git fetch")
-        if re.match(r'\d+\.\d+\.\d+', self.version) is not None:
-            version_hash = self.conan_data["commit_hash"][self.version]["hash"]
-            self.run("git checkout -f %s" % version_hash)
-        else:
-            self.run("git checkout -f %s" % self.version)
-            for p in self.patch_files:
-                patch(self, patch_file=p)
+        # Local export: the working tree was already staged by export_sources().
+        if os.listdir(self.source_folder):
+            return
+
+        version = str(self.version)
+        # A "git describe" version looks like "<tag>-<n>-g<rev>"; check out the
+        # commit after "-g". Any other version is a release tag "v<version>".
+        described = re.search(r"-g([0-9a-f]+)$", version)
+        ref = described.group(1) if described else "v%s" % version
+        git = Git(self)
+        git.clone(url=self.vcs_url, target=".")
+        git.checkout(ref)
 
     def generate(self):
         deps = CMakeDeps(self)
         deps.generate()
         tc = CMakeToolchain(self)
+        # Don't write CMakeUserPresets.json into the source folder: builds are
+        # driven by the presets in CMakePresets.json, and Conan would add one
+        # include per build directory, so two build directories sharing a build
+        # type yield duplicate `conan-<build type>` presets that make CMake
+        # refuse to read the file.
+        tc.user_presets_path = None
+        # Drive cmake/version.cmake from the package version so the conan source
+        # (no .git for git describe) bakes the right version into the build. For
+        # "local" exports the describe version was stapled into conandata.yml at
+        # export time; a release version is the package version itself.
+        version = str(self.version)
+        if version == "local":
+            version = (self.conan_data or {}).get("local_version") or version
+        if version and version != "local":
+            tc.cache_variables["TT_CLIENT_VERSION"] = version
+        if self.settings.os == "Linux" and self.options.capi_linux_exports:
+            tc.cache_variables["VPNLIBS_CAPI_LINUX_EXPORTS"] = True
         if self.options.sanitize:
             tc.cache_variables["CMAKE_C_FLAGS"] += f" -fno-omit-frame-pointer -fsanitize={self.options.sanitize}"
             tc.cache_variables["CMAKE_CXX_FLAGS"] += f" -fno-omit-frame-pointer -fsanitize={self.options.sanitize}"

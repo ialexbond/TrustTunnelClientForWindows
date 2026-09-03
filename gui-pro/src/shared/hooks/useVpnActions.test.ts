@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -999,5 +999,141 @@ describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→conn
     // No teardown ran → the seeded push (inside the teardown block) was skipped.
     expect(seeded).not.toHaveBeenCalled();
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_disconnect");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Item 7 (30.1 milestone review) — «Сохранить и переподключиться» must stop
+// burning the full 5 s safety window on every single use.
+//
+// Rust emits the terminal `disconnected` event from INSIDE the teardown, BEFORE
+// `vpn_disconnect`'s IPC promise resolves. handleReconnect armed its completion
+// latch (`reconnectResolve.current`) only AFTER awaiting that promise, so the real
+// event always arrived with the latch still null and the wait could only ever end
+// via the 5 s backstop — a five-second stall on the happy path, every time.
+//
+// The identical bug was fixed for `switchTo` as F-8 (the settled promise is built
+// and the ref armed BEFORE the invoke, awaited after) and never carried over here.
+//
+// Both cases below drive a FAKE clock, because "did this need the clock to move?"
+// is precisely the property under test. The second case exists so that deleting the
+// safety timer cannot pass as a fix for the first.
+// ─────────────────────────────────────────────────────────────────────────
+describe("useVpnActions.handleReconnect — item 7 (30.1): the completion latch is armed before the teardown", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupListenMock();
+    i18n.changeLanguage("ru");
+    vi.mocked(invoke).mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Let the awaited continuations inside handleReconnect run WITHOUT moving the clock. */
+  async function flushMicrotasks(times = 20) {
+    for (let i = 0; i < times; i += 1) await Promise.resolve();
+  }
+
+  it("completes on the REAL event: a Disconnected emitted before vpn_disconnect resolves reconnects with the clock untouched", async () => {
+    vi.useFakeTimers();
+    // The event ordering Rust actually produces — the terminal Disconnected is emitted from
+    // inside the teardown, before the disconnect's own promise settles.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_disconnect") emitEvent("vpn-status", { status: "disconnected" });
+      return null;
+    });
+
+    const { hook } = renderReconnectHarness("connected");
+
+    let reconnectPromise!: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await flushMicrotasks();
+    });
+
+    // The reconnect already reached vpn_connect and the clock has NOT advanced one millisecond.
+    // Before the fix this assertion failed: the latch was armed too late to catch the event, so
+    // nothing could release the wait until the 5000 ms backstop fired.
+    expect(vi.mocked(invoke).mock.calls.map((c) => c[0])).toContain("vpn_connect");
+
+    // Drain whatever is still pending so the test leaves no dangling promise behind.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+      await reconnectPromise;
+    });
+  });
+
+  it("keeps the 5 s backstop: with NO teardown event at all the safety timer still releases the wait", async () => {
+    // The timer is a BACKSTOP, not the normal path — removing it is not the fix for the case
+    // above, and this case is what says so. A teardown that never emits (a wedged sidecar) must
+    // still let the reconnect through rather than hanging the spinner forever.
+    vi.useFakeTimers();
+    vi.mocked(invoke).mockResolvedValue(null); // no vpn-status event is ever emitted
+
+    const { hook } = renderReconnectHarness("connected");
+
+    let reconnectPromise!: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await flushMicrotasks();
+    });
+
+    // Nothing has reconnected yet — the wait is genuinely parked on the backstop.
+    expect(vi.mocked(invoke).mock.calls.map((c) => c[0])).not.toContain("vpn_connect");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+      await reconnectPromise;
+    });
+
+    expect(vi.mocked(invoke).mock.calls.map((c) => c[0])).toContain("vpn_connect");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// The raw-path-comparison class (30.1 class sweep) — site 1 of 3.
+//
+// `markLastUsed` resolves a manifest id from a path so the connected server sorts
+// to the top and becomes the next boot's auto-connect target. It matched with a
+// byte `===`, so when the manifest spelled the file differently from the path the
+// connect flow carried — routine on Windows — no entry was found and the marker was
+// silently skipped. Best-effort by design, so nothing ever surfaced.
+// ─────────────────────────────────────────────────────────────────────────
+describe("useVpnActions.markLastUsed — the raw-path-comparison class (30.1, site 1 of 3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupListenMock();
+    i18n.changeLanguage("ru");
+    vi.mocked(invoke).mockResolvedValue(null);
+  });
+
+  it("resolves the manifest id when the two spellings of the path differ only cosmetically", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "id-a", path: "C:\\cfg\\a.toml" }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("connected");
+
+    await act(async () => {
+      await hook.result.current.actions.markLastUsed("C:/cfg/a.toml");
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_last_used", { id: "id-a" });
+  });
+
+  it("still marks nothing when the path names a config the manifest does not hold", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "id-a", path: "C:\\cfg\\a.toml" }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("connected");
+
+    await act(async () => {
+      await hook.result.current.actions.markLastUsed("C:/cfg/somewhere-else.toml");
+    });
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("set_last_used", expect.anything());
   });
 });

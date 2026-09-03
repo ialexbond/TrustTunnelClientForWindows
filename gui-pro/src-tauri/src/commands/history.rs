@@ -12,7 +12,7 @@ pub struct SessionRecord {
 }
 
 fn history_path() -> std::path::PathBuf {
-    ssh::portable_data_dir().join("connection_history.json")
+    ssh::user_data_dir().join("connection_history.json")
 }
 
 fn load_history() -> Vec<SessionRecord> {

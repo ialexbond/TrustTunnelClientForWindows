@@ -135,6 +135,8 @@ fn fill_tun_listener_table(table: &mut Table, settings: &Settings) {
     table["excluded_routes"] = value(Array::from_iter(settings.excluded_routes.iter()));
     table["mtu_size"] = value(settings.mtu_size as i64);
     table["change_system_dns"] = value(settings.change_system_dns);
+    table["device_name"] = value(&settings.device_name);
+    table["use_existing"] = value(settings.use_existing);
 }
 
 #[cfg(test)]
@@ -150,6 +152,10 @@ mod tests {
             killswitch_enabled: true,
             killswitch_allow_ports: vec![],
             post_quantum_group_enabled: true,
+            exclusions_tcp_early_ack_enabled: false,
+            exclusions_preresolve_enabled: true,
+            exclusions_preresolve_max_queries: 0,
+            exclusions_scannable_ports: Settings::default_exclusions_scannable_ports(),
             exclusions: vec![],
             endpoint: Endpoint {
                 hostname: "vpn.example.com".into(),
@@ -165,8 +171,12 @@ mod tests {
                 bound_if: "".into(),
                 included_routes: vec!["0.0.0.0/0".into()],
                 excluded_routes: vec![],
-                mtu_size: 1280,
+                mtu_size: 1350,
+                tcp_recv_buf_size: 0,
+                tcp_send_buf_size: 0,
                 change_system_dns: true,
+                device_name: "".into(),
+                use_existing: false,
             }),
         }
     }

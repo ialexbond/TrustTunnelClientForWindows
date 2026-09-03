@@ -67,7 +67,7 @@ describe("SettingsCard", () => {
 
   it("paints the warning chip from the warning tint/fg token pair", () => {
     const { container } = render(
-      <SettingsCard icon={<Settings className="h-4 w-4" />} title="Экспериментальные функции" variant="warning">
+      <SettingsCard icon={<Settings className="h-4 w-4" />} title="Раздел с предупреждающим тоном" variant="warning">
         <span>Тело</span>
       </SettingsCard>,
     );
@@ -80,7 +80,7 @@ describe("SettingsCard", () => {
 
   it("warning tints the header tile ONLY — nothing else in the card carries the warning family", () => {
     const { container } = render(
-      <SettingsCard icon={<Settings className="h-4 w-4" />} title="Экспериментальные функции" variant="warning">
+      <SettingsCard icon={<Settings className="h-4 w-4" />} title="Раздел с предупреждающим тоном" variant="warning">
         <span>Тело</span>
       </SettingsCard>,
     );

@@ -10,13 +10,9 @@ import { renderWithProviders as render } from "../test/test-utils";
 // generic `invoke` mock below covers it. The old module mock was the 28-06 harness trap —
 // `restoreMocks: true` stripped its resolved values before every test.
 
-// Mock useFeatureToggles
-vi.mock("../shared/hooks/useFeatureToggles", () => ({
-  useFeatureToggles: () => ({
-    toggles: { blockRouting: false, processFilter: false },
-    update: vi.fn(),
-  }),
-}));
+// Здесь стоял мок `useFeatureToggles`. Хранилище тумблеров удалено 2026-09-03 вместе с его
+// единственным жителем — «Блокировка сайтов»: блокировка по домену никогда не работала и не могла
+// без правки замороженного C++-ядра. Мокать больше нечего.
 
 describe("AppSettingsPanel", () => {
   // 12-07: AppSettingsPanel no longer takes `hasConfig` (that prop only fed the auto-connect toggle
@@ -50,9 +46,13 @@ describe("AppSettingsPanel", () => {
     expect(screen.getByText("Внешний вид")).toBeInTheDocument();
   });
 
-  it("renders ExperimentalSection", () => {
+  // Секция «Экспериментальные функции» удалена 2026-09-03. В ней была ровно одна строка —
+  // «Блокировка сайтов», — и вместе с функцией ушла вся карточка: пустая карточка предупреждающего
+  // тона хуже, чем её отсутствие.
+  it("does not render the «Экспериментальные функции» section — it is gone, not emptied", () => {
     render(<AppSettingsPanel {...defaultProps} />);
-    expect(screen.getByText("Экспериментальные функции")).toBeInTheDocument();
+    expect(screen.queryByText("Экспериментальные функции")).not.toBeInTheDocument();
+    expect(screen.queryByText("Блокировка сайтов")).not.toBeInTheDocument();
   });
 
   // 12-07: «Авто-режим» (AutoModeSettings) is now mounted in the Settings panel.
@@ -66,7 +66,6 @@ describe("AppSettingsPanel", () => {
     expect(screen.getByText("Основные")).toBeInTheDocument();
     expect(screen.getByText("Авто-режим")).toBeInTheDocument();
     expect(screen.getByText("Внешний вид")).toBeInTheDocument();
-    expect(screen.getByText("Экспериментальные функции")).toBeInTheDocument();
   });
 
   it("renders statusPanel when provided", () => {
@@ -108,26 +107,26 @@ describe("AppSettingsPanel", () => {
   const SAVED = "Настройки сохранены";
   const SAVE_FAILED = "Не удалось сохранить настройку. Попробуйте ещё раз.";
 
-  it("mounts the four sections in the fixed order", () => {
+  // Было «четыре секции в фиксированном порядке». Стало три: четвёртая, «Экспериментальные
+  // функции», удалена вместе с единственной своей строкой. Порядок остальных не тронут.
+  it("mounts the three sections in the fixed order", () => {
     render(<AppSettingsPanel {...defaultProps} />);
     expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
       "Основные",
       "Авто-режим",
       "Внешний вид",
-      "Экспериментальные функции",
     ]);
   });
 
-  // The warning tile is the tab's «this card is not like the others» signal, and it only says that
-  // while exactly one card wears it.
-  it("gives «Экспериментальные функции» the tab's ONLY warning-tinted header tile", () => {
+  // Предупреждающий тон был на вкладке В ЕДИНСТВЕННОМ экземпляре — он и означал «эта карточка не
+  // такая, как остальные». Карточка ушла, а значит на вкладке не должно остаться НИ ОДНОЙ
+  // предупреждающей плашки: одиночный сигнал, потерявший смысл, — это просто цветное пятно.
+  it("leaves no warning-tinted header tile on the tab at all", () => {
     const { container } = render(<AppSettingsPanel {...defaultProps} />);
     const warningTiles = Array.from(container.querySelectorAll<HTMLElement>("[style]")).filter(
       (element) => (element.getAttribute("style") ?? "").includes("warning"),
     );
-    expect(warningTiles).toHaveLength(1);
-    // …and it is the header tile of that card, not something inside its body.
-    expect(warningTiles[0].closest("div")?.textContent).toContain("Экспериментальные функции");
+    expect(warningTiles).toHaveLength(0);
   });
 
   // The two switches used below both write through `invoke`, so the harness controls which one

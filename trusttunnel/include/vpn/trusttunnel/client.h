@@ -114,7 +114,6 @@ private:
     std::optional<FileHandler> m_logfile_handler;
     std::optional<Logger::LogToFile> m_logtofile;
     VpnCallbacks m_callbacks;
-    DomainFilter m_blocked_filter;
     std::unordered_set<std::string> m_process_direct;
     std::unordered_set<std::string> m_process_proxy;
     std::unordered_set<std::string> m_process_block;

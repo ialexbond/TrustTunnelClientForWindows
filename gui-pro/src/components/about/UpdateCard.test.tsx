@@ -3,11 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // @types/node is not in this package's tsconfig, and `?raw` resolves the path at
 // transform time so the assertion below does not depend on the runner's cwd.
 import updateCardSource from "./UpdateCard.tsx?raw";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import i18n from "../../shared/i18n";
 import { UpdateCard, type UpdateCardState } from "./UpdateCard";
+// The gap the OTHER update track already uses. Imported rather than re-declared: the two
+// tracks are on one budget, and a literal here would let the test keep passing on the day
+// the shared constant is tuned and the card is not.
+import { WATCHDOG_MS } from "../update/useUpdateProgress";
 import type { UpdateInfo } from "../../shared/types";
 import { renderWithProviders as render } from "../../test/test-utils";
 
@@ -720,6 +724,156 @@ describe("UpdateCard", () => {
 
     expect(onScreen).not.toContain("api.github.com");
     expect(onScreen).not.toContain("SOME_FUTURE_BACKEND_TOKEN");
+  });
+
+  // ─── The wedged download (30.1 item 10, the half the review filed as a footnote) ───
+  //
+  // The Rust download client is untimed ON PURPOSE — a total budget would abort a slow but
+  // PROGRESSING multi-megabyte transfer, which is a regression, not a hardening. What was missing
+  // is the other shape of protection: nothing noticed when the transfer connected and then went
+  // silent. `self_update` never resolves and never rejects, so the catch arm above never runs, and
+  // the card sat on «Скачиваем…» with «Обновить», «Скачать» and the check button all held — for the
+  // rest of the session, with no way back short of restarting the app.
+  //
+  // A GAP, NOT A DEADLINE, and that distinction is the whole finding. These two tests are written
+  // as a pair on purpose: the first alone is satisfied by a plain total timeout, which would
+  // reintroduce exactly the defect the untimed client was avoiding. Only the second one can tell
+  // the two implementations apart.
+
+  /** Capture the `update-progress` handler the card registers, so a test can emit into it. */
+  function captureProgressListener() {
+    const handlers = new Map<string, (event: { payload: unknown }) => void>();
+    const unlisten = vi.fn();
+    vi.mocked(listen).mockImplementation(async (event, handler) => {
+      handlers.set(event as string, handler as (e: { payload: unknown }) => void);
+      return unlisten;
+    });
+    return { handlers, unlisten };
+  }
+
+  function emitProgress(
+    handlers: Map<string, (event: { payload: unknown }) => void>,
+    percent: number,
+  ) {
+    act(() => {
+      handlers.get("update-progress")?.({
+        payload: { stage: "download", percent, message: "update.downloading|1|2" },
+      });
+    });
+  }
+
+  /** Render the card and press «Обновить» against a `self_update` that never settles. */
+  async function startWedgedDownload() {
+    vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
+    const view = render(
+      <UpdateCard
+        updateInfo={makeUpdateInfo({
+          available: true,
+          latestVersion: "3.1.0",
+          downloadUrl: "https://example.com/setup.exe",
+        })}
+        onCheck={onCheck}
+        onOpenDownload={onOpenDownload}
+        onOpenChangelog={onOpenChangelog}
+      />,
+    );
+    // Flush the awaited `listen()` registration before anything is emitted into it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("buttons.update") }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    return view;
+  }
+
+  it("замерший загрузчик через сторожевой интервал снимает карточку с плитки «Скачиваем…»", async () => {
+    vi.useFakeTimers();
+    try {
+      captureProgressListener();
+      await startWedgedDownload();
+
+      // Not one event for the whole gap.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WATCHDOG_MS);
+      });
+
+      // The card is off the downloading plate and its actions are live again — the user can
+      // retry or fall back to the manual «Скачать» without restarting the app.
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: i18n.t("buttons.update") })).toBeEnabled();
+      expect(screen.getByRole("button", { name: i18n.t("buttons.download") })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("идущая загрузка сторожем НЕ прерывается: каждое событие прогресса взводит его заново", async () => {
+    // THE TEST THAT REFUSES A TOTAL TIMEOUT. Six minutes of wall-clock — three times the gap —
+    // with a heartbeat every 90s, which is comfortably inside it. A deadline implementation
+    // passes the test above and fails this one, and that is the only thing separating the fix
+    // this finding needs from the regression it explicitly warns against.
+    vi.useFakeTimers();
+    try {
+      const { handlers } = captureProgressListener();
+      await startWedgedDownload();
+
+      for (let i = 1; i <= 4; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(90_000);
+        });
+        emitProgress(handlers, 20 * i);
+      }
+
+      expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: i18n.t("buttons.update") })).toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("сторож не переживает карточку: после размонтирования он ничего не трогает", async () => {
+    vi.useFakeTimers();
+    try {
+      captureProgressListener();
+      const { unmount } = await startWedgedDownload();
+
+      unmount();
+      // A timer that outlived its component would fire here, into a card that is gone.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WATCHDOG_MS * 2);
+      });
+
+      expect(document.body.textContent ?? "").not.toContain(i18n.t("about.update_failed"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("сообщение о замершей загрузке называет причину, а не адрес и не код", async () => {
+    // The same D-29 / hygiene-rule-3 bar the catch arm already meets. The watchdog fires with the
+    // download URL, the stage and the last progress line all in scope; none of them may reach the
+    // screen. The card states a CAUSE CATEGORY, and this is the assertion that keeps the new
+    // failure route held to the standard the old one was fixed to.
+    vi.useFakeTimers();
+    try {
+      captureProgressListener();
+      await startWedgedDownload();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WATCHDOG_MS);
+      });
+
+      const onScreen = document.body.textContent ?? "";
+      expect(onScreen).toContain(i18n.t("about.update_failed"));
+      expect(onScreen).not.toContain("example.com");
+      expect(onScreen).not.toContain("http");
+      expect(onScreen).not.toContain("setup.exe");
+      expect(onScreen).not.toContain("download");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // ─── The reserved auto-update area (ABOUT-01 prohibition / T-30-12) ───

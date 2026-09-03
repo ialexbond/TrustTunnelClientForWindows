@@ -79,7 +79,16 @@ const INITIAL_STATE: UpdateProgressState = {
 // WR-02 (10.1 review): max gap between progress events before an active update is
 // treated as wedged and flipped to a closeable error. Generous (2 min) so a slow
 // but still-progressing update never false-times-out.
-const WATCHDOG_MS = 120_000;
+//
+// EXPORTED SINCE 30.1, AND THE TWO UPDATE TRACKS ARE NOW ON ONE BUDGET. The app's own
+// self-update in `about/UpdateCard.tsx` had no stall detection at all: a download that
+// connected and then went silent pinned the card on «Скачиваем…» for the rest of the
+// session, because the Rust download is deliberately untimed (a total budget would abort a
+// slow but progressing multi-megabyte transfer) and nothing else was watching. It now arms
+// the same watchdog on the same gap. Minting a second constant there would have been two
+// numbers meaning «how long may an update go quiet» — and two such numbers drift, so the
+// day someone tunes one, the tracks start disagreeing about what «wedged» means.
+export const WATCHDOG_MS = 120_000;
 
 export interface UseUpdateProgressResult {
   state: UpdateProgressState;

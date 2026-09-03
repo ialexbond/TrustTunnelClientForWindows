@@ -352,7 +352,7 @@ async fn refresh_group_caches() -> bool {
 /// group can be in use.
 ///
 /// 1. `active_groups.json`: the tiles the user switched on, plus the reserved RU whitelist.
-/// 2. `routing_rules.json`: every `iplist_group` entry across direct / proxy / block. A manually
+/// 2. `routing_rules.json`: every `iplist_group` entry across direct / proxy. A manually
 ///    typed `iplist_group:<id>` rule never touches the active-groups file, so this source is not
 ///    redundant — without it a hand-written rule would resolve against a cache that never updates.
 ///
@@ -381,12 +381,8 @@ pub fn groups_to_refresh(active: &ActiveGroups, rules: &RoutingRules) -> Vec<Str
         push(id);
     }
 
-    for entry in rules
-        .direct
-        .iter()
-        .chain(rules.proxy.iter())
-        .chain(rules.block.iter())
-    {
+    // Two lists, not three: the `block` list was removed with site blocking on 2026-09-03.
+    for entry in rules.direct.iter().chain(rules.proxy.iter()) {
         if entry.entry_type != "iplist_group" {
             continue;
         }
@@ -486,7 +482,18 @@ async fn apply_if_safe(
     // CR-01, and a `tokio::sync::MutexGuard` is `Send`, so holding it is legal and correct here.
     let geo = Arc::clone(geo_state);
     let resolved = tokio::task::spawn_blocking(move || {
-        let rules = routing_rules::load_routing_rules().unwrap_or_default();
+        // D-02 (30.1 blocker 2) — THE CLASS, NOT THE INSTANCE, and here it is not merely a lie but
+        // DATA LOSS. This used to default an unreadable `routing_rules.json` into an empty rule
+        // set and hand that to the resolve, which writes `exclusions.txt`, `blocked.txt` and the
+        // three process files from what it is given. On a background timer the user's WORKING
+        // resolved files would have been overwritten with nothing — because a file this path did
+        // not need to read would not parse.
+        //
+        // Unlike the three connect doors there is no connect to refuse and no status to move: the
+        // honest answer is to leave every file exactly as it is and skip this cycle. Nothing is
+        // lost by skipping — the next connect re-resolves, and if the rules file is still broken
+        // by then that connect refuses and TELLS the user, which is where this belongs.
+        let rules = routing_rules::load_routing_rules()?;
         routing_rules::resolve_and_apply_inner(&path, &rules, &geo)
     })
     .await;
@@ -746,9 +753,8 @@ mod tests {
             iplist_groups: vec!["games".to_string(), "youtube".to_string()],
         };
         let rules = RoutingRules {
-            direct: vec![iplist_rule("iplist_group:games")],
+            direct: vec![iplist_rule("iplist_group:games"), iplist_rule("porn")],
             proxy: vec![iplist_rule("iplist_group:music")],
-            block: vec![iplist_rule("porn")],
             ..RoutingRules::default()
         };
 
@@ -815,8 +821,11 @@ mod tests {
                 other_rule("domain", "games"),
                 other_rule("geosite", "geosite:games"),
             ],
-            proxy: vec![other_rule("ip", "1.2.3.4"), other_rule("cidr", "10.0.0.0/8")],
-            block: vec![other_rule("geoip", "geoip:ru")],
+            proxy: vec![
+                other_rule("ip", "1.2.3.4"),
+                other_rule("cidr", "10.0.0.0/8"),
+                other_rule("geoip", "geoip:ru"),
+            ],
             ..RoutingRules::default()
         };
         assert!(

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -27,6 +27,9 @@ import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
 import { formatRelativeCheck } from "../../shared/utils/formatRelativeCheck";
 import type { UpdateInfo } from "../../shared/types";
+// The sidecar update track's no-progress gap, reused rather than re-declared. See its own
+// comment: two constants meaning «how long may an update go quiet» would drift apart.
+import { WATCHDOG_MS } from "../update/useUpdateProgress";
 
 /**
  * Backend rejection code → the i18n key naming the CAUSE, exhaustively and with NO passthrough.
@@ -331,9 +334,100 @@ export function UpdateCard({
     [t],
   );
 
+  // ── The no-progress watchdog (30.1 item 10) ─────────────────────────────────────────────
+  //
+  // A GAP BETWEEN EVENTS, NOT A DEADLINE FOR THE DOWNLOAD, and the difference is the whole
+  // finding. The milestone review read «the self-update download has no timeout» as one defect
+  // with its two sibling probes; it is not. Those probes fetch one small JSON document and were
+  // given a total budget. This is a multi-megabyte installer, and `updater.rs` states in so many
+  // words why it must NOT have one: a total timeout aborts a transfer that is slow but
+  // progressing, on exactly the connections that most need the update to arrive. «Sweeping» the
+  // third client would have been a regression wearing the costume of a fix.
+  //
+  // What was genuinely missing is the other failure: a transfer that connects and then goes
+  // SILENT. `self_update` then neither resolves nor rejects — the catch arm below never runs —
+  // and the card stayed on «Скачиваем…» with «Обновить» and «Скачать» held by
+  // `updateActionsHeld` and the check button held by `checkPointless`. A frozen card with no way
+  // back short of restarting the app: the same trap `self_update`-that-returned already closed,
+  // reached by a different route.
+  //
+  // The evidence lives here, not in Rust: the download loop emits `update-progress` as it goes,
+  // so the front end is where their ABSENCE is observable. Every event re-arms the timer, so a
+  // slow transfer is never interrupted; only silence for the whole gap trips it.
+  //
+  // `WATCHDOG_MS` is the sidecar update track's own constant, imported rather than re-declared —
+  // see its comment for why both tracks are deliberately on one budget.
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+  // `updating` as a ref as well as state: the timer callback is created once per arming and would
+  // otherwise close over a stale value, and a watchdog that fires against a download which already
+  // finished would raise a failure for an update that succeeded.
+  const updatingRef = useRef(false);
+  useEffect(() => {
+    updatingRef.current = updating;
+  }, [updating]);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current !== null) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+  }, []);
+
+  // THE FIRING ACTION LIVES BEHIND A REF, and that is not indirection for its own sake. It needs
+  // `t`, `pushSnack` and `activityLog`, none of which is guaranteed to keep its identity between
+  // renders. Naming them as dependencies of `armWatchdog` would make IT change every render, which
+  // would make the arming effect below re-run every render, which would re-arm the timer from zero
+  // every render — a watchdog that can never reach its own deadline, silently, while every test
+  // that merely checks «a timer was set» still passes.
+  const onStallRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    onStallRef.current = () => {
+      if (!isMountedRef.current || !updatingRef.current) return;
+      // A CAUSE ON SCREEN, THE DETAIL IN THE LOG — the same split the catch arm below is built
+      // on. The download URL, the stage and the last progress line are all in scope here and none
+      // of them may reach the user: `t()` of a key this file chose cannot carry an address or a
+      // status code, and the log line is a fixed ASCII string, not a rendered value.
+      activityLog("ERROR", "about.self_update_failed", "watchdog: no download progress");
+      setUpdating(false);
+      setUpdateProgress(null);
+      pushSnack(t("about.update_failed"), "error");
+    };
+  });
+
+  const armWatchdog = useCallback(() => {
+    clearWatchdog();
+    watchdogRef.current = setTimeout(() => onStallRef.current(), WATCHDOG_MS);
+  }, [clearWatchdog]);
+
+  // Armed while a download runs, cleared on every other state AND on unmount, so no timer can
+  // outlive the card that owns it.
+  useEffect(() => {
+    if (updating) armWatchdog();
+    else clearWatchdog();
+    return clearWatchdog;
+  }, [updating, armWatchdog, clearWatchdog]);
+
+  // A stable ref to the latest `armWatchdog` so the mount-time listener can re-arm on each
+  // progress event without re-subscribing. (Same shape, and the same reason, as the sidecar
+  // track's hook.)
+  const armWatchdogRef = useRef(armWatchdog);
+  useEffect(() => {
+    armWatchdogRef.current = armWatchdog;
+  }, [armWatchdog]);
+
   useEffect(() => {
     const unlisten = listen<UpdateProgressPayload>("update-progress", (event) => {
       setUpdateProgress(translateProgress(event.payload));
+      // Progress is proof of life: re-arm. Guarded on `updating` so a stray event outside a
+      // download cannot leave a timer running against a card that is at rest.
+      if (updatingRef.current) armWatchdogRef.current();
     });
     return () => {
       unlisten.then((f) => f());

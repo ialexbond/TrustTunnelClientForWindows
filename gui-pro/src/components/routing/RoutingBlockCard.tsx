@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Shield, Zap, Ban } from "lucide-react";
+import { ChevronDown, Shield, Zap } from "lucide-react";
 import { Card } from "../../shared/ui";
 import { RuleEntryRow } from "./RuleEntryRow";
 import { GroupChip } from "./GroupChip";
@@ -32,7 +32,7 @@ const actionConfig: Record<
     tint: string;
     iconColor: string;
     icon: typeof Shield;
-    badgeVariant: "success" | "accent" | "danger";
+    badgeVariant: "success" | "accent";
   }
 > = {
   direct: {
@@ -53,14 +53,10 @@ const actionConfig: Record<
     icon: Shield,
     badgeVariant: "accent",
   },
-  block: {
-    titleKey: "routing.blockTitle",
-    descriptionKey: "routing.blockDescription",
-    tint: "var(--color-danger-tint-10)",
-    iconColor: "var(--color-danger-fg)",
-    icon: Ban,
-    badgeVariant: "danger",
-  },
+  // Здесь был третий вариант — `block` (красная шапка, глиф Ban, «Заблокировать»). Блокировка
+  // сайтов удалена 2026-09-03: она никогда не работала и не могла заработать без правки
+  // замороженного C++-ядра. Карточек ровно две, и `RouteAction` теперь тоже знает ровно два
+  // направления, так что забыть добавить сюда ветку невозможно — это будет ошибка типов.
 };
 
 // Отображаемое имя чипа-группы. Для iplist_group ищем человекочитаемое имя в дескрипторах групп

@@ -219,9 +219,18 @@ export function usePerConfigPing(targets: PingTarget[]): PerConfigPing {
         return next;
       });
     } finally {
-      // Only the round that is still current owns clearing the flag — a superseded round leaves it to
-      // whichever round is now live, so the button's spinner tracks the ACTIVE round, not a stale one.
-      if (generationRef.current === myGeneration) setPinging(false);
+      // Item 8 (30.1 review): ALWAYS clear the flag — the round that raised it lowers it, superseded
+      // or not. Note the deliberate asymmetry with the cancel guard on the result write just above:
+      // the two used to share the same round-generation check, which LOOKS symmetrical and is not.
+      //
+      // Discarding a superseded round's RESULT is correct (it could paint a band for an id that just
+      // left the list). Handing the FLAG-CLEAR to "whichever round is now live" was correct only while
+      // this hook ran an automatic 15 s interval loop, because a successor round was guaranteed to
+      // exist and to clear it. D-16 made pinging MANUAL-ONLY — no mount ping, no interval — so the
+      // only thing that can start a successor is the «Обновить пинг» button, and that button is
+      // `disabled={pinging}`. The flag therefore wedged its own only trigger: one target-set change
+      // mid-round (an import, a delete, a rename) left the button dead until the component remounted.
+      setPinging(false);
     }
   }, []);
 

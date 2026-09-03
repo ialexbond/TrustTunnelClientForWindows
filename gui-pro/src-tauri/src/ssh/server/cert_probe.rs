@@ -76,6 +76,19 @@ pub struct EndpointCertInfo {
     /// embedding adds ~3 KB of payload that blows past QR capacity.
     #[serde(default)]
     pub is_system_verifiable: bool,
+    /// SEC-01: true when the probed chain verifies with the LEAF ITSELF as the only
+    /// trust anchor, against this SNI — i.e. exactly what the core does when the config
+    /// carries `certificate` and `skip_verification = false`
+    /// (`trusttunnel/src/client.cpp` `tls_verify_cert` + the host-name check in
+    /// `core/src/vpn_manager.cpp`).
+    ///
+    /// This exists so the pin can be TRUSTED rather than assumed. A self-signed
+    /// certificate issued without a SAN, without `serverAuth`, or without `CA:TRUE`
+    /// cannot be verified by anything modern, and turning verification on for such an
+    /// endpoint would take it off the air. Callers must leave `skip_verification` alone
+    /// unless this is true.
+    #[serde(default)]
+    pub pin_verifiable: bool,
 }
 
 /// Decode a base64 DER string into raw bytes with the same size cap applied to live probes.
@@ -306,6 +319,42 @@ pub async fn fetch_endpoint_cert(
             }
         };
 
+        // SEC-01: would the CORE be able to verify this endpoint if we stopped telling
+        // it not to? Rather than reason about the certificate's contents, ask a real
+        // verifier the same question the core asks: build a trust store containing
+        // nothing but this leaf, and check the chain against THIS SNI. A `true` here is
+        // a proof, not a guess — and a `false` keeps today's behaviour, so an endpoint
+        // whose certificate predates the SAN fix simply stays as it is instead of
+        // dropping off the air.
+        let pin_verifiable = {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+            let provider = rustls::crypto::CryptoProvider::get_default()
+                .expect("crypto provider must be installed by now")
+                .clone();
+            let mut roots = rustls::RootCertStore::empty();
+            if roots.add(CertificateDer::from(leaf_der.clone())).is_ok() {
+                match rustls::client::WebPkiServerVerifier::builder_with_provider(
+                    std::sync::Arc::new(roots),
+                    provider,
+                )
+                .build()
+                {
+                    Ok(v) => v
+                        .verify_server_cert(
+                            &CertificateDer::from(leaf_der.clone()),
+                            &intermediates,
+                            &server_name_for_verify,
+                            &[],
+                            UnixTime::now(),
+                        )
+                        .is_ok(),
+                    Err(_) => false,
+                }
+            } else {
+                false
+            }
+        };
+
         // Fingerprint stays leaf-only — stable across intermediate rotations.
         let digest = Sha256::digest(&leaf_der);
         let fingerprint_hex = format_fingerprint_hex(&digest);
@@ -315,6 +364,7 @@ pub async fn fetch_endpoint_cert(
             fingerprint_hex,
             chain_len: chain.len(),
             is_system_verifiable,
+            pin_verifiable,
         })
     };
 
@@ -361,6 +411,7 @@ mod tests {
             fingerprint_hex: "aabbcc".to_string(),
             chain_len: 2,
             is_system_verifiable: true,
+                    pin_verifiable: false,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("\"leaf_der_b64\":\"AQID\""));

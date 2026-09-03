@@ -42,6 +42,9 @@ static constexpr int VPN_DEFAULT_POSTPONEMENT_WINDOW_MS = 3 * 1000; // how long 
 // clang-format on
 
 static const float VPN_DEFAULT_RECOVERY_BACKOFF_RATE = 1.3f;
+// Chosen so that together with default backoff rate and default initial delay,
+// the client will spend <= 60 seconds trying to recover.
+static const uint32_t VPN_DEFAULT_RECOVERY_ATTEMPTS = 30;
 static const int VPN_SKIP_VERIFICATION_FLAG = 100;
 
 typedef enum {
@@ -85,6 +88,10 @@ typedef struct {
     VpnOsTunnel *tunnel;
     /** Maximum transfer unit for TCP protocol (if 0, `DEFAULT_MTU_SIZE` will be used) */
     uint32_t mtu_size;
+    /** TCP receive window size in bytes (if 0, compile-time default is used) */
+    uint32_t tcp_recv_buf_size;
+    /** TCP send buffer size in bytes (if 0, compile-time default is used) */
+    uint32_t tcp_send_buf_size;
     /** Pcap file name */
     const char *pcap_filename;
 } VpnTunListenerConfig;
@@ -134,6 +141,14 @@ typedef struct {
      *     quic://dns.adguard.com:8853 -- DNS-over-QUIC
      */
     AG_ARRAY_OF(const char *) dns_upstreams;
+    /**
+     * If `true`, DNS queries for excluded (or, in selective mode, not included) domains
+     * will be sent to their original destinations through the bypass upstream, instead
+     * of being redirected to the system DNS proxy.
+     *
+     * The default value is `false`.
+     */
+    bool dns_alt_exclusions_route;
 } VpnListenerConfig;
 
 typedef struct {
@@ -159,6 +174,13 @@ typedef struct {
      * If 0, `VPN_DEFAULT_RECOVERY_LOCATION_UPDATE_PERIOD_MS` will be assigned.
      */
     uint32_t location_update_period_ms;
+    /**
+     * The maximum number of recovery attempts that the library will make before transitioning into the
+     * `VPN_SS_DISCONNECTED` state with the `VPN_EC_LOCATION_UNAVAILABLE` error code. The counter resets
+     * on successful recovery, network change or client disconnect.
+     * If set to `0`, `VPN_DEFAULT_RECOVERY_ATTEMPTS` will be assigned.
+     */
+    uint32_t attempts;
 } VpnUpstreamSessionRecoverySettings;
 
 typedef struct {
@@ -450,6 +472,12 @@ typedef enum {
  * List of VPN client settings
  */
 typedef struct {
+    /**
+     * A function, together with its argument, that gets called to notify the application of an event.
+     *
+     * NOTE: VPN library functions should NOT be called from this function directly: doing so may lead to a deadlock.
+     * Schedule a call from another thread instead.
+     */
     VpnHandler handler;
     /** The VPN mode (see `VpnMode`) */
     VpnMode mode;
@@ -482,20 +510,17 @@ typedef struct {
      *              - recognized formats are:
      *                  - IPv4Address/mask
      *                  - IPv6Address/mask
+     *          - wildcard port: `*:port`
+     *              - matches any connection to the specified port regardless of the destination address
+     *                (e.g., `*:80` will match any connection to port 80)
      *
      *  examples:
      *      - example.org 1.2.3.4
      *      - 1.1.1.1:1 [feed::beef] www.example.com
      *      - [deaf::beef]:12 *.example.com
+     *      - *:80 *:443
      */
     ag::VpnStr exclusions;
-    /**
-     * Space/newline-separated list of domains, IPs and CIDRs to block.
-     * DNS queries for blocked domains will receive NXDOMAIN responses.
-     * TCP/UDP connections to blocked IPs will be rejected.
-     * Format is the same as `exclusions`.
-     */
-    ag::VpnStr blocked;
     /**
      * Path to directory where some temporary files (like connection buffers) will be stored.
      * If null, temporary files won't be used at all.
@@ -522,6 +547,34 @@ typedef struct {
      * an endpoint will not be routed directly in that case.
      */
     bool killswitch_enabled;
+
+    /**
+     * When enabled, all TCP connections to scannable ports are initially routed through a fake upstream
+     * to read the SNI from the TLS ClientHello before making any real connection to the endpoint.
+     * This ensures exclusions work when the suspects cache is not populated, e.g. when secure DNS
+     * is configured outside of AdGuard VPN or when the exclusion list contains wildcard entries.
+     */
+    bool exclusions_tcp_early_ack_enabled;
+
+    /**
+     * When enabled, DNS-resolvable exclusions are pre-resolved in the background after the exclusion
+     * list is updated. This populates the suspects cache so that connections to excluded hosts are
+     * routed correctly without waiting for the first DNS response.
+     */
+    bool exclusions_preresolve_enabled;
+
+    /**
+     * Maximum number of exclusion domains to pre-resolve.
+     * 0 means use the default value (50).
+     */
+    uint32_t exclusions_preresolve_max_queries;
+
+    /**
+     * Comma-separated list of ports considered "scannable" for domain extraction and exclusion matching.
+     * Supports individual ports and ranges, e.g. "443,80,8080:8090,853".
+     * If empty or null, the default list is used.
+     */
+    const char *exclusions_scannable_ports;
 
     /**
      * Path to a directory where SSL sessions would be cached to persist
@@ -674,7 +727,6 @@ bool vpn_process_client_packets(Vpn *vpn, VpnPackets packets);
 
 /**
  * Complete connect request according to action.
- * MAY be called from `VPN_EVENT_CONNECT_REQUEST` handler without a context switch.
  * @param vpn VPN client
  * @param info connection info
  */

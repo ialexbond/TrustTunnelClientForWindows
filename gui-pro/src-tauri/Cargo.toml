@@ -52,6 +52,12 @@ uuid = { version = "1", features = ["v4"] }
 # declaring `url` as a DIRECT dependency guarantees `url::Url` is importable in 09-17
 # (a merely-transitive `url` via tauri/reqwest is not directly usable in Rust).
 url = "2"
+# ROUTE-11 — punycode/IDNA for domain_scope::to_core_ascii. NOT a new crate in the build: `url`
+# above already pulls idna 1.1.0 transitively, and Cargo.lock is unchanged by this line. It is
+# declared DIRECTLY for the same reason `url` is, one comment up — a merely-transitive crate is not
+# importable in Rust, and the alternative (hand-rolling punycode) would be our own encoder deciding
+# what hostname the C++ core matches against.
+idna = "1"
 base64 = "0.22"
 # Phase 24 (D-01) — PNG-кодирование иконок программ в processes.rs. Обе версии (0.17.16 и 0.18.1)
 # УЖЕ разрешены в Cargo.lock транзитивно (через image/tauri), поэтому объявление прямой

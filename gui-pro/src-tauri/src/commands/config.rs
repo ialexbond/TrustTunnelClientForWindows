@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::routing_rules::RoutingRules;
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 
 // WR-03: path-traversal validation now lives in one shared place (commands::paths) instead of
 // three byte-similar copies. Re-export under the local name so the rest of this module reads
@@ -129,7 +129,7 @@ fn validate_save_destination(destination: &str) -> Result<(), String> {
             allowed_roots.push(p);
         }
     };
-    push_root(portable_data_dir());
+    push_root(user_data_dir());
     // %USERPROFILE% covers Desktop / Downloads / Documents — every Save-As the UI offers.
     if let Ok(profile) = std::env::var("USERPROFILE") {
         if !profile.is_empty() {
@@ -195,7 +195,7 @@ pub async fn write_string_to_path(
 /// `write_string_to_path(<any bytes>, "%TEMP%\\x")` then `copy_file("%TEMP%\\x", <anywhere>)`.
 ///
 /// The honest disposition: this capability pre-dates Phase 25 — the same chain already worked
-/// through `portable_data_dir()` alone before the temp root was added as a source — and it is
+/// through `user_data_dir()` alone before the temp root was added as a source — and it is
 /// not a meaningful escalation, because reaching it at all requires executing script in the
 /// webview, at which point the attacker already holds `invoke` over the whole command surface
 /// (a strictly larger primitive than this two-step write). It is therefore an ACCEPTED
@@ -497,19 +497,26 @@ pub fn spawn_stale_staged_config_sweep() {
     std::thread::spawn(sweep_stale_staged_configs);
 }
 
-/// Copy a config file into the app directory (next to the executable).
-/// Returns the new path. If the file is already in the app dir, returns it as-is.
+/// Copy a config file into the per-user data root.
+/// Returns the new path. If the file is already in the data root, returns it as-is.
+///
+/// D-03 C: the destination was the executable's own directory. Client `.toml` configs carry the
+/// endpoint PASSWORD, so under a Program Files install every imported config would have landed
+/// in a directory readable by every account on the machine — the confidentiality regression the
+/// data move exists to prevent. The destination is now the per-user root, which is also where
+/// the path-confinement guard (`validate_app_path`) looks, so an imported config stays
+/// connectable.
 #[tauri::command]
 pub fn copy_config_to_app_dir(source_path: String) -> Result<String, String> {
     let src = std::path::Path::new(&source_path);
     if !src.exists() {
         return Err(format!("Source file does not exist: {source_path}"));
     }
-    let exe = std::env::current_exe().map_err(|e| format!("Cannot find exe path: {e}"))?;
-    let app_dir = exe.parent().ok_or("Cannot determine app directory")?;
+    let app_dir_owned = user_data_dir();
+    let app_dir = app_dir_owned.as_path();
     let src_dir = src.parent().unwrap_or(std::path::Path::new(""));
 
-    // Already in app dir — no copy needed
+    // Already in the data root — no copy needed
     if src_dir == app_dir {
         return Ok(source_path);
     }
@@ -541,12 +548,15 @@ pub fn copy_config_to_app_dir(source_path: String) -> Result<String, String> {
     Ok(dest.to_string_lossy().to_string())
 }
 
-/// Find .toml config files next to the executable
+/// Find .toml config files in the per-user data root.
+///
+/// D-03 C: scanned the executable's directory before the move. It must follow the destination
+/// `copy_config_to_app_dir` writes to — a scanner looking at the old location would find nothing
+/// and the app would report "no config" while the user's configs sat in the data root.
 #[tauri::command]
 pub fn auto_detect_config() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    for e in std::fs::read_dir(dir).ok()?.flatten() {
+    let dir = user_data_dir();
+    for e in std::fs::read_dir(&dir).ok()?.flatten() {
         let path = e.path();
         if path.extension().and_then(|s| s.to_str()) == Some("toml")
             && path.file_name().and_then(|s| s.to_str()) != Some("Cargo.toml")
@@ -572,7 +582,7 @@ pub fn config_file_exists(config_path: String) -> bool {
 /// create/remove/modify.
 ///
 /// PP-6: this NO LONGER spawns its own `notify` watcher. Before PP-6 there were two OS watchers on
-/// the same `portable_data_dir` (this one for the active file + the app-wide list watcher). They
+/// the same `user_data_dir` (this one for the active file + the app-wide list watcher). They
 /// are collapsed into ONE: `start_configs_watcher` reads the active path registered here and emits
 /// the byte-identical `{ exists, path }` payload. The FE contract (useConfigLifecycle) is unchanged
 /// — same event name, same payload, same external-delete/restore semantics (the self-delete guard
@@ -830,7 +840,7 @@ pub fn normalize_config_socks_to_tun(toml_text: &str) -> Option<String> {
 /// unreadable/unwritable file is skipped. D-29: config contents are NEVER logged (they carry
 /// credentials); only a fixed phrase is emitted.
 pub fn normalize_all_configs_to_tun() {
-    let dir = portable_data_dir();
+    let dir = user_data_dir();
     let Ok(rd) = std::fs::read_dir(&dir) else {
         return;
     };
@@ -1032,7 +1042,7 @@ mod tests {
     /// data-dir path must get a refusal AND leave the file untouched.
     #[test]
     fn delete_staged_temp_file_refuses_the_app_data_dir_and_leaves_the_file() {
-        let live = portable_data_dir()
+        let live = user_data_dir()
             .join(format!("tt_test_cmd_live_{}.toml", std::process::id()));
         std::fs::write(&live, "loglevel = \"info\"\n").expect("app-dir write must succeed");
 
@@ -1103,7 +1113,7 @@ mod tests {
     #[test]
     fn sweep_refuses_the_same_name_in_the_app_data_dir_and_leaves_it_on_disk() {
         let name = client_config_filename(&format!("t44app{}", std::process::id()), None);
-        let live = portable_data_dir().join(&name);
+        let live = user_data_dir().join(&name);
         std::fs::write(&live, "password = \"live\"\n").expect("app-dir write must succeed");
 
         let outcome = sweep_one_staged_config(&live, std::time::Duration::ZERO);
@@ -1176,7 +1186,7 @@ mod tests {
         let link = std::env::temp_dir().join(&name);
         // The target is a directory OUTSIDE the temp root, with a file in it to prove nothing was
         // deleted through the link.
-        let target_dir = portable_data_dir().join(format!("tt_test_t44_target_{}", std::process::id()));
+        let target_dir = user_data_dir().join(format!("tt_test_t44_target_{}", std::process::id()));
         let victim = target_dir.join("victim.toml");
         std::fs::create_dir_all(&target_dir).expect("target mkdir must succeed");
         std::fs::write(&victim, "password = \"must survive\"\n").expect("target write must succeed");
@@ -1332,7 +1342,7 @@ some_future_key = "value"
     // download bug survived precisely because nothing exercised `copy_file` end to end:
     // `fetch_server_config(stageToTemp: true)` stages into `std::env::temp_dir()`
     // (ssh/server/server_config.rs:524, a deliberate Phase-19 UAT fix) while the source
-    // check confined to `portable_data_dir()` only — so the app rejected the very file it
+    // check confined to `user_data_dir()` only — so the app rejected the very file it
     // had just written, and «Скачать конфиг» saved nothing.
 
     /// The happy path of «Панель управления» → Пользователи → «Скачать конфиг»: a config
@@ -1368,11 +1378,11 @@ some_future_key = "value"
     /// The OTHER door onto the same command: the wizard's Save-As
     /// (`components/wizard/useWizardState.ts:1675`) hands `copy_file` an APP-DIR source. Adding
     /// the temp root must not cost the data-dir root — this is the no-regression guard for it.
-    /// Under `cargo test --lib` `portable_data_dir()` resolves to the test binary's own
-    /// directory, which is writable.
+    /// Under `cargo test --lib` `user_data_dir()` resolves to a per-process temp sandbox
+    /// (D-03 C), which is writable.
     #[test]
     fn copy_file_still_accepts_an_app_dir_source() {
-        let dir = portable_data_dir();
+        let dir = user_data_dir();
         let src = dir.join(format!("tt_test_copy_appdir_{}.toml", std::process::id()));
         let dst = std::env::temp_dir().join(format!(
             "tt_test_copy_appdir_dst_{}.toml",
@@ -1389,7 +1399,7 @@ some_future_key = "value"
         let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_file(&dst);
 
-        result.expect("a source inside portable_data_dir must remain an allowed copy source");
+        result.expect("a source inside user_data_dir must remain an allowed copy source");
         assert_eq!(copied.as_deref(), Some(content));
     }
 

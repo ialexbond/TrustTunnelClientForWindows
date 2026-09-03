@@ -270,8 +270,11 @@ describe("GeneralSection", () => {
 
   /**
    * The header glyph sits in a tinted tile — the tab's main «this was redesigned» signal, and the
-   * accent counterpart of the warning tile «Экспериментальные функции» wears. Asserted on the token
-   * pair rather than on a class, the same way ExperimentalSection asserts its own tile.
+   * accent counterpart of `SettingsCard`'s warning tile. Asserted on the token pair rather than on
+   * a class.
+   *
+   * (The warning tile had exactly one wearer, «Экспериментальные функции», and that card was
+   * removed on 2026-09-03 with the site-blocking feature. The accent side is unchanged.)
    */
   it("paints the header tile from the ACCENT tint/fg pair", () => {
     const { container } = render(<GeneralSection {...defaultProps} />);

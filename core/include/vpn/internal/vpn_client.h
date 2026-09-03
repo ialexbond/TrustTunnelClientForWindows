@@ -165,6 +165,10 @@ public:
     VpnListenerConfig listener_config = {};                    // common listener configuration
     vpn_client::EndpointConnectionConfig upstream_config = {}; // upstream configuration
     bool kill_switch_on = false;
+    bool exclusions_tcp_early_ack_enabled = false;
+    bool exclusions_preresolve_enabled = false;
+    uint32_t exclusions_preresolve_max_queries = 1;
+    PortRangeSet exclusions_scannable_ports;
     std::shared_ptr<ServerUpstream> endpoint_upstream;  // upstream for connections routed through vpn
     std::shared_ptr<ServerUpstream> bypass_upstream;    // upstream for bypassed connections
     std::shared_ptr<ClientListener> client_listener;    // client listener
@@ -174,7 +178,6 @@ public:
     IdGenerator upstream_conn_id_generator{};           // connection id generator for server-side connections
     std::optional<VpnDnsResolveId> dns_health_check_id; // ID of the resolve for a DNS upstream health check
     DomainFilter domain_filter;                         // decides if connection should be bypassed over VPN
-    DomainFilter blocked_filter;                        // domains/IPs to block completely (NXDOMAIN + reject)
     std::set<event_loop::AutoTaskId> deferred_tasks;
     std::unique_ptr<EndpointConnector> endpoint_connector; // connects to endpoint using given upstream(s)
     std::optional<std::string> tmp_files_base_path;        // directory where some temporary files will be stored
@@ -191,7 +194,7 @@ public:
     VpnMode exclusions_mode = VPN_MODE_GENERAL;
 
     // One of these is handed off from the pinger. An upstream can then snatch it up.
-    ag::DeclPtr<QuicConnector, &quic_connector_destroy> quic_connector;
+    std::unique_ptr<QuicConnectorResult> quic_connector;
     ag::DeclPtr<TcpSocket, &tcp_socket_destroy> tcp_socket;
 };
 

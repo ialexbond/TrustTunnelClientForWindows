@@ -88,6 +88,18 @@ export interface ConfigEditViewProps {
    * atomically when the single App flag flips on settle (no per-control timer).
    */
   isSwitching?: boolean;
+  /**
+   * G-30.1-01 (30.1 UAT, T-14): this config's `.toml` has been deleted from disk while the modal
+   * was open — established by `useConfigFileGone` in `ConnectionPanel`, which asks the backend
+   * rather than guessing from list membership.
+   *
+   * It is NOT the same fact as `loadError` and must not be folded into it. `loadError` means the
+   * file is there and unparseable, and its copy tells the user to re-import; this means the file is
+   * gone, the card behind the modal has already disappeared, and there is nothing to re-import.
+   * Only one of the two is true at a time, but this one wins if both are somehow set — a deletion
+   * is the more specific and more recent fact.
+   */
+  fileMissing?: boolean;
 }
 
 /** «?» help on a label — extra detail on hover (HelpCircle in a Tooltip), the canonical
@@ -157,6 +169,7 @@ export function ConfigEditView({
   onReconnect,
   onConfigChange,
   isSwitching = false,
+  fileMissing = false,
 }: ConfigEditViewProps) {
   const { t } = useTranslation();
 
@@ -309,7 +322,29 @@ export function ConfigEditView({
         )}
       </p>
 
-      {loadError ? (
+      {fileMissing ? (
+        // G-30.1-01: the `.toml` this modal edits was deleted on disk while it was open.
+        //
+        // WHY THE MODAL STAYS OPEN INSTEAD OF CLOSING ITSELF. Yanking a pane out from under someone
+        // mid-edit is its own rudeness, and it would leave the user with a list that silently lost
+        // both the card and the window, with no statement of what happened. So the pane stays and
+        // says it: the form — and with it «Сохранить»/«Сохранить и переподключить» — is replaced by
+        // the reason. The user closes when they have read it.
+        //
+        // WHY THIS SHAPE. It is the one the app already uses for «the thing you were looking at is
+        // gone»: a banner naming the cause plus a single way forward, no «Повторить» (RoutingPanel's
+        // D-02 «Правила маршрутизации не читаются», and this component's own loadError below).
+        // Re-reading a file that is not there changes nothing, exactly as re-reading a corrupt one
+        // does not.
+        <div className="mt-[var(--space-5)] flex flex-col gap-[var(--space-4)]">
+          <ErrorBanner variant="error" message={t("connection.editView.file_missing")} />
+          <div className="flex justify-end">
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              {t("connection.editView.close")}
+            </Button>
+          </div>
+        </div>
+      ) : loadError ? (
         // The config file is corrupt / unparseable — there is nothing to «retry» (re-reading
         // the same broken file changes nothing), so NO retry button: just the error + a
         // single «Закрыть». The user closes and re-imports the config.

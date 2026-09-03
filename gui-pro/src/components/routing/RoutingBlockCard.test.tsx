@@ -107,16 +107,29 @@ describe("RoutingBlockCard", () => {
     expect(screen.getByText("Через VPN")).toBeInTheDocument();
   });
 
-  it("renders block card with correct title", () => {
-    renderCard({ action: "block" });
-    expect(screen.getByText("Заблокировать")).toBeInTheDocument();
-  });
+  // Третьей карточки — «Заблокировать» — больше нет: блокировка сайтов удалена 2026-09-03.
+  // Отдельного теста «её нет» здесь не заводим: `RouteAction` знает два направления, поэтому
+  // такую карточку невозможно даже попросить нарисовать — это ошибка типов, а не красный тест.
+  // Что карточки нет НА ВКЛАДКЕ, проверяет RoutingPanel.test.tsx, и вот там это может сломаться.
 
   it("shows description text for direct action", () => {
     renderCard({ action: "direct" });
     // Description should be visible (not collapsed)
     expect(screen.getByText(/минуя VPN-туннель/)).toBeInTheDocument();
   });
+
+  // ROUTE-10. «Трафик к этим адресам» did unearned work: a user who typed `maxmind.com` read «this
+  // address» as the site, and what the app delivered was one exact host plus its `www.` twin. The
+  // backend now routes the site and every subdomain of it, so BOTH cards have to say the scope out
+  // loud — a description that undersells a promise the app keeps is the same class of untruth as
+  // one that oversells a promise it does not, and the user acts on the text, not on the code.
+  it.each(["direct", "proxy"] as const)(
+    "the %s card states that a domain covers its subdomains",
+    (action) => {
+      renderCard({ action });
+      expect(screen.getByText(/поддомены/)).toBeInTheDocument();
+    },
+  );
 
   it("renders all rule entries", () => {
     renderCard();
@@ -219,8 +232,8 @@ describe("RoutingBlockCard", () => {
     expect(screen.getByTestId("add-rule-input-direct")).toBeInTheDocument();
   });
 
-  it("renders AddRuleInput for block action", () => {
-    renderCard({ action: "block" });
-    expect(screen.getByTestId("add-rule-input-block")).toBeInTheDocument();
+  it("renders AddRuleInput for proxy action", () => {
+    renderCard({ action: "proxy" });
+    expect(screen.getByTestId("add-rule-input-proxy")).toBeInTheDocument();
   });
 });

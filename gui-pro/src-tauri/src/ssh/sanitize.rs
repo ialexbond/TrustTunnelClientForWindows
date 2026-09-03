@@ -284,10 +284,11 @@ pub fn validate_listen_address(s: &str) -> Result<(), String> {
 // 06-uat install-wizard slimming: `validate_metrics_address` and `validate_socks5_address`
 // were REMOVED with their Metrics (Prometheus) / SOCKS5 upstream wizard settings — they
 // had no remaining callers after the settings were dropped. `validate_reverse_proxy_address`
-// was likewise REMOVED with the camouflage / `[reverse_proxy]` feature (it does not work on
-// the prebuilt core v1.0.33) — it had no remaining callers once the deploy.rs reverse-proxy
-// gate was deleted. The shared `validate_url_path` (ping/speedtest paths) and
-// `validate_auth_status_code` (407/405 chooser) validators are deliberately KEPT —
+// was likewise REMOVED with the camouflage / `[reverse_proxy]` feature (dropped against the
+// then-pinned v1.0.33 — the CAMOUFLAGE REMOVED record at the top of `deploy.rs` is the one place
+// that says what the v1.1.0 pin does and does not change about that) — it had no remaining callers
+// once the deploy.rs reverse-proxy gate was deleted. The shared `validate_url_path`
+// (ping/speedtest paths) and `validate_auth_status_code` (the auth-failure code chooser) are KEPT —
 // validate_url_path still has other callers and is not specific to reverse-proxy.
 
 /// Version string: semver-like format only (digits, dots, optional 'v' prefix).
@@ -541,13 +542,22 @@ pub fn validate_log_level(s: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// HTTP status code: 405 or 407 only (per upstream CONFIGURATION.md `auth_failure_status_code`).
+/// HTTP status code for `auth_failure_status_code` — the exact set upstream parses, nothing wider.
+///
+/// SRV-01 (2026-09-04): widened from `405|407` to `403|404|405|407`. Upstream added 404/403 in
+/// v1.0.41 and we now pin v1.1.0 (`deploy::TRUSTTUNNEL_INSTALL_SH_TAG`), so the narrow set was our
+/// validator refusing values the endpoint accepts. The two new ones are the camouflage answers: an
+/// unauthenticated probe is told the resource is not there rather than that a proxy is.
+///
+/// Still a transcription of upstream's enum rather than a loosening to «any 4xx» — a value upstream
+/// cannot parse is refused at the endpoint, and the user would meet it as a server that will not
+/// start, long after the wizard said the settings were fine.
 pub fn validate_auth_status_code(code: u16) -> Result<(), String> {
-    if code == 405 || code == 407 {
+    if matches!(code, 403 | 404 | 405 | 407) {
         Ok(())
     } else {
         Err(format!(
-            "auth_failure_status_code must be 405 or 407 (got {code})"
+            "auth_failure_status_code must be 403, 404, 405 or 407 (got {code})"
         ))
     }
 }
@@ -919,9 +929,10 @@ mod tests {
     // 06-uat install-wizard slimming: the validate_metrics_address / validate_socks5_address
     // tests were removed with those validators (their Metrics / SOCKS5 wizard settings were
     // removed end-to-end). The validate_reverse_proxy_address tests were likewise removed
-    // with the camouflage / `[reverse_proxy]` feature (dropped — does not work on the
-    // prebuilt core v1.0.33). The shared validate_url_path + validate_auth_status_code tests
-    // stay — they gate the kept 407/405 setting and other validate_url_path callers.
+    // with the camouflage / `[reverse_proxy]` feature (dropped against the then-pinned v1.0.33 —
+    // see the CAMOUFLAGE REMOVED record at the top of `deploy.rs`). The shared validate_url_path +
+    // validate_auth_status_code tests stay — they gate the kept auth-failure code setting
+    // (403|404|405|407 since SRV-01) and other validate_url_path callers.
 
     // ─── path_mask gate: the EXISTING validate_url_path is the chosen validator ───
     // (reviews: dedup — no new validate_path_mask twin). These cases pin the
@@ -1272,10 +1283,23 @@ mod tests {
     }
 
     #[test]
+    fn auth_status_code_accepts_the_404_403_camouflage_answers_upstream_added() {
+        // SRV-01: upstream widened the set to `407|405|404|403` in v1.0.41 and we now pin v1.1.0,
+        // so refusing 404/403 would be OUR validator lying about what the endpoint accepts.
+        // These two are the camouflage answers — an unauthenticated probe is told the resource is
+        // not there rather than that a proxy is.
+        assert!(validate_auth_status_code(404).is_ok());
+        assert!(validate_auth_status_code(403).is_ok());
+    }
+
+    #[test]
     fn auth_status_code_rejects_other() {
+        // Still a transcription of upstream's exact set, not «any 4xx»: a value upstream cannot
+        // parse is refused at the endpoint and surfaces as a server that will not start.
         assert!(validate_auth_status_code(200).is_err());
         assert!(validate_auth_status_code(401).is_err());
-        assert!(validate_auth_status_code(403).is_err());
+        assert!(validate_auth_status_code(402).is_err());
+        assert!(validate_auth_status_code(406).is_err());
         assert!(validate_auth_status_code(500).is_err());
         assert!(validate_auth_status_code(0).is_err());
     }

@@ -596,7 +596,7 @@ fn log_decision(d: &EgressDecision, server_ip: Option<IpAddr>, adapters: &[imp::
 // ─── Applying the decision ───────────────────────────────────────────────────────────────────
 
 fn runtime_dir() -> PathBuf {
-    crate::ssh::portable_data_dir().join(RUNTIME_SUBDIR)
+    crate::ssh::user_data_dir().join(RUNTIME_SUBDIR)
 }
 
 /// Delete leftover override copies at startup. They are password-bearing throwaways whose only
@@ -827,6 +827,6 @@ mod tests {
         // phantom duplicate server (with the password inside) appears in the UI.
         let dir = runtime_dir();
         assert_eq!(dir.file_name().unwrap(), RUNTIME_SUBDIR);
-        assert_eq!(dir.parent().unwrap(), crate::ssh::portable_data_dir());
+        assert_eq!(dir.parent().unwrap(), crate::ssh::user_data_dir());
     }
 }

@@ -551,7 +551,7 @@ pub async fn mtproto_get_status(
         installed: true,
         active,
         port,
-        secret,
+        secret: status_secret_for_owner(secret, managed_by_us),
         proxy_link,
         managed_by_us,
     })
@@ -960,7 +960,6 @@ async fn open_telemt_firewall(
 /// - все символы `[0-9.]` (IPv4) → false
 /// - содержит `.` (типа `example.com`) → true
 /// - иначе → false (одиночные имена типа `localhost`)
-#[allow(dead_code)]
 fn looks_like_hostname(s: &str) -> bool {
     if s.is_empty() {
         return false;
@@ -981,7 +980,6 @@ fn looks_like_hostname(s: &str) -> bool {
 ///
 /// `secret` query param не трогается — он содержит hex-encoded tls_domain
 /// независимо от server поля.
-#[allow(dead_code)]
 fn rewrite_link_server(link: &str, new_server: &str) -> String {
     if let Some(server_start) = link.find("server=") {
         let value_start = server_start + "server=".len();
@@ -996,6 +994,39 @@ fn rewrite_link_server(link: &str, new_server: &str) -> String {
         );
     }
     link.to_string()
+}
+
+/// Item 14 (30.1 milestone review) — substitute the issued domain into a `tg://proxy`
+/// link, when there IS one.
+///
+/// `rewrite_link_server` and `looks_like_hostname` above have existed since Phase 17.1
+/// and were called from nothing but their own unit tests: `fetch_proxy_link` took the
+/// target host as `_target_host` and dropped it on the floor, so the Telegram link always
+/// carried the raw IP while the function's own doc comment promised the domain. This is
+/// the missing wire, not new logic.
+///
+/// The `looks_like_hostname` guard is what keeps the promise honest in the other
+/// direction: with no domain, an IP, or a single-label name, the link comes back exactly
+/// as telemt produced it. The rewrite may substitute a real FQDN and may never invent one.
+fn apply_host_rewrite(link: String, target_host: Option<&str>) -> String {
+    match target_host {
+        Some(host) if looks_like_hostname(host) => rewrite_link_server(&link, host),
+        _ => link,
+    }
+}
+
+/// Item 16 (30.1 milestone review) — the secret the status payload is allowed to carry.
+///
+/// `managed_by_us` was computed and then never consulted, so a status refresh against a
+/// telemt instance the app did NOT install returned that admin's proxy secret over IPC
+/// into the webview. The D-29 note beside the `telemt.toml` read in `mtproto_get_status`
+/// records that this very leak was closed on the LOG channel (the read was moved to the
+/// non-echoing `exec_command_quiet`); the IPC channel was the other half and stayed open.
+///
+/// Only the secret is withheld — every other field is unchanged, so the front end can
+/// still distinguish «installed, ours» / «installed, foreign» / «not installed».
+fn status_secret_for_owner(secret: String, managed_by_us: bool) -> String {
+    if managed_by_us { secret } else { String::new() }
 }
 
 /// Phase 17.1 — fetch `tg://proxy?...` link via primary API path, fallback journalctl.
@@ -1014,6 +1045,10 @@ fn rewrite_link_server(link: &str, new_server: &str) -> String {
 ///   API + journalctl.
 /// - Если `target_host` is FQDN (домен Let's Encrypt) — переписываем
 ///   `server=IP` на `server=domain` для UX (короче, переживёт смену IP).
+///   Item 14 (30.1 milestone review): этот пункт ОПИСЫВАЛ поведение, которого у функции
+///   не было — параметр звался `_target_host` и игнорировался, ссылка всегда несла raw IP.
+///   Теперь оба return-пути (API + journalctl) проходят через `apply_host_rewrite`, так что
+///   комментарий и код наконец совпадают.
 ///
 /// Returns empty string если за 30 сек так и не появилась НЕ-placeholder ссылка.
 /// Frontend useMtProtoState делает background polling каждые 3 сек и подтянет
@@ -1022,7 +1057,7 @@ async fn fetch_proxy_link(
     handle: &client::Handle<SshHandler>,
     app: &tauri::AppHandle,
     sudo: &str,
-    _target_host: Option<&str>,
+    target_host: Option<&str>,
     expected_port: Option<u16>,
 ) -> String {
     // Post-UAT 2026-05-21: двухуровневый фильтр stale ссылок.
@@ -1091,7 +1126,7 @@ async fn fetch_proxy_link(
         .await
         .unwrap_or_default();
         if let Some(link) = parse_proxy_link_from_api_json_filtered(&api_out, expected_port) {
-            return link;
+            return apply_host_rewrite(link, target_host);
         }
 
         // Fallback: journalctl. Filtered by --since (timestamp) + expected_port.
@@ -1107,7 +1142,7 @@ async fn fetch_proxy_link(
         .await
         .unwrap_or_default();
         if let Some(link) = parse_proxy_link_from_journalctl_filtered(&log_out, expected_port) {
-            return link;
+            return apply_host_rewrite(link, target_host);
         }
     }
     // 30 секунд retry'я telemt всё ещё не отдал НЕ-placeholder ссылку —
@@ -2038,6 +2073,158 @@ port = 9443
         assert!(rewritten.contains("secret=eedeadbeef676574"));
         assert!(rewritten.contains("server=example.com"));
         assert!(!rewritten.contains("server=1.2.3.4"));
+    }
+
+    // ─── Item 14 (30.1 milestone review): the rewrite helper is WIRED ──────────────
+    //
+    // `rewrite_link_server` and `looks_like_hostname` existed, were tested, and were
+    // called from nowhere but those two tests — while `fetch_proxy_link` took the target
+    // host as `_target_host` and ignored it. The doc comment promised the domain rewrite;
+    // the code always returned the raw IP. Those two tests above stayed green throughout,
+    // which is why the wiring needs its own guard.
+
+    #[test]
+    fn host_rewrite_names_the_domain_when_there_is_one() {
+        let link = "tg://proxy?server=198.51.100.34&port=8443&secret=ee0123".to_string();
+        let got = apply_host_rewrite(link, Some("getstarted.neuralslop.ru"));
+        assert_eq!(
+            got, "tg://proxy?server=getstarted.neuralslop.ru&port=8443&secret=ee0123",
+            "a Let's Encrypt domain must reach the Telegram link"
+        );
+    }
+
+    #[test]
+    fn host_rewrite_never_invents_a_host() {
+        // No domain, an IPv4, an IPv6 and a bare single-label name all fall through
+        // untouched — the rewrite may only ever substitute a real FQDN.
+        let link = "tg://proxy?server=198.51.100.34&port=8443&secret=ee0123".to_string();
+        for target in [None, Some("198.51.100.34"), Some("2001:db8:5:21::1"), Some("localhost"), Some("")] {
+            assert_eq!(
+                apply_host_rewrite(link.clone(), target),
+                link,
+                "link must be untouched for target_host {target:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn host_rewrite_leaves_port_and_secret_alone() {
+        // The `secret` query param carries the hex-encoded tls_domain independently of
+        // the `server` field — substituting the host must not disturb it.
+        let link = "tg://proxy?server=1.2.3.4&port=8443&secret=eedeadbeef676574".to_string();
+        let got = apply_host_rewrite(link, Some("example.com"));
+        assert!(got.contains("port=8443"), "got: {got}");
+        assert!(got.contains("secret=eedeadbeef676574"), "got: {got}");
+        assert!(got.contains("server=example.com"), "got: {got}");
+    }
+
+    #[test]
+    fn fetch_proxy_link_actually_applies_the_host_rewrite() {
+        // The defect was a helper that existed and was never called. A unit test over the
+        // helper alone would have stayed green for the whole life of the bug, so this
+        // guard pins the CALL: every return path of fetch_proxy_link that yields a link
+        // must go through the rewrite, and the parameter must no longer be ignored.
+        let source = include_str!("./server_mtproto.rs");
+        let body = source
+            .split("async fn fetch_proxy_link(")
+            .nth(1)
+            .and_then(|s| s.split("\n/// Phase 17.1 — full rollback").next())
+            .unwrap_or("");
+        assert!(
+            !body.is_empty(),
+            "fetch_proxy_link not found — this guard has lost its subject"
+        );
+        assert!(
+            !body.contains("_target_host"),
+            "the target host must no longer be an ignored parameter"
+        );
+        assert_eq!(
+            body.matches("return apply_host_rewrite(").count(),
+            2,
+            "both link-returning paths (API + journalctl) must apply the rewrite; body:\n{body}"
+        );
+        assert!(
+            !body.contains("return link;"),
+            "a raw `return link;` bypasses the rewrite and reopens item 14"
+        );
+    }
+
+    // ─── Item 16 (30.1 milestone review): a foreign secret never crosses IPC ───────
+    //
+    // `managed_by_us` was computed and never gated `secret`, so `mtproto_get_status` on
+    // a telemt instance the app did not install handed that admin's proxy secret to the
+    // webview. The D-29 comment beside the read records that this exact leak was already
+    // closed on the LOG channel (the read moved to exec_command_quiet); this closes the
+    // IPC channel, the other half of the same finding.
+
+    #[test]
+    fn a_foreign_secret_is_blanked_in_the_status_payload() {
+        assert_eq!(
+            status_secret_for_owner("eedeadbeef676574".to_string(), false),
+            "",
+            "an instance we did not install must not leak its secret to the front end"
+        );
+    }
+
+    #[test]
+    fn our_own_secret_is_returned_unchanged() {
+        // The front end must still be able to tell «installed, ours» from «installed,
+        // foreign» from «not installed» — only the secret field changes.
+        assert_eq!(
+            status_secret_for_owner("eedeadbeef676574".to_string(), true),
+            "eedeadbeef676574"
+        );
+    }
+
+    #[test]
+    fn the_status_payload_gates_its_secret_on_ownership() {
+        // Guards the CALL, like the rewrite guard above: the struct literal must route
+        // the secret through the ownership gate rather than moving it in bare.
+        let source = include_str!("./server_mtproto.rs");
+        let body = source
+            .split("pub async fn mtproto_get_status(")
+            .nth(1)
+            .and_then(|s| s.split("\n// ═══").next())
+            .unwrap_or("");
+        assert!(
+            !body.is_empty(),
+            "mtproto_get_status not found — this guard has lost its subject"
+        );
+        assert!(
+            body.contains("secret: status_secret_for_owner(secret, managed_by_us)"),
+            "the status payload must gate the secret on ownership; body:\n{body}"
+        );
+    }
+
+    #[test]
+    fn no_log_call_on_either_ownership_path_receives_the_secret_d29() {
+        // D-29 standing rule. A runtime spy is not available here — every log seam in
+        // this path (`emit_log`, `emit_mtproto_step`, and `exec_command`'s stdout echo)
+        // needs a live `tauri::AppHandle` and a live SSH session. So the assertion is
+        // made statically over the whole status path, which covers BOTH ownership
+        // branches at once because the branch is data, not control flow: the read is the
+        // same read either way.
+        let source = include_str!("./server_mtproto.rs");
+        let body = source
+            .split("pub async fn mtproto_get_status(")
+            .nth(1)
+            .and_then(|s| s.split("\n// ═══").next())
+            .unwrap_or("");
+        assert!(!body.is_empty(), "this guard has lost its subject");
+        // The secret-bearing telemt.toml read must stay on the NON-echoing exec.
+        assert!(
+            body.contains("exec_command_quiet("),
+            "the telemt.toml read must go through exec_command_quiet — plain exec_command \
+             echoes stdout into the deploy-log channel (WR-9 / D-29)"
+        );
+        // No logging seam may take the secret (or the secret-bearing link) as an argument.
+        for seam in ["emit_log", "emit_mtproto_step", "log_app", "eprintln!", "println!"] {
+            assert!(
+                !body.contains(seam),
+                "the status path must reach no log seam at all, found {seam:?}; if one is \
+                 ever added, prove it cannot carry `secret` or `proxy_link` (D-29)"
+            );
+        }
     }
 
     #[test]

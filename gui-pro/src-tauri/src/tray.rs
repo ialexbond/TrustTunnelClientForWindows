@@ -322,6 +322,48 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         return;
     };
 
+    // CA-2, THE THIRD SPAWN DOOR (30.1 regression defect 2). The window door
+    // (`vpn_connect`), the reconnect door (`respawn_sidecar`) and eight path-taking IPC
+    // commands all confine a config path to the data root before touching it. This door did
+    // not — it read `state.config_path` and spawned it raw. Two doors to the SAME action
+    // disagreed: the window refused a config the tray would happily hand to the C++ core.
+    //
+    // The aggravating detail that makes this more than an inconsistency: `vpn_connect` commits
+    // the UNVALIDATED path into `state.config_path` ~50 lines before its own guard runs, so a
+    // window connect that FAILS the guard first loads the refused path into the tray's only
+    // input. Window says «доступ запрещён», tray connects. The confinement control the codebase
+    // believes it has was missing on one of its three spawn paths — the class, not the instance.
+    //
+    // Guarded HERE, in the synchronous half, before the `vpn-flow` emit below: a refused path
+    // must not be broadcast to the window as the config the tray just connected, and the
+    // refusal costs nothing to decide early. The CANONICAL path the guard returns replaces the
+    // raw string from this point on, mirroring the window door's F16 fix so validate and spawn
+    // resolve the string exactly once (no check-then-use window).
+    //
+    // The status write is the same shape the D-02 routing refusal uses further down: this door
+    // has no `Err` channel to a caller, so the ONLY way to tell the user is the terminal status
+    // carrying the reason code, which the window localizes into the Russian sentence.
+    let config_path = match crate::commands::paths::validate_app_path_canonical(&config_path) {
+        Ok(canonical) => canonical.to_string_lossy().to_string(),
+        Err(e) => {
+            crate::logging::log_app(
+                "ERROR",
+                &format!(
+                    "[tray] connect REFUSED by the path guard (CA-2): config={config_path} \
+                     is outside the data root {} — {e}",
+                    crate::ssh::user_data_dir().to_string_lossy()
+                ),
+            );
+            set_vpn_status(
+                &app,
+                &state,
+                VpnStatus::Error,
+                Some(crate::lifecycle::CONFIG_OUTSIDE_DATA_DIR_REASON.to_string()),
+            );
+            return;
+        }
+    };
+
     let log_level = state.log_level.lock()
         .map(|g| g.clone())
         .unwrap_or_else(|_| "info".to_string());
@@ -430,9 +472,38 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         kill_stale_sidecar();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Resolve routing rules
-        let rules = routing_rules::load_routing_rules().unwrap_or_default();
-        if let Err(e) = routing_rules::resolve_and_apply_inner(&config_path, &rules, &geodata_state) {
+        // Resolve routing rules.
+        //
+        // D-02 (30.1 milestone review, blocker 2) — THE CLASS, NOT THE INSTANCE. The review named
+        // `vpn_connect` and `respawn_sidecar`. This is a THIRD spawn door with the identical
+        // defect: it used to default an unreadable `routing_rules.json` into an empty rule set and
+        // connect anyway, so the tray reported a working tunnel over routing the user never asked
+        // for. A fix that closed the two named doors and left this one open would mean the very
+        // same lie, reachable by clicking the tray instead of the window.
+        //
+        // `Connecting` was emitted at :410, so the refusal must move the status off it — the same
+        // rule the window path follows, through the same single mutator.
+        let rules = match crate::commands::vpn::rules_load_outcome(
+            routing_rules::load_routing_rules(),
+        ) {
+            Ok(rules) => rules,
+            Err(reason) => {
+                crate::logging::log_app(
+                    "ERROR",
+                    "[tray] routing_rules.json could not be parsed — refusing the connect (D-02)",
+                );
+                set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+                return;
+            }
+        };
+        // Item 13: the tray connect reports skipped entries too — the tray is a spawn door like
+        // any other, and a user who connects from it sees the same log panel.
+        if let Err(e) = routing_rules::resolve_and_apply_reporting(
+            &config_path,
+            &rules,
+            &geodata_state,
+            Some(&app),
+        ) {
             eprintln!("[tray_vpn_connect] Warning: routing rules resolve failed: {e}");
         }
 
@@ -896,8 +967,10 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             // AUDIT-2026-06-11 #7: cleanup runs even when the child slot was empty — a tray cancel
             // mid-respawn / mid-recovery must still tear the session down (the supervisor's T-31
             // Aborted branch handles any in-flight respawn). Moved INSIDE the state block so the
-            // generation guard above covers it (F-5): DNS/hosts belong to whichever session is live.
-            routing_rules::cleanup_hosts_block().ok();
+            // generation guard above covers it (F-5): the resolver belongs to whichever session
+            // is live. (DEFENDER-2026-09-03 removed a hosts-file cleanup that stood beside this
+            // one; it cleaned a block no shipped build ever wrote — see routing_rules.rs for the
+            // evidence.)
             // AUDIT-2026-06-11 #5 / FIX-A (RC-2): restore the pre-VPN system DNS, exactly like
             // `vpn_disconnect`. The hard-killed sidecar never restores it itself.
             crate::dns_guard::restore_system_dns();
@@ -936,7 +1009,6 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
         } else {
             // AppState gone (app shutting down): best-effort cleanup, nothing to gate or write.
-            routing_rules::cleanup_hosts_block().ok();
             crate::dns_guard::restore_system_dns();
         }
     });
@@ -945,6 +1017,147 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── 30.1 regression defect 2: EVERY spawn door is path-confined, and there are three ───
+    //
+    // `tray_vpn_connect` applied neither `vpn_connect_path_guard` nor `validate_app_path` while
+    // the window door and nine other IPC commands did. Two doors to the same action disagreed:
+    // the window refused a config the tray would hand straight to the C++ core. Worse, the
+    // window commits the UNVALIDATED path into `state.config_path` before its own guard runs,
+    // so a refused window connect loads that path into the tray's only input.
+    //
+    // The test below is a CENSUS, not a spot check, and that is the whole point. Guarding the
+    // one door the review named is how this defect was created: CA-2 (phase 17) closed
+    // `vpn_connect` and `respawn_sidecar` — the two doors ITS review named — and the tray was
+    // the door nobody counted. Plan 06 hit the identical shape on the corrupt-rules class and
+    // answered it by pinning the site count. A fourth spawn door moves the number and this test
+    // refuses to measure until somebody classifies it.
+
+    /// Strip `//` line comments so a door discussed in prose is never counted as a door.
+    /// Deliberately prefix-only (a `//` inside a string literal is not a comment) — the same
+    /// simplification `vpn.rs`'s D-02 census makes, and safe here because no string literal in
+    /// these three files contains `spawn_trusttunnel(`.
+    fn strip_line_comments(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The production half of a file: everything before its `#[cfg(test)]` module. A door named
+    /// inside a test is not a door.
+    fn production_half(src: &str) -> String {
+        let src = strip_line_comments(src);
+        match src.find("\n#[cfg(test)]") {
+            Some(i) => src[..i].to_string(),
+            None => src,
+        }
+    }
+
+    /// Every `.rs` file under `src/`, walked at test time. A census that reads a hard-coded
+    /// list of files can only ever find doors in the files somebody already thought of — which
+    /// is the same blind spot, one level up, as guarding the doors a review happened to name.
+    fn all_rust_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                all_rust_sources(&p, out);
+            } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    #[test]
+    fn every_sidecar_spawn_door_is_path_confined_and_there_are_exactly_three() {
+        let src_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        all_rust_sources(&src_root, &mut files);
+        files.sort();
+        assert!(
+            files.len() > 10,
+            "the source walk found only {} files — it did not reach the crate and this test is \
+             measuring nothing (CANNOT MEASURE, not a pass)",
+            files.len()
+        );
+
+        // Which file holds how many doors, and which confinement call each door file must carry.
+        // `sidecar.rs` DEFINES the spawn and its signature is excluded from the count below, so
+        // it is expected to hold zero calls and needs no guard of its own.
+        let expected: &[(&str, usize, &str)] = &[
+            ("commands/vpn.rs", 2, "vpn_connect_path_guard("),
+            ("tray.rs", 1, "crate::commands::paths::validate_app_path_canonical("),
+        ];
+
+        let mut found: Vec<(String, usize, String)> = Vec::new();
+        let mut total = 0usize;
+        for path in &files {
+            let Ok(raw) = std::fs::read_to_string(path) else { continue };
+            let body = production_half(&raw);
+            let n = body
+                .matches("spawn_trusttunnel(")
+                .count()
+                .saturating_sub(body.matches("fn spawn_trusttunnel(").count());
+            if n == 0 {
+                continue;
+            }
+            total += n;
+            let label = path
+                .strip_prefix(&src_root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            found.push((label, n, body));
+        }
+
+        // THE COUNT. Three doors: the window connect, its reconnect twin, and the tray.
+        assert_eq!(
+            total, 3,
+            "the sidecar spawn-door census expected 3 doors and found {total}: {:?}. A NEW door \
+             must be classified — does it confine its config path before spawning? — before this \
+             test can speak again. Guarding only the doors a review happens to name is exactly \
+             how the tray door stayed unguarded through the phase that closed the other two",
+            found.iter().map(|(l, n, _)| (l, n)).collect::<Vec<_>>()
+        );
+
+        // EACH DOOR CARRIES A GUARD. The count alone is worthless: plan 02 proved that on the
+        // fail2ban class, where an aggregate count stayed green while one of two doors was
+        // reverted. Every door file is matched to its expected confinement call, and an
+        // unexpected door FILE fails rather than passing unexamined.
+        for (label, n, body) in &found {
+            let Some((_, want_n, guard)) = expected.iter().find(|(l, _, _)| l == label) else {
+                panic!(
+                    "{label} holds {n} sidecar spawn door(s) and is not in the classified set. \
+                     Add it with the confinement call it uses — an unclassified door is how CA-2 \
+                     came to be missing on one of three paths"
+                );
+            };
+            assert_eq!(n, want_n, "{label} must hold exactly {want_n} spawn door(s)");
+            assert!(
+                body.contains(guard),
+                "{label} has a sidecar spawn door but no path confinement (`{guard}`). An \
+                 unguarded door hands the C++ core a config path from anywhere on disk, and the \
+                 CA-2 control the rest of the codebase relies on is only as strong as its \
+                 weakest door"
+            );
+            // The guard must run BEFORE the spawn — a confinement check after the fact is not a
+            // confinement check. Positional, because there is no other way to say "before".
+            let guard_at = body.find(guard).expect("asserted present above");
+            let spawn_at = body.find("spawn_trusttunnel(").expect("the door is why we are here");
+            assert!(
+                guard_at < spawn_at,
+                "{label}: the path guard must run BEFORE the spawn, not after it"
+            );
+        }
+        assert_eq!(
+            found.len(),
+            expected.len(),
+            "every classified door file must actually hold its doors — found {:?}, expected {:?}",
+            found.iter().map(|(l, n, _)| (l, n)).collect::<Vec<_>>(),
+            expected.iter().map(|(l, n, _)| (l, n)).collect::<Vec<_>>()
+        );
+    }
 
     // Tray left-click decision — the fix for "a second tray click brings the window back still
     // minimized". The live handler lives inside a `TrayIconEvent` that no test can build, so the

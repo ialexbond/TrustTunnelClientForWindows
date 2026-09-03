@@ -208,4 +208,9 @@ void quic_connector_destroy(QuicConnector *connector) {
     delete connector;
 }
 
+std::unique_ptr<QuicConnectorResult> quic_connector_get_result(QuicConnector *) {
+    // The mock never produces a handoff result.
+    return nullptr;
+}
+
 } // namespace ag

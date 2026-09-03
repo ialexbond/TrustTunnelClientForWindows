@@ -1,5 +1,5 @@
 ﻿use toml_edit::{DocumentMut, value, Array};
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
@@ -54,11 +54,11 @@ pub struct ActiveGroups {
 }
 
 fn exclusions_json_path() -> std::path::PathBuf {
-    portable_data_dir().join("exclusions.json")
+    user_data_dir().join("exclusions.json")
 }
 
 fn active_groups_path() -> std::path::PathBuf {
-    portable_data_dir().join("active_groups.json")
+    user_data_dir().join("active_groups.json")
 }
 
 /// Whitelist guard for a manual `iplist_group:<id>` id before it becomes a filesystem cache
@@ -79,7 +79,7 @@ fn is_valid_group_id(id: &str) -> bool {
 }
 
 fn group_cache_path(group_id: &str) -> std::path::PathBuf {
-    let cache_dir = portable_data_dir().join("group_cache");
+    let cache_dir = user_data_dir().join("group_cache");
     std::fs::create_dir_all(&cache_dir).ok();
     // Sanitize before joining: a rejected id (e.g. `../etc`, `a/b`) must NEVER build a path that
     // traverses out of the cache dir. Return a fixed sentinel INSIDE the cache dir whose name
@@ -597,7 +597,7 @@ pub async fn refresh_group_cache_if_stale(
 //
 // The security whitelist sanitizer `is_valid_group_id` (Phase 22, T-22-01). A manual
 // `iplist_group:<id>` entry is user-controlled input that reaches `group_cache_path(<id>)` →
-// `portable_data_dir().join("group_cache").join("<id>.json")`. Without a whitelist a value like
+// `user_data_dir().join("group_cache").join("<id>.json")`. Without a whitelist a value like
 // `../etc` or `a/b` would traverse out of the cache dir (tampering / info-disclosure). The
 // mitigation is a `[a-z0-9_-]`-only, ≤64-char, non-empty allowlist that also accepts the 17 known
 // iplist group ids + `ru_whitelist`.

@@ -21,7 +21,7 @@
 //
 // See .planning/debug/claude-code-403-on-vpn-reconnect.md (RC-2 / FIX-A).
 
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
@@ -31,7 +31,7 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn snap_path() -> PathBuf {
-    portable_data_dir().join("dns_snapshot.json")
+    user_data_dir().join("dns_snapshot.json")
 }
 
 #[derive(Serialize, Deserialize, Clone)]

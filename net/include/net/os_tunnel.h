@@ -15,6 +15,7 @@
 #include "common/error.h"
 #include "common/socket_address.h"
 #include "common/utils.h"
+#include "net/network_manager.h"
 #include "vpn/platform.h"
 #include "vpn/utils.h"
 
@@ -46,12 +47,19 @@ struct VpnOsTunnelSettings {
     int mtu;
     /** DNS servers addresses */
     VpnAddressArray dns_servers;
+    /** TUN / Wintun device name.
+     * On Linux: TUN interface name (empty/NULL = kernel-assigned).
+     * On macOS: request a specific `utun<N>` unit (empty/NULL = kernel-assigned).
+     * On Windows: Wintun adapter name, should be non-empty. */
+    const char *device_name;
+    /** If true, open the pre-existing device named `device_name`
+     *  instead of creating a new one. Requires `device_name` to be
+     *  non-empty. Linux only. */
+    bool use_existing;
 };
 
 #ifdef _WIN32
 struct VpnWinTunnelSettings {
-    /** Wintun adapter name. Displayed as title of connection in list of connections */
-    const char *adapter_name;
     /** Wintun adapter tunnel type. Displayed as "smth Tunnel" connection type in list of connections */
     const char *tunnel_type;
     /** Library module to handle tunnel */
@@ -89,6 +97,27 @@ WIN_EXPORT void vpn_win_tunnel_settings_destroy(VpnWinTunnelSettings *settings);
  * Default settings for all tunnels
  */
 WIN_EXPORT const VpnOsTunnelSettings *vpn_os_tunnel_settings_defaults();
+
+#if defined(__linux__) && !defined(ANDROID)
+/**
+ * Create Linux tunnel.
+ * @param settings Tunnel settings. See `vpn_os_tunnel_settings_defaults()` for recommended defaults.
+ * @return Newly created tunnel or NULL.
+ */
+WIN_EXPORT void *vpn_linux_tunnel_create(VpnOsTunnelSettings *settings);
+
+/**
+ * Destroy Linux tunnel.
+ */
+WIN_EXPORT void vpn_linux_tunnel_destroy(void *linux_tunnel);
+
+/**
+ * Get the file descriptor of the Linux TUN device.
+ * @param linux_tunnel Tunnel object returned by @ref vpn_linux_tunnel_create
+ * @return File descriptor, or -1 on error.
+ */
+WIN_EXPORT int vpn_linux_tunnel_get_fd(void *linux_tunnel);
+#endif
 
 #ifdef _WIN32
 /**
@@ -170,6 +199,9 @@ public:
     VpnOsTunnel &operator=(VpnOsTunnel &&) = delete;
 
 protected:
+    void mark_tunnel_active();
+    void clear_tunnel_active();
+
     void init_settings(const VpnOsTunnelSettings *settings) {
         m_settings.reset(vpn_os_tunnel_settings_clone(settings));
     }
@@ -178,6 +210,7 @@ protected:
     uint32_t m_if_index = 0;
     bool m_system_dns_setup_success = false;
     bool m_ipv6_available = false;
+    VpnTunnelActivityToken m_tunnel_activity_token = VPN_TUNNEL_ACTIVITY_TOKEN_INVALID;
 };
 
 #ifdef __linux__

@@ -3,7 +3,7 @@
 //! This is the LOCAL twin of the Control-Panel SSH export path
 //! (`server_export_config_deeplink[_advanced]`). Instead of SSHing into the
 //! server and asking its CLI for a `tt://` link, we read a stored client config
-//! TOML from the app's `portable_data_dir`, map its `[endpoint]` table forward
+//! TOML from the app's `user_data_dir`, map its `[endpoint]` table forward
 //! into a `DeepLinkConfig`, and call the compiled local encoder
 //! `trusttunnel_deeplink::encode()` — no server round-trip. This lets a user
 //! transfer a config to another device while offline (D-01/D-03).
@@ -18,7 +18,7 @@
 //!   import `tlv_encoder`.
 //! - **WR-04 — path guard.** A registered Tauri command is callable from ANY
 //!   frontend JS, so `config_path` is untrusted. `validate_app_path` confines
-//!   reads to `portable_data_dir` (mirrors `read_client_config`).
+//!   reads to `user_data_dir` (mirrors `read_client_config`).
 //! - **D-29 — logging discipline.** The `tt://` link legitimately CARRIES the
 //!   password (D-04); LOGGING it (or the file content) is forbidden. Any `[qr]`
 //!   log line may reference only the config path / a boolean, never the
@@ -152,7 +152,7 @@ fn endpoint_to_deeplink_config(ep: Endpoint) -> Result<DeepLinkConfig, String> {
 #[tauri::command]
 pub async fn export_config_deeplink_local(config_path: String) -> Result<String, String> {
     // WR-04: a registered Tauri command is callable from ANY frontend JS, so
-    // `config_path` is untrusted. Confine reads to `portable_data_dir`. First line.
+    // `config_path` is untrusted. Confine reads to `user_data_dir`. First line.
     crate::commands::paths::validate_app_path(&config_path)?;
 
     let content = std::fs::read_to_string(&config_path)
@@ -443,7 +443,7 @@ ampleExampleExampleExampleExampleExampleQ==\n\
         );
     }
 
-    // ── B-09: path outside portable_data_dir rejected (WR-04) ────────────────
+    // ── B-09: path outside user_data_dir rejected (WR-04) ────────────────
     #[tokio::test]
     async fn path_outside_data_dir_rejected() {
         // An absolute path outside the app data dir must be rejected by the
@@ -451,7 +451,7 @@ ampleExampleExampleExampleExampleExampleQ==\n\
         let result =
             export_config_deeplink_local("C:/Users/x/secret.txt".to_string()).await;
         let err = result.expect_err(
-            "a path outside portable_data_dir must be rejected (validate_app_path)",
+            "a path outside user_data_dir must be rejected (validate_app_path)",
         );
         // Assert the SPECIFIC path-guard rejection, not just any Err — otherwise the
         // 15-01 `unimplemented` stub (which also returns Err) would false-green this.

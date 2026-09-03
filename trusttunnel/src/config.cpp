@@ -24,7 +24,7 @@
 
 using namespace ag; // NOLINT(google-build-using-namespace)
 
-static constexpr uint32_t DEFAULT_MTU = 1280;
+static constexpr uint32_t DEFAULT_MTU = 1350;
 static const Logger g_logger("TRUSTTUNNEL_CLIENT"); // NOLINT(readability-identifier-naming)
 
 static const std::unordered_map<std::string_view, VpnUpstreamProtocol> UPSTREAM_PROTO_MAP = {
@@ -195,11 +195,22 @@ static std::optional<TrustTunnelConfig::TunListener> parse_tun_listener_config(c
     return std::nullopt;
 #endif
 
+    bool use_existing = (*tun_config)["use_existing"].value_or<bool>(false);
+    std::string device_name = (*tun_config)["device_name"].value_or<std::string>({});
+
+    if (use_existing && device_name.empty()) {
+        errlog(g_logger, "listener.tun: use_existing = true requires device_name to be set");
+        return std::nullopt;
+    }
+
     TrustTunnelConfig::TunListener tun = {
-            .adapter_name = (*tun_config)["adapter_name"].value_or<std::string>({}),
+            .device_name = std::move(device_name),
             .mtu_size = (*tun_config)["mtu_size"].value<uint32_t>().value_or(DEFAULT_MTU),
+            .tcp_recv_buf_size = (*tun_config)["tcp_recv_buf_size"].value<uint32_t>().value_or(0),
+            .tcp_send_buf_size = (*tun_config)["tcp_send_buf_size"].value<uint32_t>().value_or(0),
             .bound_if = std::move(bound_if),
             .change_system_dns = (*tun_config)["change_system_dns"].value_or<bool>(true),
+            .use_existing = use_existing,
             .netns = (*tun_config)["netns"].value<std::string>(),
     };
 
@@ -279,6 +290,14 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
     }
     result.post_quantum_group_enabled =
             config["post_quantum_group_enabled"].value_or(default_settings->post_quantum_group_enabled);
+    result.exclusions_tcp_early_ack_enabled =
+            config["exclusions_tcp_early_ack_enabled"].value_or(default_settings->exclusions_tcp_early_ack_enabled);
+    result.exclusions_preresolve_enabled =
+            config["exclusions_preresolve_enabled"].value_or(default_settings->exclusions_preresolve_enabled);
+    result.exclusions_preresolve_max_queries = config["exclusions_preresolve_max_queries"].value_or<uint32_t>(
+            uint32_t{default_settings->exclusions_preresolve_max_queries});
+    result.exclusions_scannable_ports =
+            config["exclusions_scannable_ports"].value_or<std::string>(default_settings->exclusions_scannable_ports);
 
     result.ssl_session_storage_path = config["ssl_session_cache_path"].value<std::string_view>();
 
@@ -306,23 +325,6 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
             infolog(g_logger, "Loaded exclusions from file: {} ({} bytes)", *ef, sz > 0 ? sz : 0);
         } else {
             warnlog(g_logger, "Failed to open exclusions_file: {}", *ef);
-        }
-    }
-
-    // Load blocked domains/IPs from external file
-    if (auto bf = config["blocked_file"].value<std::string>(); bf.has_value() && !bf->empty()) {
-        if (FILE *f = std::fopen(bf->c_str(), "r"); f != nullptr) {
-            std::fseek(f, 0, SEEK_END);
-            long sz = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
-            if (sz > 0) {
-                result.blocked.resize(static_cast<size_t>(sz), '\0');
-                std::fread(result.blocked.data(), 1, static_cast<size_t>(sz), f);
-            }
-            std::fclose(f);
-            infolog(g_logger, "Loaded blocked list from file: {} ({} bytes)", *bf, sz > 0 ? sz : 0);
-        } else {
-            warnlog(g_logger, "Failed to open blocked_file: {}", *bf);
         }
     }
 

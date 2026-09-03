@@ -269,3 +269,61 @@ describe("usePerConfigPing — cancel-on-re-seed + WR-05 prune", () => {
     globalThis.removeEventListener?.("unhandledrejection", onUnhandled);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Item 8 (30.1 milestone review) — «Обновить пинг» must never be left disabled
+// with no round in flight.
+//
+// The round's `finally` block guarded BOTH the result write and the busy-flag clear
+// on the same round-generation check. That guard is right for the write (a superseded
+// round must not paint a band for an id that just left the list) and wrong for the
+// flag: it hands the clear to "whichever round is now live", and since pinging became
+// MANUAL-ONLY (D-16 — no mount ping, no interval) there is no successor round to
+// inherit it. The button that starts a round is `disabled={pinging}`, so the flag it
+// set wedged its own only trigger until the component remounted.
+// ─────────────────────────────────────────────────────────────────────────
+describe("usePerConfigPing — item 8 (30.1): a superseded round clears the flag it set", () => {
+  it("clears `pinging` when the round is superseded mid-flight, while still writing NO result", async () => {
+    let resolveProbe: ((v: { status: string; ms: number }) => void) | undefined;
+    mockInvoke.mockImplementation(
+      (cmd: string) =>
+        new Promise((resolve) => {
+          if (cmd === "ping_config_endpoint") {
+            resolveProbe = resolve as (v: { status: string; ms: number }) => void;
+          } else {
+            resolve(null);
+          }
+        }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ targets }: { targets: PingTarget[] }) => usePerConfigPing(targets),
+      { initialProps: { targets: [{ id: "a", path: "/a.toml" }] } },
+    );
+
+    // Start a round over the {a} set; the probe hangs, so the flag is up and the button is held.
+    let round: Promise<void>;
+    act(() => {
+      round = result.current.refreshPings();
+    });
+    await waitFor(() => expect(result.current.pinging).toBe(true));
+
+    // Re-seed the target set while the {a} round is still in flight → the round is SUPERSEDED.
+    // Nothing starts a replacement round: pinging is manual-only and the only manual trigger is
+    // the button this very flag disables.
+    rerender({ targets: [{ id: "c", path: "/c.toml" }] });
+
+    await act(async () => {
+      resolveProbe?.({ status: "ok", ms: 10 });
+      await round;
+    });
+
+    // The round that RAISED the flag lowers it — no successor is required. Before the fix this
+    // read `true` and «Обновить пинг» stayed disabled for the rest of the session.
+    expect(result.current.pinging).toBe(false);
+    // …and the cancel guard on the RESULT write is untouched: the superseded round still paints
+    // nothing, for the departed id or the new one.
+    expect(result.current.pings.a).toBeUndefined();
+    expect(result.current.pings.c).toBeUndefined();
+  });
+});

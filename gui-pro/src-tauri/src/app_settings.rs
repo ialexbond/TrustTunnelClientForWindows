@@ -1,7 +1,7 @@
 //! App-level settings persisted on the Rust side (D-12).
 //!
 //! Why a new module instead of reusing something existing: before Phase 23 every backend-known
-//! setting used one of two ad-hoc mechanisms — a marker FILE next to the exe (`.start_minimized`
+//! setting used one of two ad-hoc mechanisms — a marker FILE in the data root (`.start_minimized`
 //! in `lib.rs`, `.enable_logs` in `logging.rs`) or a runtime mirror pushed from the frontend's
 //! `localStorage` (the notifications gate in `lib.rs`). Neither works for the geodata auto-update
 //! toggle:
@@ -13,7 +13,7 @@
 //! - The localStorage mirror is unreachable from a background task: the scheduler runs with no
 //!   window open, possibly before any webview has ever mounted this session.
 //!
-//! So: one small JSON in `portable_data_dir()`, modelled on `active_groups.json`
+//! So: one small JSON in `user_data_dir()`, modelled on `active_groups.json`
 //! (`geodata.rs`), holding a struct rather than a single boolean — the next Rust-side setting
 //! extends `AppSettings` instead of adding a fourth persistence mechanism.
 
@@ -118,7 +118,7 @@ pub struct FailoverSettings {
 }
 
 fn app_settings_path() -> PathBuf {
-    crate::ssh::portable_data_dir().join("app_settings.json")
+    crate::ssh::user_data_dir().join("app_settings.json")
 }
 
 /// Path-parameterised read leg, so the tests below can exercise the real decode + fallback

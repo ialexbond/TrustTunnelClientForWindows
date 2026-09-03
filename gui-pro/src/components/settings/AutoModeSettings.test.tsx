@@ -752,3 +752,88 @@ describe("AutoModeSettings — the eleven list states", () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Item 9 (30.1 milestone review) — a reorder the backend REFUSED must not be
+// announced as «Настройки сохранены».
+//
+// `persistOrder` was fire-and-forget with an empty catch, and both call sites (the
+// keyboard move and the drag drop) called `onSaved` unconditionally right after it.
+// So a refused write left the user with a confirmation they earned nothing for and a
+// visible queue order the failover engine does not use — the card and Rust silently
+// disagreeing about which server is tried first.
+//
+// The counter-pattern is on this very surface: the master toggle and the participation
+// set already route a refusal through a reconcile-and-report pair (`savedToRust` →
+// `reconcileFailoverFromRust` + `onSaveFailed`). The reorder was the odd one out.
+// ─────────────────────────────────────────────────────────────────────────
+describe("AutoModeSettings — item 9 (30.1): a refused reorder confirms nothing", () => {
+  /** Rust accepts everything except the reorder. */
+  function refuseReorder() {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return liveConfigs;
+      if (cmd === "reorder_configs") throw new Error("disk full");
+      return null;
+    });
+  }
+
+  it("reports the refusal, fires no confirmation, and puts the visible order back", async () => {
+    const onSaved = vi.fn();
+    const onSaveFailed = vi.fn();
+    masterOn();
+    refuseReorder();
+    render(<AutoModeSettings onSaved={onSaved} onSaveFailed={onSaveFailed} />);
+    const list = await findList();
+
+    // Move Config B up over Config A.
+    fireEvent.keyDown(within(list).getAllByRole("listitem")[1], { key: "ArrowUp" });
+
+    // The confirmation must not have fired on the keypress itself — before the fix it did,
+    // synchronously, before the write it was confirming had even been attempted.
+    expect(onSaved).not.toHaveBeenCalled();
+    // The refusal reaches the user through the same slot the other two refused writes use…
+    await waitFor(() => expect(onSaveFailed).toHaveBeenCalled());
+    // …and «Настройки сохранены» never fired at all for a write that did not land.
+    expect(onSaved).not.toHaveBeenCalled();
+    // The queue is back on the order Rust actually holds, rather than leaving the user looking at
+    // an arrangement failover will not use.
+    await waitFor(() => {
+      const rows = within(list).getAllByRole("listitem");
+      expect(rows[0]).toHaveTextContent("Config A");
+      expect(rows[1]).toHaveTextContent("Config B");
+    });
+  });
+
+  it("the live region corrects itself to the row's REAL position after a refusal", async () => {
+    // The announcement is the screen-reader equivalent of the visible order, so leaving it saying
+    // «на позиции 1 из 3» after the move was refused is the same lie in another channel.
+    masterOn();
+    refuseReorder();
+    render(<AutoModeSettings />);
+    const list = await findList();
+
+    fireEvent.keyDown(within(list).getAllByRole("listitem")[1], { key: "ArrowUp" });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("automode-live-region")).toHaveTextContent(
+        "Config B — позиция 2 из 3",
+      ),
+    );
+  });
+
+  it("an ACCEPTED reorder still confirms exactly as before", async () => {
+    const onSaved = vi.fn();
+    const onSaveFailed = vi.fn();
+    masterOn();
+    render(<AutoModeSettings onSaved={onSaved} onSaveFailed={onSaveFailed} />);
+    const list = await findList();
+
+    fireEvent.keyDown(within(list).getAllByRole("listitem")[1], { key: "ArrowUp" });
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(onSaveFailed).not.toHaveBeenCalled();
+    // …and the move stands.
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Config B");
+  });
+});

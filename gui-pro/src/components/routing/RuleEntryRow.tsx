@@ -48,10 +48,11 @@ const typeBadgeVariant: Record<string, NonNullable<BadgeProps["variant"]>> = {
   iplist_group: "neutral",
 };
 
+// Две карточки — значит по одной цели переноса у каждой. Третьей строки (`block`) здесь больше нет:
+// блокировка сайтов удалена 2026-09-03, и запись физически не может оказаться в блоке, которого нет.
 const moveTargets: Record<RouteAction, RouteAction[]> = {
   direct: ["proxy"],
   proxy: ["direct"],
-  block: ["direct", "proxy"], // block card hidden, but keep for data integrity
 };
 
 // Per-target arrow colour = the destination block's colour, THEME-AWARE (-fg), matching GroupChip's
@@ -59,7 +60,6 @@ const moveTargets: Record<RouteAction, RouteAction[]> = {
 const actionColors: Record<RouteAction, string> = {
   direct: "var(--color-success-fg)",
   proxy: "var(--color-accent-fg)",
-  block: "var(--color-danger-fg)",
 };
 
 export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEntryRowProps) {

@@ -6,6 +6,8 @@
 #include <sys/kern_control.h>
 #include <sys/kern_event.h>
 
+#include <common/utils.h>
+
 static const ag::Logger logger("OS_TUNNEL_MAC");
 
 static bool sys_cmd_bool(std::string cmd) {
@@ -39,6 +41,7 @@ ag::VpnError ag::VpnMacTunnel::init(const ag::VpnOsTunnelSettings *settings) {
         return {-1, "Failed to init tunnel"};
     }
     setup_if();
+    mark_tunnel_active();
     setup_dns();
     if (!setup_routes()) {
         return {-1, "Unable to setup routes for mactun session"};
@@ -50,6 +53,7 @@ ag::VpnError ag::VpnMacTunnel::init(const ag::VpnOsTunnelSettings *settings) {
 void ag::VpnMacTunnel::deinit() {
     close(m_tun_fd);
     m_system_dns_setup_success = false;
+    clear_tunnel_active();
 }
 
 std::string ag::VpnMacTunnel::get_name() {
@@ -84,15 +88,34 @@ evutil_socket_t ag::VpnMacTunnel::tun_open() {
         return -1;
     }
 
+    constexpr std::string_view UTUN_PREFIX = "utun";
+    unsigned int sc_unit = 0;
+    std::string_view device_name = utils::safe_string_view(m_settings->device_name);
+    if (!device_name.empty()) {
+        if (auto utun_index = ag::utils::starts_with(device_name, UTUN_PREFIX)
+                        ? ag::utils::to_integer<uint32_t>(device_name.substr(UTUN_PREFIX.size()))
+                        : std::nullopt) {
+            sc_unit = *utun_index + 1;
+        } else {
+            errlog(logger, "Malformed macOS device_name '{}'; expected utun<N>", device_name);
+            close(fd);
+            return -1;
+        }
+    }
+
     struct sockaddr_ctl addr{};
     addr.sc_id = info.ctl_id;
     addr.sc_len = sizeof(addr);
     addr.sc_family = AF_SYSTEM;
     addr.ss_sysaddr = AF_SYS_CONTROL;
-    addr.sc_unit = 0;
+    addr.sc_unit = sc_unit;
 
     if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
-        errlog(logger, "Failed to connect: ({}) {}", errno, strerror(errno));
+        if (sc_unit != 0 && errno == EBUSY) {
+            errlog(logger, "Requested utun device {} is busy", m_settings->device_name);
+        } else {
+            errlog(logger, "Failed to connect: ({}) {}", errno, strerror(errno));
+        }
         close(fd);
         return -1;
     }

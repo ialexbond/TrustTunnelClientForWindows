@@ -1,0 +1,114 @@
+#import "Logger.h"
+#import <os/log.h>
+
+#include "common/logger.h"
+#include <mutex>
+
+namespace {
+
+std::mutex g_callback_guard;
+NativeLoggerCallback g_callback = nil;
+
+LogLevel to_log_level(ag::LogLevel level) {
+    switch (level) {
+    case ag::LOG_LEVEL_ERROR:
+        return LogLevelError;
+    case ag::LOG_LEVEL_WARN:
+        return LogLevelWarn;
+    case ag::LOG_LEVEL_INFO:
+        return LogLevelInfo;
+    case ag::LOG_LEVEL_DEBUG:
+        return LogLevelDebug;
+    case ag::LOG_LEVEL_TRACE:
+        return LogLevelTrace;
+    }
+
+    return LogLevelInfo;
+}
+
+ag::LogLevel from_log_level(LogLevel level) {
+    switch (level) {
+    case LogLevelError:
+        return ag::LOG_LEVEL_ERROR;
+    case LogLevelWarn:
+        return ag::LOG_LEVEL_WARN;
+    case LogLevelInfo:
+        return ag::LOG_LEVEL_INFO;
+    case LogLevelDebug:
+        return ag::LOG_LEVEL_DEBUG;
+    case LogLevelTrace:
+        return ag::LOG_LEVEL_TRACE;
+    }
+
+    return ag::LOG_LEVEL_INFO;
+}
+
+NSString *to_ns_string(std::string_view message) {
+    NSString *string = [[NSString alloc] initWithBytes:message.data()
+                                                length:message.size()
+                                              encoding:NSUTF8StringEncoding];
+    return string ?: @"";
+}
+
+const char *to_log_level_name(ag::LogLevel level) {
+    switch (level) {
+    case ag::LOG_LEVEL_ERROR:
+        return "ERROR";
+    case ag::LOG_LEVEL_WARN:
+        return "WARN";
+    case ag::LOG_LEVEL_INFO:
+        return "INFO";
+    case ag::LOG_LEVEL_DEBUG:
+        return "DEBUG";
+    case ag::LOG_LEVEL_TRACE:
+        return "TRACE";
+    }
+
+    return "UNKNOWN";
+}
+
+void log_to_default_sink(ag::LogLevel level, std::string_view message) {
+    static os_log_t log_handle = os_log_create("com.adguard.TrustTunnel.VpnClientFramework", "VpnClient");
+    os_log(log_handle, "[%{public}s]\t%{public}.*s", to_log_level_name(level), (int)message.size(), message.data());
+}
+
+void dispatch_log(ag::LogLevel level, std::string_view message) {
+    NativeLoggerCallback callback = nil;
+    {
+        std::scoped_lock lock(g_callback_guard);
+        callback = g_callback;
+    }
+
+    if (callback != nil) {
+        callback(to_log_level(level), to_ns_string(message));
+        return;
+    }
+
+    log_to_default_sink(level, message);
+}
+
+void install_native_callback() {
+    ag::Logger::set_callback([](ag::LogLevel level, std::string_view message) { dispatch_log(level, message); });
+}
+
+} // namespace
+
+@implementation NativeLogger
+
++ (void)setCallback:(NativeLoggerCallback)callback {
+    static std::once_flag once;
+    std::call_once(once, install_native_callback);
+
+    std::scoped_lock lock(g_callback_guard);
+    g_callback = [callback copy];
+}
+
++ (LogLevel)currentLogLevel {
+    return to_log_level(ag::Logger::get_log_level());
+}
+
++ (void)setLogLevel:(LogLevel)logLevel {
+    ag::Logger::set_log_level(from_log_level(logLevel));
+}
+
+@end

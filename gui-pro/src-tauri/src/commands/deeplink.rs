@@ -1,4 +1,4 @@
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 use trusttunnel_settings::{endpoint_from_deeplink_config, trusttunnel_deeplink};
 
 /// Decode a trusttunnel:// deeplink URL and return the TOML config content.
@@ -180,7 +180,7 @@ pub async fn import_config_from_string(
         return Err("Config is missing the [endpoint] section".into());
     }
 
-    let config_dir = portable_data_dir();
+    let config_dir = user_data_dir();
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config dir: {e}"))?;
 
@@ -441,7 +441,7 @@ mod tests {
     // ─── T-11-08: import ADDS, never overwrites (Pitfall 2) ──────────────────
     //
     // The headline data-loss fix. `import_config_from_string` is hardwired to
-    // `portable_data_dir()`, so these tests exercise the SAME unique-filename +
+    // `user_data_dir()`, so these tests exercise the SAME unique-filename +
     // manifest-append + host+user-dup logic through the manifest helpers (which take an
     // explicit dir) over a tempdir — proving the behaviour without writing into the real
     // app data dir during a unit run.

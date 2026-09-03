@@ -121,6 +121,56 @@ pub const SIDECAR_EXIT_REASON: &str = "sidecar-exit";
 /// apart from "the server stopped responding".
 pub const RECOVERY_TIMEOUT_REASON: &str = "recovery-timeout";
 
+/// Stable, secret-free ASCII reason code emitted when `routing_rules.json` exists but
+/// cannot be parsed, so the app does not know what the user asked it to route
+/// (D-02, 30.1 milestone review blocker 2).
+///
+/// Distinct from every neighbour above, and the distinction is the whole point. The
+/// codes above all describe a TUNNEL that would not come up — no internet, a sidecar
+/// that died, an adapter that never returned. This one describes a tunnel we refuse to
+/// bring up: the machinery is fine, but the ROUTING POLICY is unreadable, and a tunnel
+/// carrying rules the user never wrote is worse than no tunnel. Collapsing it into
+/// `sidecar-exit` would tell somebody to retry the connection when the thing they must
+/// actually do is repair or reset their rule list — a message that sends the user to the
+/// wrong screen is not a smaller version of the right one.
+///
+/// The wording lives as `errors.routing_rules_unreadable` on the frontend
+/// (`vpnEventHelpers.ts` `REASON_CODE_I18N`), which points the user at the Routing tab
+/// where the reset affordance lives. D-09/D-29: FIXED lowercase-kebab ASCII — never the
+/// serde error text (English and unbounded), never a path, never Cyrillic.
+///
+/// TERMINAL (see `is_terminal_reason`): the file is byte-identical on every retry.
+pub const ROUTING_RULES_UNREADABLE_REASON: &str = "routing-rules-unreadable";
+
+/// Stable, secret-free ASCII reason code emitted when the CA-2 path-confinement guard
+/// REFUSES a connect because the `.toml` it was handed does not live inside the app's data
+/// root (`commands::paths::validate_app_path_canonical`).
+///
+/// **Why this code had to exist.** The guard used to abort with `set_vpn_status(…, None)`, and
+/// a terminal `Error` carrying no reason renders the frontend's generic fallback —
+/// «Не удалось выполнить подключение к серверу». That sentence blames the SERVER, which was
+/// never contacted: the app refused before a single packet left the machine. The 30.1
+/// regression diagnosis caught six real refusals on a real Windows install reported that way.
+/// A wrong cause is not a milder version of the right one — it sends the user to restart a
+/// server that is fine while the actual fix (the config file is not in the app's folder) goes
+/// unmentioned.
+///
+/// Distinct from `ROUTING_RULES_UNREADABLE_REASON` above for the same reason that one is
+/// distinct from its neighbours: that code means «I cannot read your ROUTING POLICY», this one
+/// means «I will not open THIS FILE». Different file, different recovery, different sentence.
+///
+/// The wording lives as `errors.config_outside_data_dir` on the frontend
+/// (`vpnEventHelpers.ts` `REASON_CODE_I18N`). D-09/D-29: FIXED lowercase-kebab ASCII — never
+/// the guard's English sentence, never the offending path (that goes to the log, which is a
+/// developer channel), never Cyrillic.
+///
+/// **Deliberately NOT registered in `is_terminal_reason`.** That predicate is consulted by the
+/// reconnect supervisor over the RECORDED failure cause, and no path records this one: the
+/// window guard returns `Err` straight to the caller, and the reconnect twin bails with a log
+/// line and no recorded cause (`vpn.rs`, `respawn_sidecar` step 3). Registering a code nothing
+/// records would be a guard over an empty set — the vacuous shape this phase keeps finding.
+pub const CONFIG_OUTSIDE_DATA_DIR_REASON: &str = "config-outside-data-dir";
+
 // ---------------------------------------------------------------------------
 // Pure decision helpers.
 //
@@ -196,6 +246,20 @@ pub fn is_terminal_reason(reason: &str) -> bool {
         | "VPN adapter creation failed"
         // Malformed config — the file is the same on every attempt.
         | "Configuration parse error. Check your config file."
+        // D-02 (30.1 blocker 2): the ROUTING RULES file could not be parsed, so the app does
+        // not know what the user asked it to route. Same argument as the malformed config one
+        // line above — the bytes on disk are identical on the second read — but a different
+        // file and a different recovery, which is why it is its own code and not a reuse.
+        // Registering it here is what stops the supervisor spending three attempts of about a
+        // minute each re-reading a file that cannot change while it reads it.
+        //
+        // NOTE this list is ALSO the sidecar's derived English fatal markers. Ours is the first
+        // of our own kebab codes to join them; the two kinds coexist because this predicate is
+        // deliberately the SINGLE source of the terminal set (see the doc above). What must NOT
+        // follow from that is the inverse — see `connectivity::terminal_reason_for_give_up`,
+        // whose allowlist stays narrow precisely so a sidecar English string cannot ride this
+        // list onto a Russian screen.
+        | ROUTING_RULES_UNREADABLE_REASON
     )
 }
 
@@ -943,6 +1007,163 @@ mod tests {
         assert_ne!(SIDECAR_PID_BASENAME, ".sidecar-light.pid"); // distinct from Light
     }
 
+    /// **The uninstaller reads the pid file the app writes.**
+    ///
+    /// The uninstall hook reads that file BY PATH in order to kill only this edition's VPN core.
+    /// If the two ends drift, uninstalling and updating stop killing the core and the tunnel
+    /// outlives the app — no error, no dialog, on a security product. It was ALREADY broken once:
+    /// the hook read `.sidecar.pid` while Rust had moved to the per-edition `.sidecar-pro.pid`
+    /// (D-07), so the kill had been a silent no-op and nothing was watching.
+    ///
+    /// `include_str!` binds the assertion to the real file at COMPILE time, so editing either end
+    /// alone cannot leave this green — the test binary is rebuilt when the `.nsh` changes.
+    ///
+    /// **Why this asserts on a prefix and a basename rather than on a resolved absolute path.**
+    /// The data root is the executable's own directory, which the installer spells `$INSTDIR` —
+    /// an NSIS variable that has no value until the uninstaller runs, so Rust cannot resolve it.
+    /// The agreement is therefore pinned in three parts, each of which alone would be too weak:
+    /// the hook's root is the install directory (not some other folder), the pid path is COMPOSED
+    /// from that root plus the constant production code uses, and Rust's own root really is the
+    /// executable's directory — which is what makes `$INSTDIR` the correct spelling of it.
+    #[test]
+    fn the_uninstall_hook_reads_the_pid_file_the_app_writes() {
+        let hook = include_str!("../nsis/installer-hooks.nsh");
+
+        // (1) The hook's root is the install directory. Pinning the literal is the point: any
+        //     other value — a $LOCALAPPDATA subfolder, a vendor\edition pair — means the hook is
+        //     looking somewhere the app does not write.
+        assert!(
+            hook.contains("!define TT_DATA_ROOT \"$INSTDIR\""),
+            "the uninstall hook must define the data root as the install directory — that is \
+             where the app writes"
+        );
+
+        // (2) The pid path is composed from THAT root plus the SAME constant production code
+        //     uses (`commands/vpn.rs::sidecar_pid_path` joins it onto `ssh::user_data_dir()`).
+        //     Hard-coding the basename here would make this test agree with itself rather than
+        //     with the application.
+        let want_pid =
+            format!("!define TT_SIDECAR_PID_FILE \"${{TT_DATA_ROOT}}\\{SIDECAR_PID_BASENAME}\"");
+        assert!(
+            hook.contains(&want_pid),
+            "the uninstall hook's pid path must be built from the data root plus \
+             {SIDECAR_PID_BASENAME}; expected the line: {want_pid}"
+        );
+
+        // (3) Rust's end of the agreement: the data root really is the executable's directory,
+        //     so `$INSTDIR` is the right NSIS spelling of it. Without this the first two
+        //     assertions would keep passing if the Rust helper moved the data elsewhere.
+        let install = std::path::Path::new("C:\\Users\\u\\AppData\\Local\\TrustTunnel Client Pro");
+        assert_eq!(
+            crate::ssh::resolve_data_root(Some(install.join("trusttunnel.exe"))).0,
+            install,
+            "the app's data root must be the executable's own directory, else $INSTDIR is the \
+             wrong spelling of it and the hook is reading the wrong folder"
+        );
+
+        // (4) The hook must READ the pid file through the composed define, never through a
+        //     hand-written path. A second, literal path is how the two ends drift back apart.
+        for line in hook.lines() {
+            let l = line.trim();
+            if (l.starts_with("IfFileExists") || l.starts_with("FileOpen")) && l.contains(".pid") {
+                assert!(
+                    l.contains("${TT_SIDECAR_PID_FILE}"),
+                    "the hook must read the pid file through TT_SIDECAR_PID_FILE, not a literal \
+                     path: {l}"
+                );
+            }
+        }
+    }
+
+    /// **The uninstaller must not delete the user's data.** An UPDATE runs the uninstaller.
+    ///
+    /// This is not hypothetical and it is not new: until phase 30.1 this hook unconditionally
+    /// deleted `ssh_credentials.json`, `known_hosts.json`, `routing_rules.json` and the rest on
+    /// every uninstall, so every routine update silently wiped the user's saved SSH passwords and
+    /// routing rules. The server list survived only by accident — `configs.json` and the
+    /// per-server `.toml` files were never in that list.
+    ///
+    /// The subjects are ALL of it: the data root is the install directory, so a `Delete` or
+    /// `RMDir` naming any user artifact under `$INSTDIR` — or under `${TT_DATA_ROOT}`, which is
+    /// the same folder — destroys live data. Comment lines are excluded, because the hook
+    /// documents by name exactly what it no longer deletes and a raw scan would flag its own
+    /// explanation.
+    #[test]
+    fn the_uninstaller_never_deletes_user_data() {
+        let hook = include_str!("../nsis/installer-hooks.nsh");
+
+        // Every artifact the app persists into its data root. Anything the uninstaller removes
+        // from this list is data the user loses on a routine update.
+        const USER_DATA: &[&str] = &[
+            "configs.json",
+            "ssh_credentials.json",
+            "known_hosts.json",
+            "routing_rules.json",
+            "exclusions.json",
+            "active_groups.json",
+            "connection_history.json",
+            "app_settings.json",
+            "dns_snapshot.json",
+            "trusttunnel_client.toml",
+            "webview_data",
+            "geodata",
+            "resolved",
+            "group_cache",
+            "runtime",
+            "logs",
+        ];
+
+        let mut offenders: Vec<String> = Vec::new();
+        for line in hook.lines() {
+            let l = line.trim();
+            if l.starts_with(';') {
+                continue; // prose, including the record of what used to be deleted here
+            }
+            let is_removal = l.starts_with("Delete ") || l.starts_with("RMDir");
+            if !is_removal {
+                continue;
+            }
+            // Only removals aimed at the data root can destroy user data. $TEMP leftovers and
+            // the icon caches under $LOCALAPPDATA are install-scoped and stay.
+            if !(l.contains("$INSTDIR") || l.contains("${TT_DATA_ROOT}")) {
+                continue;
+            }
+            if USER_DATA.iter().any(|name| l.contains(name)) {
+                offenders.push(l.to_string());
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "the uninstaller deletes user data from the data root — an UPDATE runs the \
+             uninstaller, so these lines wipe the user's servers, passwords and routing rules \
+             during what they experience as an update:\n  {}",
+            offenders.join("\n  ")
+        );
+
+        // The stance must be stated, not merely true by accident: an undocumented absence is what
+        // the next reader "fixes" by adding a tidy-up list back.
+        assert!(
+            hook.contains("DetailPrint \"Keeping user data in ${TT_DATA_ROOT}\""),
+            "the hook must say out loud that the user's data is kept, so the omission reads as a \
+             decision rather than as something forgotten"
+        );
+
+        // And the recursive form must never be aimed at the data root at all. `RMDir /r
+        // \"$INSTDIR\"` takes everything in one line and would not be caught by the name list.
+        for line in hook.lines() {
+            let l = line.trim();
+            if l.starts_with(';') {
+                continue;
+            }
+            assert!(
+                !(l.starts_with("RMDir /r")
+                    && (l.contains("\"$INSTDIR\"") || l.contains("\"${TT_DATA_ROOT}\""))),
+                "a recursive removal of the data root deletes everything the user has: {l}"
+            );
+        }
+    }
+
     #[test]
     fn never_connected_exit_reason_codes_are_ascii_and_cyrillic_free() {
         // 02-09 (UAT Gap #2) — mirror of vpn.rs `timeout_error_uses_reason_code_not_cyrillic`.
@@ -963,6 +1184,77 @@ mod tests {
         assert_eq!(NO_INTERNET_REASON, "no-internet");
         assert_eq!(SIDECAR_EXIT_REASON, "sidecar-exit");
         assert_ne!(NO_INTERNET_REASON, SIDECAR_EXIT_REASON);
+    }
+
+    /// 30.1 regression defect 1 — the refused connect's reason code.
+    ///
+    /// Same three facts as its D-02 neighbour below, with the third INVERTED and that inversion
+    /// is the point of writing the test at all: this code is deliberately NOT terminal, because
+    /// nothing records it as a failure cause for the reconnect supervisor to read. Registering
+    /// it would be a guard over an empty set — and an empty-set guard reads as coverage while
+    /// measuring nothing, which is the exact shape this phase has now caught six times.
+    #[test]
+    fn config_outside_data_dir_reason_is_a_distinct_ascii_token_and_is_not_registered_terminal() {
+        assert_eq!(CONFIG_OUTSIDE_DATA_DIR_REASON, "config-outside-data-dir");
+        assert!(CONFIG_OUTSIDE_DATA_DIR_REASON.is_ascii());
+        assert!(
+            !CONFIG_OUTSIDE_DATA_DIR_REASON
+                .chars()
+                .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)),
+            "reason code must contain NO Cyrillic — the Russian wording is an i18n key, not this",
+        );
+        // Distinct from every sibling: each sends the user to a different action, and this one's
+        // action («add the server again») is nothing like «check your internet» or «retry».
+        for sibling in [
+            NO_INTERNET_REASON,
+            SIDECAR_EXIT_REASON,
+            RECOVERY_TIMEOUT_REASON,
+            ROUTING_RULES_UNREADABLE_REASON,
+            crate::connectivity::RECONNECT_GAVE_UP_REASON,
+            crate::connectivity::FAILOVER_EXHAUSTED_REASON,
+        ] {
+            assert_ne!(CONFIG_OUTSIDE_DATA_DIR_REASON, sibling);
+        }
+        assert!(
+            !is_terminal_reason(CONFIG_OUTSIDE_DATA_DIR_REASON),
+            "no path records this code as a failure cause, so registering it terminal would add \
+             a branch nothing can reach — if a future change DOES record it, register it then \
+             and delete this assertion with the reason written down"
+        );
+    }
+
+    #[test]
+    fn routing_rules_unreadable_reason_is_ascii_cyrillic_free_distinct_and_terminal() {
+        // D-02 (30.1 blocker 2). Three separate facts, and the third is the one with teeth.
+        //
+        // (a) It is a token, not a sentence — the serde parse error is English and unbounded, so
+        //     nothing derived from it may ever be what crosses IPC (D-09/D-29).
+        assert_eq!(ROUTING_RULES_UNREADABLE_REASON, "routing-rules-unreadable");
+        assert!(ROUTING_RULES_UNREADABLE_REASON.is_ascii());
+        assert!(
+            !ROUTING_RULES_UNREADABLE_REASON
+                .chars()
+                .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)),
+            "reason code must contain NO Cyrillic — the Russian wording is an i18n key, not this",
+        );
+        // (b) Distinct from every sibling. Each of these sends the user somewhere different, and a
+        //     collision would send them to the wrong screen with a confident message.
+        for sibling in [
+            NO_INTERNET_REASON,
+            SIDECAR_EXIT_REASON,
+            RECOVERY_TIMEOUT_REASON,
+            crate::connectivity::RECONNECT_GAVE_UP_REASON,
+            crate::connectivity::FAILOVER_EXHAUSTED_REASON,
+        ] {
+            assert_ne!(ROUTING_RULES_UNREADABLE_REASON, sibling);
+        }
+        // (c) TERMINAL. A corrupt file is byte-identical on the second read and the third, so the
+        //     bounded reconnect loop must stop after ONE attempt rather than spend its budget —
+        //     roughly a minute per attempt of «Переподключение…» that cannot possibly succeed.
+        assert!(
+            is_terminal_reason(ROUTING_RULES_UNREADABLE_REASON),
+            "an unreadable rules file cannot heal between two respawns — retrying it is pure delay",
+        );
     }
 
     #[test]

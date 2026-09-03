@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use chrono::Local;
 use tokio::sync::mpsc;
 
-use crate::ssh::portable_data_dir;
+use crate::ssh::user_data_dir;
 
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
 
@@ -178,7 +178,7 @@ fn try_parse_ipv4(bytes: &[u8], pos: usize) -> Option<(usize, bool)> {
 }
 
 fn logs_dir() -> PathBuf {
-    portable_data_dir().join("logs")
+    user_data_dir().join("logs")
 }
 
 /// Initialize logging if enabled (flag file exists).
@@ -214,13 +214,25 @@ pub fn reinit_logging() {
     init_logging();
 }
 
+/// Basename of the "file logging is on" flag file. Named once so the reader below and the
+/// `set_logging_enabled` writer cannot resolve two different paths — which, since the reader
+/// decides whether the writer's effect is ever observed, would present as "the toggle does
+/// nothing" with no error anywhere.
+const ENABLE_LOGS_MARKER: &str = ".enable_logs";
+
+/// Path of the file-logging flag file, in the app's data root.
+///
+/// Resolved through the shared helper rather than re-derived here. The flag is written by one
+/// site and read by another, and the reader decides whether the writer's effect is ever
+/// observed — so two independent lookups present as "the toggle does nothing", reported through
+/// the very log channel this flag controls.
+fn enable_logs_marker_path() -> PathBuf {
+    crate::ssh::user_data_dir().join(ENABLE_LOGS_MARKER)
+}
+
 /// Check if logging is enabled via flag file.
 pub fn is_logging_enabled() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|d| d.join(".enable_logs")))
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    enable_logs_marker_path().exists()
 }
 
 /// Rotate log file if it exceeds MAX_LOG_SIZE. Returns true if rotation happened.
@@ -402,11 +414,7 @@ pub fn install_panic_hook() {
 
 #[tauri::command]
 pub fn set_logging_enabled(enabled: bool) -> Result<(), String> {
-    let flag_path = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("no parent dir")?
-        .join(".enable_logs");
+    let flag_path = enable_logs_marker_path();
     if enabled {
         fs::write(&flag_path, "1").map_err(|e| e.to_string())?;
     } else {

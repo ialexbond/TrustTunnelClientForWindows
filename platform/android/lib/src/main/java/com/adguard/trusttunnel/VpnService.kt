@@ -12,26 +12,33 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
-import com.adguard.trusttunnel.log.LoggerManager
+import com.adguard.trusttunnel.log.FileLogger
 import com.adguard.trusttunnel.utils.NetworkUtils
 import com.adguard.trusttunnel.utils.concurrent.thread.ThreadManager
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class VpnService : android.net.VpnService(), VpnClientListener {
 
     companion object {
-        private val SYNC = Any()
-
-        private val LOG = LoggerManager.getLogger("VpnService")
+        private val LOG = Logger("VpnService")
+        private val NETWORK_MANAGER_SYNC = Any()
 
         // Network monitoring
         private lateinit var connectivityManager: ConnectivityManager
         private lateinit var networkRequest: NetworkRequest
         private lateinit var networkCallback: NetworkUtils.Companion.NetworkCollector
-        private var connectionInfoFile: PrefixedLenRingProto? = null
+        private var connectionInfoFile: PersistentRingBuffer? = null
         private var currentStartId: Int = -1
 
+        private var fileLogger: FileLogger? = null
+        private var initialized = false
+
         private var vpnClient: VpnClient? = null
+        @Volatile
         private var configStorage: VpnConfigStorage? = null
         // The last VpnState observed by `onStateChanged`
         private var lastState: Int = 0
@@ -70,7 +77,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         fun start(context: Context, config: String?) = start(context, ACTION_START, config)
         private fun start(context: Context, action: String, config: String?) = start(context, getIntent(context, action), config)
 
-        fun startNetworkManager(context: Context) {
+        fun startNetworkManager(context: Context) = synchronized(NETWORK_MANAGER_SYNC) {
             if (::networkCallback.isInitialized) {
                 // Avoid double initialization
                 return
@@ -90,6 +97,14 @@ class VpnService : android.net.VpnService(), VpnClientListener {
             connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
         }
 
+        private fun startNetworkNotifications(vpnClient: VpnClient?) = synchronized(NETWORK_MANAGER_SYNC) {
+            networkCallback.startNotifying(vpnClient)
+        }
+
+        private fun stopNetworkNotifications() = synchronized(NETWORK_MANAGER_SYNC) {
+            networkCallback.stopNotifying()
+        }
+
         fun isPrepared(context: Context): Boolean {
             return try {
                 prepare(context) == null
@@ -103,34 +118,83 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         private fun getIntent(context: Context, action: String): Intent = Intent(context, VpnService::class.java).setAction(action)
 
         private val eventsSync = ThreadManager.create("events-sync", 1)
-        private var appNotifier: AppNotifier? = null;
-        fun setAppNotifier(file: File, notifier: AppNotifier) {
-            connectionInfoFile = PrefixedLenRingProto(file)
+        private var appNotifier: AppNotifier? = null
+        fun setAppNotifier(file: File, notifier: AppNotifier) = eventsSync.execute {
+            connectionInfoFile = PersistentRingBuffer(file)
             appNotifier = notifier
-            eventsSync.execute {
-                // Notify current state
-                appNotifier?.onStateChanged(lastState)
-                // Notify all query logs
-                connectionInfoFile?.apply {
-                    val records = read_all()
-                    if (records == null) {
-                        clear()
-                        return@execute
-                    }
-                    for (record in records) {
-                        appNotifier?.onConnectionInfo(record)
-                    }
+            // Notify current state
+            appNotifier?.onStateChanged(lastState)
+            // Notify all query logs
+            connectionInfoFile?.apply {
+                val records = readAll()
+                if (records == null) {
+                    clear()
+                    return@execute
+                }
+                for (record in records) {
+                    appNotifier?.onConnectionInfo(record)
                 }
             }
+        }
+
+        /**
+         * Initialize the adapter. Call once at app startup (e.g., from
+         * [MainActivity.configureFlutterEngine]) to set up network monitoring and
+         * file logging from the very beginning.
+         *
+         * Idempotent — safe to call multiple times.
+         */
+        fun initialize(context: Context) {
+            if (initialized) return
+            initialized = true
+
+            // FileLogger — captures all logs from this point forward
+            val logsDir = File(context.filesDir, "logs")
+            val logger = FileLogger(logsDir, FileLogger.VPN_BASE_NAME)
+            logger.install()
+            fileLogger = logger
+
+            // Network monitoring — detect network changes for VPN recovery
+            startNetworkManager(context)
+        }
+
+        /**
+         * Export log files to a timestamped temp directory.
+         *
+         * Returns absolute paths to snapshot copies. Caller (Flutter) owns cleanup.
+         * Safe to call while VPN is active.
+         */
+        fun exportLogs(context: Context): List<String> {
+            if (!initialized) return emptyList()
+
+            val dateStr = SimpleDateFormat("yyyyMMdd'T'HHmmss", Locale.US).apply {
+                timeZone = TimeZone.getDefault()
+            }.format(Date())
+
+            val exportDirName = "trusttunnel_android_logs_$dateStr"
+            val exportDir = File(context.cacheDir, exportDirName)
+
+            return fileLogger?.snapshotTo(exportDir) ?: emptyList()
+        }
+
+        /**
+         * Delete all log files produced by the VPN service.
+         *
+         * Safe to call while the VPN is active.
+         */
+        fun clearLogs() {
+            if (!initialized) return
+            fileLogger?.clearLogs()
         }
     }
 
     private var state = State.Stopped
     private val singleThread = ThreadManager.create("vpn-service", 1)
+    @Volatile
     private var certificateVerificator: CertificateVerificator? = null
 
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = synchronized(SYNC) {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
             LOG.info("Received a null intent, doing nothing")
             stopSelf()
@@ -172,7 +236,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         return START_NOT_STICKY
     }
 
-    private fun processStarting(configStr: String?, startId: Int): Unit = synchronized(SYNC) {
+    private fun processStarting(configStr: String?, startId: Int) {
         if (state == State.Started) {
             LOG.info("VPN service has already been started, do nothing")
             return
@@ -220,7 +284,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         }
         vpnClient = VpnClient(configStr, proxyClientListener)
 
-        networkCallback.startNotifying(vpnClient)
+        startNetworkNotifications(vpnClient)
         if (vpnClient?.start(vpnTunInterface) != true) {
             LOG.error("Failed to start Vpn client");
             close();
@@ -292,12 +356,12 @@ class VpnService : android.net.VpnService(), VpnClientListener {
      * @return true if the service has been closed successfully
      *         false if something is wrong with closing or the service has already been closed
      */
-    private fun close(startId: Int? = null): Boolean = synchronized(SYNC) {
+    private fun close(startId: Int? = null): Boolean {
         if (state != State.Started) return false.also { LOG.info("VPN service is not running, do nothing") }
 
         LOG.info("Closing VPN service")
 
-        networkCallback.stopNotifying()
+        stopNetworkNotifications()
         vpnClient?.stop()
         vpnClient?.close()
         vpnClient = null
@@ -332,7 +396,8 @@ class VpnService : android.net.VpnService(), VpnClientListener {
     }
 
     override fun verifyCertificate(certificate: ByteArray?, rawChain: List<ByteArray?>?): Boolean {
-        return certificateVerificator?.verifyCertificate(certificate, rawChain) ?: false;
+        val verificator = certificateVerificator ?: return false
+        return verificator.verifyCertificate(certificate, rawChain)
     }
 
     override fun onStateChanged(state: Int) = eventsSync.execute {

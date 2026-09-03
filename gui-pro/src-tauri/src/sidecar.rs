@@ -516,7 +516,7 @@ pub async fn spawn_trusttunnel(
                     // on Windows (PIDs recycle) could hit ANOTHER process, including a
                     // co-installed Light sidecar: exactly the cross-edition kill D-07 was
                     // added to prevent. Clean up the SAME per-edition basename we wrote.
-                    let pid_path = crate::ssh::portable_data_dir()
+                    let pid_path = crate::ssh::user_data_dir()
                         .join(crate::lifecycle::SIDECAR_PID_BASENAME);
                     // AUDIT-2026-06-11 #4: delete the PID file ONLY when it still records
                     // OUR OWN pid. A supervisor respawn (`respawn_sidecar`) or a fast

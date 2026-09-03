@@ -39,7 +39,7 @@ interface Props {
  *
  * The rows carry no icon, and that is deliberate rather than an omission: a card whose rows have no
  * icon at all skips the icon column entirely (`SettingsRow`), so two rows are consistent with each
- * other. «Авто-режим» and «Экспериментальные функции» are built the same way.
+ * other. «Авто-режим» is built the same way.
  *
  * The section deliberately owns NEITHER value. `App` holds the theme and the language and passes
  * them down; moving that ownership here would take the whole application's theming with it. Only

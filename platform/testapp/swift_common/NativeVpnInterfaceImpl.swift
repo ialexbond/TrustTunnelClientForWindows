@@ -19,10 +19,16 @@ class NativeVpnInterfaceImpl : NativeVpnInterface {
             }
         )
     }
-    func start(serverName: String, config: String) throws {
-        self.vpnManager.start(serverName: serverName, config: config)
+    func start(config: String) throws {
+        self.vpnManager.start(config: config)
     }
     func stop() throws {
         self.vpnManager.stop()
+    }
+    func exportLogs() throws -> [String] {
+        return vpnManager.exportLogs()
+    }
+    func clearLogs() throws {
+        _ = vpnManager.clearLogs()
     }
 }
