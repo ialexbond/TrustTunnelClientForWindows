@@ -16,7 +16,8 @@
     "rust:check": "cd src-tauri && cargo clippy -- -D warnings",
     "rust:fmt": "cd src-tauri && cargo fmt --check",
     "i18n:check": "node ../scripts/i18n-dead-keys.cjs",
-    "prerelease": "npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run rust:check && npm run build",
+    "nsis:check": "node ../scripts/nsis-text-gate.cjs",
+    "prerelease": "npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run rust:check && npm run build",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
