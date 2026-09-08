@@ -516,19 +516,29 @@ pub async fn spawn_trusttunnel(
                     // on Windows (PIDs recycle) could hit ANOTHER process, including a
                     // co-installed Light sidecar: exactly the cross-edition kill D-07 was
                     // added to prevent. Clean up the SAME per-edition basename we wrote.
-                    let pid_path = crate::ssh::user_data_dir()
-                        .join(crate::lifecycle::SIDECAR_PID_BASENAME);
-                    // AUDIT-2026-06-11 #4: delete the PID file ONLY when it still records
-                    // OUR OWN pid. A supervisor respawn (`respawn_sidecar`) or a fast
-                    // manual reconnect may have already saved the NEW child's pid into the
-                    // same per-edition file; this OLD child's late Terminated removing it
-                    // unconditionally would strip the new session's crash-cleanup fallback
-                    // (the next launch's `kill_stale_sidecar` would find nothing to sweep).
-                    let pid_file_is_ours = std::fs::read_to_string(&pid_path)
-                        .map(|contents| pid_file_records_pid(&contents, my_pid))
-                        .unwrap_or(false);
-                    if pid_file_is_ours {
-                        let _ = std::fs::remove_file(&pid_path);
+                    //
+                    // Phase 32: this used to compose the path itself by joining the basename
+                    // onto the data root. It now calls the ONE accessor, because the data root
+                    // and the pid directory stopped being the same folder in that phase — a
+                    // second composition site here would have silently kept writing the pid
+                    // file where the uninstaller no longer looks.
+                    //
+                    // 32-FIX-08: the accessor answers `None` when the executable's own directory
+                    // cannot be resolved, in which case nothing was ever written — «no path» and
+                    // «no file» are the same fact here, so both take the same do-nothing branch.
+                    if let Some(pid_path) = crate::commands::vpn::sidecar_pid_path() {
+                        // AUDIT-2026-06-11 #4: delete the PID file ONLY when it still records
+                        // OUR OWN pid. A supervisor respawn (`respawn_sidecar`) or a fast
+                        // manual reconnect may have already saved the NEW child's pid into the
+                        // same per-edition file; this OLD child's late Terminated removing it
+                        // unconditionally would strip the new session's crash-cleanup fallback
+                        // (the next launch's `kill_stale_sidecar` would find nothing to sweep).
+                        let pid_file_is_ours = std::fs::read_to_string(&pid_path)
+                            .map(|contents| pid_file_records_pid(&contents, my_pid))
+                            .unwrap_or(false);
+                        if pid_file_is_ours {
+                            let _ = std::fs::remove_file(&pid_path);
+                        }
                     }
 
                     // Read "was connected" from the single owner (vpn_status), not a

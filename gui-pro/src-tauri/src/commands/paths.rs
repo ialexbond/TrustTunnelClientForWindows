@@ -50,6 +50,27 @@ pub fn validate_path_in_dir(path: &str, allowed_dir: &Path) -> Result<(), String
 /// different targets (TOCTOU). The canonical value is ONLY produced on the Ok branch — the
 /// fail-closed Err branch (path + parent both non-existent) has no path to return.
 pub fn validate_path_in_dir_canonical(path: &str, allowed_dir: &Path) -> Result<PathBuf, String> {
+    // 32-FIX-03 — THE ROOT ITSELF MUST BE ABSOLUTE, and this runs before anything else.
+    //
+    // The phase-32 adversarial probe measured the failure this closes: with the data root
+    // degraded to a relative `"."`, `canonicalize` below resolved it to the PROCESS WORKING
+    // DIRECTORY — which under this phase's logon Scheduled Task is the install directory — and
+    // the guard went on returning `Ok` while defending the wrong folder. It followed the data
+    // instead of catching it, and a guard that reports success is the reason nobody looks.
+    //
+    // Two independent guarantees, deliberately: `ssh::data_root_from` now refuses to ANSWER a
+    // relative root, and this refuses to ANCHOR to one. The second is not the first restated,
+    // because this function takes its root as a PARAMETER (`manifest.rs` passes one), so the
+    // resolver's promise does not reach it.
+    //
+    // The empty root is the sharpest case and the reason a plain `canonicalize`-failure check
+    // would not do: `Path::starts_with` compares components and an empty path has none, so EVERY
+    // path starts with it — an empty allowed root turns the prefix test below into an
+    // unconditional accept.
+    if !allowed_dir.is_absolute() {
+        return Err("Access denied: path is outside the application data directory".into());
+    }
+
     let allowed =
         std::fs::canonicalize(allowed_dir).unwrap_or_else(|_| allowed_dir.to_path_buf());
 
@@ -342,6 +363,52 @@ pub fn lowercase_extension(file_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A confinement guard may never anchor itself to a root that is not absolute** (32-FIX-03).
+    ///
+    /// This is the second half of the phase-32 adversarial probe's critical finding. When the data
+    /// root degraded to a relative `"."`, the guard did not catch the move — it canonicalized the
+    /// same relative root and FOLLOWED the data into the process working directory, which under
+    /// this phase's logon Scheduled Task is the install directory. So the guard went on returning
+    /// `Ok` while defending the wrong folder, which is worse than no guard: a guard that reports
+    /// success is the reason nobody looks.
+    ///
+    /// The resolver refuses a relative root at source now (`ssh::data_root_from`), so this is a
+    /// SECOND, INDEPENDENT guarantee rather than the same one restated. It is worth having twice
+    /// because this function takes its root as a PARAMETER — `manifest.rs:1633` passes one — so
+    /// the resolver's promise does not reach it. (`validate_copy_source` and
+    /// `validate_temp_staged_path` need no such arm: neither takes a root, both build their own
+    /// from `user_data_dir()` and `temp_dir()`, and the resolver now covers the first.)
+    ///
+    /// The empty root is the sharpest arm and not a curiosity: `Path::starts_with` compares
+    /// components, an empty path has none, so EVERY path starts with it — an empty allowed root
+    /// turns the guard into an unconditional accept.
+    #[test]
+    fn the_confinement_guard_refuses_a_root_that_is_not_absolute() {
+        // `cargo test` runs with the crate root as the working directory, so this file exists
+        // and canonicalizes to somewhere under it — the exact condition that made the degraded
+        // root pass before.
+        let inside_the_working_directory = "Cargo.toml";
+
+        for root in [".", "", "src", "..\\src-tauri"] {
+            let got = validate_path_in_dir(inside_the_working_directory, Path::new(root));
+            assert!(
+                got.is_err(),
+                "a root of «{root}» is not absolute, so the guard would anchor itself to the \
+                 process working directory and defend whatever the app happened to be launched \
+                 from — under this phase's logon task, the install directory. It must refuse. \
+                 Got: {got:?}"
+            );
+        }
+
+        // Positive control. Without it the assertions above would still pass if the guard simply
+        // refused everything, which is a different bug wearing this fix's clothes.
+        let absolute_root = std::env::current_dir().expect("the test host has a working directory");
+        validate_path_in_dir(inside_the_working_directory, &absolute_root).expect(
+            "an ABSOLUTE root containing the path must still be accepted — the fix must not \
+             become a refusal of everything",
+        );
+    }
 
     // ── validate_copy_source: the rejections D-03 says a path validator earns ─────────
     //

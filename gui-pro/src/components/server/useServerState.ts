@@ -3,6 +3,11 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { formatError } from "../../shared/utils/formatError";
+import { retryOnSshTransport, sshErrorCode } from "../../shared/utils/sshRetry";
+import {
+  redactCredentialShapes,
+  redactSecretValue,
+} from "../../shared/utils/sanitizeLogMessage";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { useUsersState, type UsersState } from "./useUsersState";
@@ -174,29 +179,62 @@ export function useServerState(props: ServerPanelProps) {
       // shows the connecting skeleton, not the stub, until ALL attempts fail. A changed
       // host key is deterministic + security-sensitive → thrown immediately to the outer
       // catch's reset flow, NEVER retried.
+      //
+      // G-32-12 (UAT 2026-09-08, build h2vn6t): the retry budget above is now spent
+      // ONLY on failures whose transport broke. Two things forced the change.
+      //
+      // (1) A NEW race. Fixing auto-connect (G-32-9) means the tunnel now comes up
+      //     ~2 s INTO this very SSH session — measured: panel.load.start 10:57:58.326,
+      //     autoconnect.connect_invoked 10:58:00.384, panel.load.completed at
+      //     10:58:04.929 after 6830 ms of silent retrying. Before G-32-9 the tunnel
+      //     only ever came up on a manual click, long after this load had finished, so
+      //     the overlap had never happened. Owner's ruling: «SSH-сессия должна пережить
+      //     подключение VPN, то есть она не должна там умирать, иначе это странно».
+      //     The retry is what makes it survive, so it stays.
+      //
+      // (2) The old loop retried EVERYTHING except a changed host key — including a
+      //     REJECTED PASSWORD, three times, on every panel load, on a server whose
+      //     fail2ban this application installs and manages itself. The comment above
+      //     argued «a genuine auth failure simply fails the retry too, so broadening
+      //     costs nothing real»; that is true of the clock and false of the server's
+      //     ban counter. `classifySshFailure` now separates the two: SSH_AUTH_FAILED /
+      //     SSH_PASSWORD_REJECTED / SSH_KEY_REJECTED mean the server COMPLETED the
+      //     exchange and said no → one attempt, surfaced at once. SSH_AUTH_ERROR /
+      //     SSH_KEY_AUTH_ERROR mean the `authenticate_*` call itself errored, i.e. the
+      //     pipe broke mid-handshake → retried, because that is the route flip.
+      //
+      // `retryUnknown: true` preserves the deliberately broad cold-start recovery the
+      // comment above describes: an uncoded/unfamiliar russh wording still gets the
+      // full budget. Only the named refusals lost it.
+      //
+      // Both outcomes now write ONE line to activity.log. The error the owner saw on
+      // 2026-09-08 left no trace at all — the file held panel.load.start and
+      // panel.load.completed and nothing in between — which is why it took a screen
+      // recording to know it had happened.
       const RETRY_ATTEMPTS = 3;
       const RETRY_DELAY_MS = 1500;
-      let info: ServerInfo | undefined;
-      let lastProbeErr: unknown;
-      for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
-        try {
-          info = await invoke<ServerInfo>("check_server_installation", sshParams);
-          break;
-        } catch (probeErr) {
-          lastProbeErr = probeErr;
-          const probeStr = formatError(probeErr);
-          if (probeStr.includes("HOST_KEY_CHANGED") || probeStr.includes("Unknown server key")) {
-            throw probeErr;
-          }
-          if (attempt < RETRY_ATTEMPTS) {
-            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-          }
-        }
-      }
-      if (info === undefined) {
-        // All attempts failed (non-host-key) → surface as the normal unreachable error.
-        throw lastProbeErr;
-      }
+      const info = await retryOnSshTransport<ServerInfo>(
+        () => invoke<ServerInfo>("check_server_installation", sshParams),
+        {
+          attempts: RETRY_ATTEMPTS,
+          delayMs: RETRY_DELAY_MS,
+          retryUnknown: true,
+          onTransientFailure: ({ attempt, attempts, code }) => {
+            activityLog(
+              "STATE",
+              `panel.load.retry attempt=${attempt}/${attempts} code=${code}`,
+              "useServerState.loadServerInfo",
+            );
+          },
+          onRefusal: ({ code, failureClass }) => {
+            activityLog(
+              "ERROR",
+              `panel.load.refused class=${failureClass} code=${code}`,
+              "useServerState.loadServerInfo",
+            );
+          },
+        },
+      );
       setServerInfo(info);
       // R2-F08 (Plan 09-37, REVISED): authoritative-read producer for usersKnown.
       // The defect was `|| !silent`, which flipped true on the racy NON-SILENT mount
@@ -233,15 +271,65 @@ export function useServerState(props: ServerPanelProps) {
 
       // If installed, load config + cert in parallel
       if (info.installed && !silent) {
+        // G-32-12: these two ride the POOLED connection and run immediately after the
+        // probe — inside the very window auto-connect rewrites the routing table in.
+        // Their rejections used to be dropped on the floor by the allSettled, so a flip
+        // landing here left the Configuration tab and the certificate card empty with
+        // nothing on screen and nothing in the log to explain it.
+        //
+        // Policy is deliberately STRICTER than the probe's: transport codes only, no
+        // `retryUnknown`. The probe can afford to retry an unfamiliar wording because a
+        // failed probe blanks the whole panel; these two cannot, because
+        // SSH_READ_CONFIG_FAILED is a deterministic server-side condition
+        // (server_config.rs returns it when the file is unreadable) and spending the
+        // budget on it would add seconds to every load of a server in that state.
+        // Two attempts, not three: the pooled handle is re-acquired on the retry, so
+        // one fresh connection is the whole of what a route flip needs.
+        const PART_ATTEMPTS = 2;
+        const PART_DELAY_MS = 800;
+        const partOptions = (part: "config" | "cert") => ({
+          attempts: PART_ATTEMPTS,
+          delayMs: PART_DELAY_MS,
+          retryUnknown: false,
+          onTransientFailure: ({ attempt, attempts, code }: { attempt: number; attempts: number; code: string }) => {
+            activityLog(
+              "STATE",
+              `panel.data.retry part=${part} attempt=${attempt}/${attempts} code=${code}`,
+              "useServerState.loadServerInfo",
+            );
+          },
+        });
         const [cfgResult, certResult] = await Promise.allSettled([
-          invoke<string>("server_get_config", sshParams),
-          invoke<unknown>("server_get_cert_info", sshParams),
+          retryOnSshTransport(
+            () => invoke<string>("server_get_config", sshParams),
+            partOptions("config"),
+          ),
+          retryOnSshTransport(
+            () => invoke<unknown>("server_get_cert_info", sshParams),
+            partOptions("cert"),
+          ),
         ]);
         if (cfgResult.status === "fulfilled") {
           const val = cfgResult.value;
           setConfigRaw(typeof val === "string" ? val : JSON.stringify(val));
+        } else {
+          // Still non-fatal — a missing config must not blank a panel whose probe
+          // succeeded — but no longer silent. Code only: D-29 (see sshErrorCode).
+          activityLog(
+            "ERROR",
+            `panel.data.failed part=config code=${sshErrorCode(cfgResult.reason)}`,
+            "useServerState.loadServerInfo",
+          );
         }
-        if (certResult.status === "fulfilled") setCertRaw(certResult.value);
+        if (certResult.status === "fulfilled") {
+          setCertRaw(certResult.value);
+        } else {
+          activityLog(
+            "ERROR",
+            `panel.data.failed part=cert code=${sshErrorCode(certResult.reason)}`,
+            "useServerState.loadServerInfo",
+          );
+        }
       }
       // Phase 13.UAT G-02: panelDataLoaded=true даже если server NOT installed.
       // Иначе ControlPanelPage skeleton overlay не снимается (isFirstConnect стоит
@@ -262,9 +350,20 @@ export function useServerState(props: ServerPanelProps) {
         // даже если UI показывает "неверный пароль" (translateSshError может
         // переклассифицировать SSH timeout / network / broken pipe как auth fail).
         const dur = Date.now() - loadStartMs;
+        // D-29 (G-32-12): this line writes a RAW backend string into the log channel,
+        // which SAFETY-02 requires be scrubbed first — it never was. Two passes,
+        // because one is not enough: `redactCredentialShapes` catches the
+        // `password = "..."` / `{"password":"..."}` shapes the backend is known to
+        // produce, and `redactSecretValue` catches free prose that has no `=` or `:`
+        // at all (`authentication with password hunter2 failed`) by scrubbing the
+        // value this hook already holds. The 300-char budget is kept rather than
+        // adopting `sanitizeLogMessage`'s 80: G-07 added this line precisely because
+        // translateSshError renders transport failures as «неверный пароль», so the
+        // raw text is the only honest record, and 80 chars would gut it.
+        const safeRaw = redactSecretValue(redactCredentialShapes(errStr), sshPassword);
         activityLog(
           "ERROR",
-          `panel.load.failed dur=${dur}ms raw="${errStr.replace(/"/g, "'").slice(0, 300)}"`,
+          `panel.load.failed dur=${dur}ms raw="${safeRaw.replace(/"/g, "'").slice(0, 300)}"`,
           "useServerState.loadServerInfo",
         );
         if (errStr.includes("HOST_KEY_CHANGED") || errStr.includes("Unknown server key")) {

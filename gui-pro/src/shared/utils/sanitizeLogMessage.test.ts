@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeLogMessage, MAX_LOG_LEN } from "./sanitizeLogMessage";
+import {
+  sanitizeLogMessage,
+  redactCredentialShapes,
+  redactSecretValue,
+  MAX_LOG_LEN,
+} from "./sanitizeLogMessage";
 
 /**
  * SAFETY-02 / D-29 (T-04-16): the shared frontend log-sanitizer must strip
@@ -77,5 +82,66 @@ describe("sanitizeLogMessage", () => {
     expect(sanitizeLogMessage("")).toBe("");
     // @ts-expect-error — defensive guard against a non-string slipping in
     expect(sanitizeLogMessage(undefined)).toBe("");
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// G-32-12 — the two halves the panel-load line needs separately
+// ═══════════════════════════════════════════════════════
+
+describe("redactCredentialShapes", () => {
+  it("redacts the same shapes as sanitizeLogMessage but does NOT truncate", () => {
+    const dump = `password="${SECRET}" ` + "detail ".repeat(40);
+    const out = redactCredentialShapes(dump);
+    expect(out).not.toContain(SECRET);
+    // The whole point of splitting it out: panel.load.failed budgets 300 chars
+    // for the raw backend error and must not be clamped to 80.
+    expect(out.length).toBeGreaterThan(MAX_LOG_LEN);
+  });
+
+  it("returns empty string for empty / non-string input", () => {
+    expect(redactCredentialShapes("")).toBe("");
+    // @ts-expect-error — defensive guard against a non-string slipping in
+    expect(redactCredentialShapes(undefined)).toBe("");
+  });
+});
+
+describe("redactSecretValue", () => {
+  it("scrubs a known secret out of free prose that has no key=value shape", () => {
+    // The gap identity-redaction exists to close: no `:` or `=`, so the
+    // shape-based redactor cannot see it.
+    const prose = `authentication with password ${SECRET} failed`;
+    expect(redactCredentialShapes(prose)).toContain(SECRET);
+    expect(redactSecretValue(prose, SECRET)).not.toContain(SECRET);
+  });
+
+  it("scrubs EVERY occurrence, not just the first", () => {
+    const out = redactSecretValue(`${SECRET} and again ${SECRET}`, SECRET);
+    expect(out).not.toContain(SECRET);
+  });
+
+  it("leaks neither the value nor its length", () => {
+    const out = redactSecretValue(`tried ${SECRET} once`, SECRET);
+    expect(out).not.toContain(SECRET);
+    expect(out).toBe("tried [redacted] once");
+  });
+
+  it("leaves the message alone when there is no secret to scrub", () => {
+    expect(redactSecretValue("SSH_TIMEOUT|10.0.0.1", undefined)).toBe("SSH_TIMEOUT|10.0.0.1");
+    expect(redactSecretValue("SSH_TIMEOUT|10.0.0.1", null)).toBe("SSH_TIMEOUT|10.0.0.1");
+    expect(redactSecretValue("SSH_TIMEOUT|10.0.0.1", "")).toBe("SSH_TIMEOUT|10.0.0.1");
+  });
+
+  it("ignores a too-short secret instead of shredding the message into markers", () => {
+    // A 1-2 char "secret" would match almost everywhere; replacing it globally
+    // would destroy the log line for no security gain.
+    expect(redactSecretValue("SSH_TIMEOUT|10.0.0.1", "1")).toBe("SSH_TIMEOUT|10.0.0.1");
+    expect(redactSecretValue("SSH_TIMEOUT|10.0.0.1", "10")).toBe("SSH_TIMEOUT|10.0.0.1");
+  });
+
+  it("returns empty string for empty / non-string input", () => {
+    expect(redactSecretValue("", SECRET)).toBe("");
+    // @ts-expect-error — defensive guard against a non-string slipping in
+    expect(redactSecretValue(undefined, SECRET)).toBe("");
   });
 });

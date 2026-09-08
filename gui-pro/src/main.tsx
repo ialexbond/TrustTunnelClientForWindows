@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { polyfillCountryFlagEmojis } from "country-flag-emoji-polyfill";
 import App from "./App";
+import { MigrationOfferGate } from "./components/migration/MigrationOfferGate";
 import { SnackBarProvider } from "./shared/ui/SnackBarContext";
 import "./shared/styles/tokens.css";
 import "./index.css";
@@ -129,7 +130,16 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
       <SnackBarProvider>
-        <App />
+        {/* Phase 32 (32-08): the migration offer is asked HERE, wrapping <App />, and not inside
+            it. On the one launch where a previous version's data is waiting in another folder, the
+            question and the adoption behind it both complete before App mounts — so App's very
+            first read of the manifest already sees the adopted servers. Mounting App first and
+            refreshing afterwards would show an empty list and then pop the data in, which is the
+            one thing this must not do. Every other launch (which is all of them, after the first)
+            renders <App /> directly: the gate's probe is a single marker check. */}
+        <MigrationOfferGate>
+          <App />
+        </MigrationOfferGate>
       </SnackBarProvider>
     </ErrorBoundary>
   </React.StrictMode>,

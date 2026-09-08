@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
+import ru from "../../shared/i18n/locales/ru.json";
 import { GeneralSection } from "./GeneralSection";
 import { GEODATA_AUTO_UPDATE_CHANGED } from "../../shared/utils/geodataAutoUpdateSignal";
 
@@ -189,6 +190,50 @@ describe("GeneralSection", () => {
     expect(screen.queryByText(/registry/)).toBeNull();
   });
 
+  /**
+   * The read now has three answers, and the row must not render the third one as the second.
+   *
+   * `get_autostart` returns `Err` when the scheduler could not be asked at all — the service
+   * stopped by policy or a tuner, an apartment refused, this process's identity unreadable. The
+   * row used to `.catch(() => {})` that and stay on its `false` default, so a user whose task is
+   * registered and firing at every logon reads a confident OFF. They then either switch it on
+   * again or conclude the setting is broken.
+   */
+  it("does not render «could not read» as OFF on the autostart row", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") throw new Error("ITaskService::Connect failed");
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(target).toBeDisabled());
+    // The sentence is read out of the shipped bundle, not retyped: a test carrying its own copy
+    // of the copy agrees with itself while the product drifts.
+    expect(
+      screen.getByText(ru.settings.app.autostart_unknown)
+    ).toBeInTheDocument();
+    // And the ordinary description must be gone — leaving it would be the row claiming two things.
+    expect(screen.queryByText(ru.settings.app.autostart_desc)).toBeNull();
+    // The backend's own words never reach the screen.
+    expect(screen.queryByText(/ITaskService/)).toBeNull();
+  });
+
+  it("leaves the autostart row alone when the state reads honestly", async () => {
+    render(<GeneralSection {...defaultProps} />);
+
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_autostart"));
+    // The control for the test above. `Ok(false)` — absent or disabled — is a confident answer and
+    // must look exactly as it always did: an operable switch with its normal description.
+    expect(target).not.toBeDisabled();
+    expect(screen.getByText(ru.settings.app.autostart_desc)).toBeInTheDocument();
+    expect(screen.queryByText(ru.settings.app.autostart_unknown)).toBeNull();
+  });
+
   // ─── Phase 23: geodata auto-update row (D-12/D-13) ───
 
   it("renders the geodata auto-update toggle", () => {
@@ -255,13 +300,20 @@ describe("GeneralSection", () => {
     ]);
   });
 
-  /** Every row keeps its explanation — the description is the second, quieter line of the row. */
+  /**
+   * Every row keeps its explanation — the description is the second, quieter line of the row.
+   *
+   * The logging description is read from the locale rather than retyped here: since 32-FIX-08 it
+   * carries the two-folder sentence, and a copy of that long string in this file would be a second
+   * place to keep in step. What this test claims is «every row HAS its description», and the
+   * logging one's CONTENT has a test of its own further down.
+   */
   it("renders each row's description beneath its label", () => {
     render(<GeneralSection {...defaultProps} />);
     for (const description of [
       "Запускать TrustTunnel при старте Windows",
       "Скрывать окно при запуске, показывать только в трее",
-      "Сохранять журнал событий и вывод VPN-ядра в файлы",
+      ru.settings.app.logging_desc,
       "Базы GeoIP/GeoSite и списки групп обновляются в фоне раз в сутки",
     ]) {
       expect(screen.getByText(description)).toBeInTheDocument();
@@ -333,6 +385,8 @@ describe("GeneralSection", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Показать в папке" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("open_logs_folder"));
   });
+
+  // ─── Phase 32 (32-FIX-08, gap G-32-2d): where the two folders are ───
 
   /**
    * `initial-read`: the values are still on their way and the card stands on its defaults. No

@@ -458,7 +458,13 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, String> {
 
 /// Is this `.toml` a TrustTunnel client config? Mirrors `config.rs::auto_detect_config`
 /// (and the `deeplink.rs` shape guard): it must contain `[endpoint]` or `[listener`.
-fn looks_like_config(content: &str) -> bool {
+///
+/// `pub(crate)` for phase 32-04: first-launch adoption (`data_adoption.rs`) has to answer the same
+/// question — "is this `.toml` a server config?" — to hold its count invariant, and its tests have
+/// to count the same population. A retyped second copy of this predicate would let adoption agree
+/// with ITSELF rather than with the reconciler, and adoption disagreeing with the reconciler about
+/// what counts as a server is precisely how five servers became ten (30.1-REGRESSION.md § 2).
+pub(crate) fn looks_like_config(content: &str) -> bool {
     content.contains("[endpoint]") || content.contains("[listener")
 }
 
@@ -1015,7 +1021,14 @@ pub fn migrate_configs(legacy_active_path: Option<String>) -> Result<Vec<ConfigS
 /// the app AND deletable in-app — the two things a manifest-only list + a manifest-only delete could
 /// never do. Returns true if anything was adopted (so the caller persists). D-29: `derive_name` reads
 /// only the display name, never the password.
-fn adopt_orphans_in_dir(dir: &Path, manifest: &mut Manifest) -> bool {
+///
+/// `pub(crate)` for phase 32-04: first-launch adoption must leave the manifest describing exactly
+/// the configs on disk (the count invariant), and a legacy `configs.json` can legitimately be stale
+/// — a `.toml` may be sitting there with no row naming it. Rather than re-implement the append,
+/// adoption calls THIS one, so the id derivation, the name derivation, the ordering and the
+/// `looks_like_config` predicate are the application's own rather than a second opinion. A second
+/// opinion about what counts as a server is how five servers became ten.
+pub(crate) fn adopt_orphans_in_dir(dir: &Path, manifest: &mut Manifest) -> bool {
     let mut seen: Vec<std::path::PathBuf> = manifest
         .configs
         .iter()

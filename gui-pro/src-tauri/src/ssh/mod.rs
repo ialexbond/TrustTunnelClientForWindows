@@ -205,49 +205,271 @@ pub fn auth_plan(auth_method: Option<&str>, _has_key: bool, _has_password: bool)
 //   `configs.json` rather than copy it; that is the defect that made this revert necessary, and
 //   it is recorded here so the next attempt does not rediscover it in production.
 
-/// Where the data root was resolved FROM. Reported by diagnostics so a machine on which the
-/// primary lookup failed says so out loud instead of silently degrading.
+// RECORDED LIMITATION — WHOSE local-app-data location? (32-FIX-03)
+//
+// The rule below says «the product folder under the per-user application-data location». It does
+// not say WHICH user, and on one configuration that is not the person using the app.
+//
+// The manifest is `requireAdministrator` (`trusttunnel.exe.manifest`, embedded by `build.rs`).
+// Under OVER-THE-SHOULDER UAC on a standard-user machine — the person at the keyboard is not an
+// administrator and somebody else supplies the credentials — Windows runs this process as the
+// SUPPLYING ADMINISTRATOR, with that administrator's profile and environment. So `LOCALAPPDATA`
+// names the administrator's folder, `data_adoption.rs`'s HKCU lookup reads the administrator's
+// hive, and `task_scheduler::current_user_id` (32-FIX-01) reads the administrator's SID off the
+// process token. Three answers, one substituted identity.
+//
+// BEFORE PHASE 32 THIS COULD NOT HAPPEN: the data root was one fixed absolute path, identical for
+// every account. The relocation is what introduced the question.
+//
+// IT IS INVISIBLE ON A MACHINE WHERE THE USER IS A LOCAL ADMINISTRATOR — split-token elevation
+// keeps the same SID, the same `%LOCALAPPDATA%` and the same `HKCU` — which is why no gate here
+// catches it and why it is written down instead. Blast radius, named rather than gestured at:
+//   1. the user's servers, passwords and settings live in the administrator's profile;
+//   2. a DIFFERENT elevating administrator next time is a different root — «my servers vanished»;
+//   3. the logon task fires at the administrator's logon, so the switch promises a startup that
+//      will not happen — the exact defect this phase existed to fix, in the one case it cannot
+//      see;
+//   4. first-launch adoption repeats per elevating administrator (its marker is per-profile too).
+//
+// WHY THIS IS RECORDED AND NOT «FIXED». Every way to identify the real interactive user from an
+// elevated process is the heuristic `32-CONTEXT.md` D-08 rejected — and D-08's ground, «a
+// heuristic adjacent to a data-destroying step is not a fix», is STRONGER here, not weaker: the
+// data root sits next to `data_adoption`, which copies and rolls back the credential store, and a
+// wrong answer is not «slightly off», it is that same «my servers vanished». D-08 was about the
+// INSTALLER, and its answer was D-07 — adoption inside the app, «the only mechanism that runs as
+// the real user BY CONSTRUCTION». Over-the-shoulder elevation is the single case where that «by
+// construction» is false. The discovery is therefore not that the heuristic became acceptable; it
+// is that D-07's premise is narrower than it was written.
+//
+// WHAT WOULD ACTUALLY CLOSE IT (backlog, not here): drop `requireAdministrator` from the manifest
+// and elevate only the operations that need it, so the process always runs as the real user and
+// the question disappears instead of being guessed at. That is real work — the VPN core spawn,
+// the WinTUN adapter and the route edits all depend on those rights today.
+//
+// Full record, with the ACL measurements: `memory/security-posture.md`, «повышение через плечо».
+// Made diagnosable rather than merely written down: `diagnostics.rs::data_root_report` prints the
+// process account beside the resolved root.
+
+/// The folder the user's data lives in, under the local-app-data location.
 ///
-/// Kept through the revert deliberately. The lookup is simpler now, but it can still fail —
-/// `current_exe()` returns `Err` on a platform or a sandbox that will not answer — and the
-/// fallback below is genuinely degraded, so a diagnostics bundle must be able to say which of
-/// the two answered.
+/// Spelled out rather than derived from `CARGO_PKG_NAME` (`trusttunnel`) or from the executable's
+/// file name, because it must match the NSIS `PRODUCTNAME` define — `tauri.conf.json`'s
+/// `productName`, "TrustTunnel Client Pro" — which is what the pre-32 install directory was named
+/// and therefore where existing users' files already are. A derived name that differed by one
+/// character would present as an empty server list with every `.toml` still on disk.
+///
+/// Stable because the application version is frozen and the product name with it. Light's mirror
+/// will carry "TrustTunnel Client Light" here; the two editions must never share a data root.
+pub(crate) const PRODUCT_DATA_FOLDER: &str = "TrustTunnel Client Pro";
+
+/// Where the data root was resolved FROM. Reported by diagnostics so the answer a running app is
+/// actually using is nameable rather than inferred.
+///
+/// The variant IS the diagnostic. That is why phase 32 added a new one rather than reusing
+/// `ExecutableDir` for the new source: a machine that answered from the local-app-data location
+/// and a machine that answered from beside the executable are in genuinely different states, and
+/// a diagnostics bundle that spelled both the same way could not tell them apart.
+///
+/// **There is exactly one production variant, and that is the point** (32-FIX-03). A failed
+/// lookup no longer has an origin because it no longer has a path — see [`DataRootRefusal`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataRootOrigin {
-    /// The executable's own directory — the expected answer on every install.
-    ExecutableDir,
-    /// The process working directory, because `current_exe()` could not be resolved.
-    ///
-    /// This is DEGRADED and the user must be told: for a shell-launched or logon-task-launched
-    /// process the working directory is unpredictable and frequently `C:\Windows\System32`, so
-    /// the app would look for the user's servers somewhere they are not — and, worse, write new
-    /// ones there. Silently falling back here is how "my servers disappeared" happens with no
-    /// error anywhere; naming the origin in diagnostics is what makes it explicable.
-    WorkingDirFallback,
+    /// `%LOCALAPPDATA%\TrustTunnel Client Pro` — the expected answer on every install.
+    LocalAppData,
+    //
+    // `WorkingDirFallback` USED TO LIVE HERE and was DELETED by 32-FIX-03, deliberately, rather
+    // than left as a variant nothing constructs. It named «the process working directory, because
+    // the local-app-data location could not be resolved» — a state that can no longer exist,
+    // because that answer is now a [`DataRootRefusal`] instead of a path. The variant is gone so
+    // the degraded root is unrepresentable by TYPE rather than forbidden by comment: a future
+    // edit cannot re-introduce the fallback without also re-introducing a name for it, and the
+    // absence of the name is where the reader asks why.
+    //
     /// A test override. Only reachable under `cfg(test)`.
     #[cfg(test)]
     TestOverride,
 }
 
-/// The PURE resolution rule: given whatever `current_exe()` answered, where does the data go?
+/// Why the data root could not be resolved — the one answer that must NEVER be a path.
+///
+/// A failure gets its own vocabulary rather than a degraded path, for the reason the phase-32
+/// adversarial probe measured rather than guessed: with `LOCALAPPDATA` and `USERPROFILE` unset,
+/// the rule answered a RELATIVE `"."`, and this phase's own logon Scheduled Task sets the process
+/// working directory to the INSTALL directory. So on that branch the app wrote the plaintext
+/// credential store, the known hosts and the routing rules into `Program Files` — where, by the
+/// ACL measured in the module comment above, every account on the machine can read them. The
+/// path-confinement guard canonicalized the same relative root and followed the data there, so it
+/// defended the wrong directory instead of catching the move.
+///
+/// That is precisely the trade `30.1-*/deferred-items.md` § item 6 forbids: «relocating the
+/// install without also moving the data converts a local-elevation fix into a credential-
+/// disclosure regression». This phase performed the relocation; the degraded branch quietly
+/// undid it. Refusing is strictly better than starting: an application that does not start is a
+/// visible, reversible failure, and silently writing secrets into a world-readable directory is
+/// neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataRootRefusal {
+    /// Neither `LOCALAPPDATA` nor `USERPROFILE` named a location at all.
+    LocalAppDataUnresolvable,
+    /// One of them answered, but with something that is not an ABSOLUTE path.
+    ///
+    /// A separate arm because it is a separate hazard and the `None` check alone does not cover
+    /// it. The variables are inherited and whatever launched this process chooses them, so
+    /// `LOCALAPPDATA=.`, `LOCALAPPDATA=\Users\bob\AppData\Local` (rooted, but on whichever drive
+    /// happens to be current) and `LOCALAPPDATA=C:AppData` (drive-relative, resolved against the
+    /// current directory on C:) all reach the same destination as the `None` branch — a data root
+    /// that moves with the working directory — while passing an `is_some()` test.
+    LocalAppDataNotAbsolute,
+}
+
+/// What the user is told when the data root cannot be resolved.
+///
+/// A pure function, compiled in both builds, so the one message a user will ever see for this
+/// failure is assertable — [`refuse_to_start`] itself ends the process and cannot be unit-tested.
+///
+/// **D-29.** It carries no path and no file name: not the credential store's, not the data root's
+/// (there is none — that is the failure), not the working directory it would otherwise have
+/// degraded to. The cause is named by ENVIRONMENT VARIABLE NAME, which is public knowledge and
+/// cannot echo anything the user typed.
+pub(crate) fn refusal_message(why: DataRootRefusal) -> String {
+    let cause = match why {
+        DataRootRefusal::LocalAppDataUnresolvable => {
+            "Windows не сообщил, где находится личная папка пользователя — переменные \
+             LOCALAPPDATA и USERPROFILE пусты."
+        }
+        DataRootRefusal::LocalAppDataNotAbsolute => {
+            "Windows сообщил расположение личной папки пользователя не полным путём — \
+             переменные LOCALAPPDATA и USERPROFILE указывают не на абсолютный путь."
+        }
+    };
+    format!(
+        "Не удалось определить папку для данных программы.\n\n{cause}\n\nПрограмма не будет \
+         запущена. Иначе она сохранила бы ваши серверы, пароли и настройки рядом с собой — в \
+         папке, которую могут прочитать все учётные записи этого компьютера."
+    )
+}
+
+/// Refuse to start, having told the user why, because there is nowhere safe to keep the data.
+///
+/// **Why refusing beats every alternative.** Continuing would write the plaintext credential
+/// store into the process working directory, which under this phase's own logon Scheduled Task is
+/// the install directory under `Program Files`. Degrading to some other absolute fallback would
+/// be the same silent substitution wearing a tidier hat — the user's servers would appear to have
+/// vanished, with no error anywhere, which is the exact failure mode the `DataRootOrigin`
+/// diagnostics were added to make explicable.
+///
+/// The message goes to a native message box rather than to `app.log`, and that is forced rather
+/// than chosen: the log file itself lives under the data root, so at this point there is nowhere
+/// to write it. `MessageBoxW` costs no new dependency — `windows-sys` already carries
+/// `Win32_UI_WindowsAndMessaging` for the icon extraction in `processes.rs`.
+///
+/// Unreachable in a test build (`cfg(not(test))`), which is deliberate: a unit test that reached
+/// it would take the whole test binary down with it.
+#[cfg(not(test))]
+fn refuse_to_start(why: DataRootRefusal) -> ! {
+    let text = refusal_message(why);
+    eprintln!("[data-root] {text}");
+
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            MessageBoxW, MB_ICONERROR, MB_OK, MB_SETFOREGROUND,
+        };
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let body = wide(&text);
+        let caption = wide("TrustTunnel Client Pro");
+        MessageBoxW(
+            std::ptr::null_mut(),
+            body.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
+        );
+    }
+
+    std::process::exit(1);
+}
+
+/// The local-app-data location for the CURRENT user, or `None` if the environment will not say.
+///
+/// `USERPROFILE\AppData\Local` is tried second because `LOCALAPPDATA` is absent in a few real
+/// contexts — a service account's minimal environment, some CI containers — while `USERPROFILE`
+/// survives them. Both are read rather than resolved through `SHGetKnownFolderPath` because this
+/// stays a pure-enough rule with no FFI, and because the two answers agree on every desktop
+/// Windows install; the degraded origin below covers the case where neither answers.
+fn local_app_data_dir() -> Option<std::path::PathBuf> {
+    if let Some(v) = std::env::var_os("LOCALAPPDATA") {
+        if !v.is_empty() {
+            return Some(std::path::PathBuf::from(v));
+        }
+    }
+    std::env::var_os("USERPROFILE")
+        .filter(|v| !v.is_empty())
+        .map(|v| std::path::PathBuf::from(v).join("AppData").join("Local"))
+}
+
+/// The rule itself, with the one lookup that can fail hoisted into the caller's hands.
+///
+/// Separated from [`resolve_data_root`] so the REFUSING branches are assertable WITHOUT mutating
+/// the process environment: forcing `LOCALAPPDATA` to be absent would mean `std::env::set_var`,
+/// which races every other test in the binary and is `unsafe` from Rust 2024 for that exact
+/// reason. Handing this function its input directly states the same fact with no shared state —
+/// and, for this module above all, resolves no real data root while doing so.
+///
+/// **Every `Ok` answer is an ABSOLUTE path, and that is the contract 32-FIX-03 added.** The rule
+/// used to hand back `"."` when the environment said nothing; under this phase's logon Scheduled
+/// Task the process working directory is the install directory, so that answer wrote the
+/// plaintext credential store into `Program Files`. Both refusal arms exist because both reach
+/// that destination — one by saying nothing, one by saying something relative.
+fn data_root_from(
+    local_app_data: Option<std::path::PathBuf>,
+) -> Result<(std::path::PathBuf, DataRootOrigin), DataRootRefusal> {
+    let dir = local_app_data.ok_or(DataRootRefusal::LocalAppDataUnresolvable)?;
+
+    // The second arm, and it is not the same check twice. `Path::is_absolute` on Windows requires
+    // BOTH a prefix and a root, so it rejects the three shapes an `is_some()` test waves through:
+    // a plainly relative value, a rooted-but-driveless `\Users\...` (which lands on whichever
+    // drive is current) and a drive-relative `C:AppData` (which lands on the current directory of
+    // C:). All three move with the working directory exactly as `"."` did.
+    if !dir.is_absolute() {
+        return Err(DataRootRefusal::LocalAppDataNotAbsolute);
+    }
+
+    Ok((dir.join(PRODUCT_DATA_FOLDER), DataRootOrigin::LocalAppData))
+}
+
+/// The resolution rule: where does the user's data go?
+///
+/// **The data root is NAMED, not derived.** It is `%LOCALAPPDATA%\TrustTunnel Client Pro`, and
+/// the executable's own location has no say in it. Before phase 32 this function answered the
+/// executable's parent directory, which was the same folder — the install itself lived under
+/// `%LOCALAPPDATA%`. The install moves to Program Files with `installMode: perMachine`, and that
+/// directory's ACL grants `BUILTIN\Users` read by inheritance over both child containers and
+/// child objects (measured; see the module comment above). A data root left beside the executable
+/// there would put the plaintext `ssh_credentials.json` where every account on the machine can
+/// read it. Hence the rule changes in the same commit as the install-mode flip, never separately.
+///
+/// **The user's files do not move.** The pre-32 install directory and the new data root are the
+/// same path — `%LOCALAPPDATA%\TrustTunnel Client Pro` — so on an existing machine the binaries
+/// leave the folder and the data stays exactly where it is. That identity is D-05 and it is what
+/// makes this a rule change rather than a migration.
 ///
 /// Split out from [`user_data_dir_with_origin`] for one reason — the production branch of that
 /// function is `cfg(not(test))`, so a unit test cannot reach it. This helper is compiled in
-/// both builds, so the rule itself ("the root is the directory the executable sits in, and
-/// nothing is appended to it") is directly assertable instead of being taken on trust. It does
-/// no I/O; creating the directory is the caller's job.
+/// both builds, so the rule is directly assertable instead of being taken on trust. It does
+/// no filesystem I/O; creating the directory is the caller's job.
 ///
-/// `pub(crate)` for one further reason: `lifecycle.rs` asserts the Rust↔NSIS agreement on the
-/// uninstaller's pid path, and half of that agreement is "the data root IS the executable's
-/// directory, which the installer spells `$INSTDIR`". That half has to be assertable from
-/// outside this module.
+/// `pub(crate)` for one further reason: `lifecycle.rs` asserts that the data root and the pid
+/// directory are NOT the same place, which is the invariant refusing the pre-32 identity. That
+/// assertion has to be able to call this from outside the module.
+///
+/// **The parameter is retained although the answer no longer depends on it.** It is what lets
+/// that invariant test say «given THIS executable, the data root is not its directory» — a
+/// function that did not accept an executable could not express the negative at all, and the
+/// negative is the whole point. It also keeps every call site compiling unchanged.
 pub(crate) fn resolve_data_root(
-    exe: Option<std::path::PathBuf>,
-) -> (std::path::PathBuf, DataRootOrigin) {
-    match exe.as_deref().and_then(|p| p.parent()) {
-        Some(dir) => (dir.to_path_buf(), DataRootOrigin::ExecutableDir),
-        None => (std::path::PathBuf::from("."), DataRootOrigin::WorkingDirFallback),
-    }
+    _exe: Option<std::path::PathBuf>,
+) -> Result<(std::path::PathBuf, DataRootOrigin), DataRootRefusal> {
+    data_root_from(local_app_data_dir())
 }
 
 /// Resolve the data root and report which source answered.
@@ -280,8 +502,20 @@ pub fn user_data_dir_with_origin() -> (std::path::PathBuf, DataRootOrigin) {
 
     #[cfg(not(test))]
     {
-        let (root, origin) = resolve_data_root(std::env::current_exe().ok());
-        (ensure_dir(root), origin)
+        // The executable is still handed in although the rule no longer reads it — see
+        // `resolve_data_root`'s doc comment for why the parameter is kept. Passing what
+        // production actually has keeps this call identical in shape to the one the tests
+        // exercise, so there is no untested spelling of the production path.
+        //
+        // The refusal is REACHED HERE and nowhere else, which is what makes it the whole
+        // application's answer rather than one call site's: every artifact goes through
+        // `user_data_dir()`, and `main()`'s FIRST statement is `init_data_root_early()`, whose
+        // first act is to call it. So the refusal happens before Tauri, before WebView2, before
+        // logging — before anything has written a byte.
+        match resolve_data_root(std::env::current_exe().ok()) {
+            Ok((root, origin)) => (ensure_dir(root), origin),
+            Err(why) => refuse_to_start(why),
+        }
     }
 }
 
@@ -305,11 +539,15 @@ fn ensure_dir(p: std::path::PathBuf) -> std::path::PathBuf {
 /// automatically. That coupling is load-bearing IN BOTH DIRECTIONS, which is the lesson plan
 /// 08 paid for: a guard left pointing at the old root refuses every config the app just wrote,
 /// and DATA left pointing at the old root is refused by a guard that correctly moved. Whenever
-/// this helper's answer changes, the data must be brought with it — see the deferral note above.
+/// this helper's answer changes, the data must be brought with it.
 ///
-/// The name is kept from plan 08 on purpose even though the destination is reverted: it is the
-/// single accessor the whole crate goes through, and the rename is what made the conversion
-/// compiler-checked. Reverting the *name* would only re-scatter the lookup.
+/// Phase 32 is the case where that cost nothing: the answer changed from «the executable's own
+/// directory» to «`%LOCALAPPDATA%\TrustTunnel Client Pro`», and on every existing machine those
+/// are the SAME path — the install lived there. The rule moved; the files did not (D-05).
+///
+/// **Do not add a second accessor beside this one**, not even "just for the migration". The
+/// funnel is what makes the guards follow the data by construction; a parallel lookup is how
+/// half the crate ends up pointing at the old root with nothing to catch it.
 ///
 /// The read-only shipped resources (the sidecar binary, `wintun.dll`, the vcruntime DLLs) are
 /// resolved separately even though they land in the same place today; see
@@ -1153,50 +1391,135 @@ pub(crate) async fn exec_command_cancellable(
 mod tests {
     use super::*;
 
-    // ── D-03 C: the data root is not the install root ──
+    // ── D-05 (phase 32): the data root is NAMED, not derived from the executable ──
 
-    /// The defect in one line: the helper used to return the executable's own directory, so
-    /// every credential the app persisted lived inside the install root. Under Program Files
-    /// that directory grants BUILTIN\Users read (measured, see the module comment), which would
-    /// have made this a credential-disclosure regression.
+    /// The rule this phase installs, in one line: the data root is
+    /// `%LOCALAPPDATA%\TrustTunnel Client Pro`, and the executable's own location has no say in
+    /// it.
     ///
-    /// The data root IS the directory the executable sits in, with nothing appended.
+    /// Until phase 32 the two were the same folder, and that was safe only because the install
+    /// itself lived under `%LOCALAPPDATA%`. The install now moves to Program Files
+    /// (`installMode: perMachine`), whose ACL grants `BUILTIN\Users` read by inheritance over
+    /// both child containers AND child objects — measured, see the module comment. A data root
+    /// left beside the executable there would put `ssh_credentials.json`, in plaintext, in a
+    /// directory every account on the machine can read. That is why the rule is named rather
+    /// than derived, and why it must change in the SAME commit as the install-mode flip.
     ///
     /// The subject is the pure rule rather than `user_data_dir()` itself, because the production
-    /// branch of the resolver is `cfg(not(test))` and a unit test cannot reach it. Asserted on a
-    /// SYNTHETIC exe path so the assertion does not depend on where the test binary happens to
-    /// live, and spelled with the real install-directory name so a reintroduced vendor/edition
-    /// split — `…\TrustTunnel\ClientPro` — fails here by name rather than by accident.
+    /// branch of the resolver is `cfg(not(test))` and a unit test cannot reach it. The executable
+    /// handed in is a SYNTHETIC path under Program Files on purpose: that is the input which used
+    /// to decide the answer, so an answer that ignores it is the entire point of the test.
     #[test]
-    fn the_data_root_is_the_directory_the_executable_sits_in() {
-        let install = std::path::Path::new("C:\\Users\\u\\AppData\\Local\\TrustTunnel Client Pro");
-        let (root, origin) = resolve_data_root(Some(install.join("trusttunnel.exe")));
+    fn the_data_root_is_named_and_does_not_follow_the_executable() {
+        let exe =
+            std::path::Path::new("C:\\Program Files\\TrustTunnel Client Pro\\trusttunnel.exe");
+        let (root, origin) = resolve_data_root(Some(exe.to_path_buf()))
+            .expect("a Windows test host always has an absolute local-app-data location");
 
+        let want = local_app_data_dir()
+            .expect("a Windows test host always has a local-app-data location")
+            .join(PRODUCT_DATA_FOLDER);
         assert_eq!(
-            root,
-            install,
-            "the data root must be the executable's own directory — nothing may be appended to it \
-             (a vendor/edition split is what shipped the 30.1 connect regression)"
+            root, want,
+            "the data root must be the named per-user folder, not something derived at runtime"
         );
-        assert_eq!(origin, DataRootOrigin::ExecutableDir);
-    }
-
-    /// An unresolvable executable must be reported, not swallowed.
-    ///
-    /// The fallback is the process working directory, which for a shell- or logon-task-launched
-    /// process is unpredictable and frequently `C:\Windows\System32`. Landing there silently
-    /// presents to the user as «my servers disappeared» with no error anywhere, so diagnostics
-    /// must be able to name the degraded origin.
-    #[test]
-    fn an_unresolvable_executable_reports_a_degraded_origin() {
-        let (root, origin) = resolve_data_root(None);
-
-        assert_eq!(root, std::path::Path::new("."));
         assert_eq!(
             origin,
-            DataRootOrigin::WorkingDirFallback,
-            "a failed executable lookup must be distinguishable in diagnostics from the normal case"
+            DataRootOrigin::LocalAppData,
+            "the origin IS the diagnostic — the normal answer must be nameable as such"
         );
+        assert_ne!(
+            root,
+            exe.parent().unwrap(),
+            "the data root must never be the executable's own directory again: under Program \
+             Files that folder is world-readable and it holds the plaintext credential store"
+        );
+    }
+
+    /// **A data root that would be RELATIVE is refused, never answered.**
+    ///
+    /// This is the phase-32 adversarial probe's critical finding, as a contract. The rule used to
+    /// answer `"."` when the environment said nothing, and this phase's own logon Scheduled Task
+    /// sets the process working directory to the INSTALL directory — so that branch wrote the
+    /// plaintext credential store into `Program Files`, which the measured ACL in the module
+    /// comment says every account on the machine can read. The path-confinement guard
+    /// canonicalized the same relative root and followed the data there rather than catching it.
+    ///
+    /// Asserted against the inner rule rather than `resolve_data_root`, because forcing the
+    /// environment lookup to fail would mean mutating `LOCALAPPDATA` for the whole test process —
+    /// a cross-test race, and `std::env::set_var` is `unsafe` from Rust 2024 for exactly that
+    /// reason. Handing the inner rule its input directly states the same fact with no shared
+    /// state, and — the point of this workstream's safety rule — resolves no real data root.
+    ///
+    /// The four non-absolute spellings are not padding. Each reaches the same destination as the
+    /// `None` branch while passing an `is_some()` test, so a fix that only checked for `None`
+    /// would leave the hole open to anything that controls the inherited environment.
+    #[test]
+    fn a_data_root_that_would_be_relative_is_refused_rather_than_answered() {
+        let got = data_root_from(None);
+        assert_eq!(
+            got,
+            Err(DataRootRefusal::LocalAppDataUnresolvable),
+            "an unresolvable local-app-data location must REFUSE; answering a relative root puts \
+             the plaintext credential store in the process working directory, which under this \
+             phase's logon task is the install directory. Got: {got:?}"
+        );
+
+        for spelling in [
+            ".",                            // the literal working directory
+            "AppData\\Local",               // plainly relative
+            "\\Users\\bob\\AppData\\Local", // rooted, but on whichever drive is current
+            "C:AppData\\Local",             // drive-relative: the current dir ON C:
+        ] {
+            let got = data_root_from(Some(std::path::PathBuf::from(spelling)));
+            assert_eq!(
+                got,
+                Err(DataRootRefusal::LocalAppDataNotAbsolute),
+                "«{spelling}» is not an absolute path, so a data root built on it moves with the \
+                 working directory — it must be refused, not joined. Got: {got:?}"
+            );
+        }
+
+        // The positive control. Without it every assertion above would still pass if the rule
+        // simply refused everything, which would be a different bug wearing this fix's clothes.
+        let (root, origin) = data_root_from(Some(std::path::PathBuf::from("C:\\Users\\bob\\AppData\\Local")))
+            .expect("an absolute local-app-data location must still resolve");
+        assert!(
+            root.is_absolute(),
+            "the resolved data root must itself be absolute: {}",
+            root.display()
+        );
+        assert_eq!(origin, DataRootOrigin::LocalAppData);
+    }
+
+    /// The one sentence a user will ever see for this failure carries no path (D-29).
+    ///
+    /// `refuse_to_start` ends the process and cannot be unit-tested, so the message it shows is
+    /// factored out and asserted here instead. The bound is deliberately coarse — no backslash,
+    /// no drive-letter colon — because the failure being guarded is a future edit that helpfully
+    /// formats «the folder we tried» into the text, and the folder in question is the one that
+    /// holds `ssh_credentials.json`.
+    #[test]
+    fn the_refusal_message_names_the_cause_and_no_path() {
+        for why in [
+            DataRootRefusal::LocalAppDataUnresolvable,
+            DataRootRefusal::LocalAppDataNotAbsolute,
+        ] {
+            let msg = refusal_message(why);
+            assert!(
+                !msg.contains('\\') && !msg.contains(":\\") && !msg.contains('/'),
+                "the refusal must not carry a path: {msg}"
+            );
+            assert!(
+                msg.contains("LOCALAPPDATA") && msg.contains("USERPROFILE"),
+                "the refusal must name the cause the user can act on: {msg}"
+            );
+            assert!(
+                msg.contains("не будет запущена"),
+                "the refusal must say the program will not start, not merely that something \
+                 went wrong: {msg}"
+            );
+        }
     }
 
     /// The root must EXIST by the time a caller uses it. `save_sidecar_pid` writes with a bare
@@ -1209,26 +1532,44 @@ mod tests {
         assert!(root.is_dir(), "the data root must exist and be a directory: {}", root.display());
     }
 
-    /// Pro and Light still never share a data root, and now it is the INSTALL that separates
-    /// them: each edition installs into its own directory, so each resolves its own root.
+    /// Pro and Light still never share a data root — but what separates them has CHANGED, and
+    /// that is why this test had to be re-derived rather than left alone.
+    ///
+    /// It used to be the install directory: each edition installed somewhere else, so each
+    /// resolved its own root, and handing the rule two different executables proved it. The rule
+    /// no longer reads the executable, so that proof would now be a green tick over nothing —
+    /// both calls would return this build's own folder and the assertion would pass for a reason
+    /// that has nothing to do with what it claims.
+    ///
+    /// The separation is now the product folder name compiled into each edition. So that is what
+    /// is pinned, plus the fact that no executable path can talk this build into Light's folder.
     ///
     /// This is the property `lifecycle::SIDECAR_PID_BASENAME` (D-07) was the belt-and-braces
     /// half of — one edition's stale-cleanup must never be able to kill the other edition's live
     /// VPN. The per-edition basename stays regardless; this pins the root half.
     #[test]
-    fn the_two_editions_resolve_different_data_roots() {
-        let local = std::path::Path::new("C:\\Users\\u\\AppData\\Local");
-        let (pro, _) = resolve_data_root(Some(
-            local.join("TrustTunnel Client Pro").join("trusttunnel.exe"),
-        ));
-        let (light, _) = resolve_data_root(Some(
-            local.join("TrustTunnel Client Light").join("trusttunnel.exe"),
-        ));
+    fn the_two_editions_do_not_share_a_data_root() {
+        // The exact-list pin, and NOTHING derived from it (WR-04). A follow-up
+        // `assert_ne!(PRODUCT_DATA_FOLDER, "TrustTunnel Client Light")` used to sit here, and it
+        // could not fail: once the line above holds, that one compares two distinct string
+        // literals. Worse, it read as the test's whole point while asserting nothing — any edit
+        // that would have violated it reddens the pin first, so it never ran on a failing tree.
+        // An exact-list pin plus a property derived from that same list tests one thing, not two.
+        // The property is carried below, where it is genuinely reachable.
+        assert_eq!(PRODUCT_DATA_FOLDER, "TrustTunnel Client Pro");
 
-        assert_ne!(
-            pro, light,
-            "Pro and Light must not share a data root — a shared root lets one edition's cleanup \
-             reach the other edition's live VPN state"
+        // THE REACHABLE HALF. The rule is handed the OTHER edition's executable on purpose. This
+        // fails the moment anybody re-derives the data root from the executable's own directory —
+        // which is what it did before phase 32, and is the shared-root hazard the deleted line was
+        // gesturing at: one edition's cleanup reaching the other's live VPN state.
+        let (root, _) = resolve_data_root(Some(std::path::PathBuf::from(
+            "C:\\Program Files\\TrustTunnel Client Light\\trusttunnel.exe",
+        )))
+        .expect("a Windows test host always has an absolute local-app-data location");
+        assert!(
+            root.ends_with(PRODUCT_DATA_FOLDER),
+            "no executable path may talk this build into the other edition's data root: {}",
+            root.display()
         );
     }
 

@@ -2,6 +2,20 @@ mod app_settings;
 mod autostart;
 mod commands;
 mod connectivity;
+// Phase 32-04 (D-07) — first-launch adoption of a legacy data root the new install does not read.
+// Declared at RED, before the implementation existed, for a reason that is not bookkeeping: an
+// undeclared `.rs` file is not compiled at all, so `cargo test --lib data_adoption` would have
+// reported "0 tests, ok" and exit 0 — a green tick over nothing, which is the failure this phase
+// keeps refusing. The startup call is the first statement in `.setup()`.
+mod data_adoption;
+// RESERVED for phase 32-05: `mod task_scheduler;` belongs on the next line.
+//
+// It is a comment and not the declaration because a `mod` whose file does not exist does not
+// compile — 32-05 creates `task_scheduler.rs` and adds its own one-line declaration here. The
+// reservation exists so the two plans agree in advance on WHERE that line goes and neither has to
+// re-read this block to decide. 32-05 is wave 3 and this is wave 2, so they never write this file
+// at the same moment; what the marker actually buys is a diff that is one line instead of a
+// judgement call about module ordering.
 mod diagnostics;
 mod dns_guard;
 mod domain_scope;
@@ -9,6 +23,10 @@ mod geodata;
 mod geodata_scheduler;
 mod geodata_v2ray;
 mod job_object;
+// Phase 32-FIX-11 (UAT gaps G-32-2 / G-32-2b) — the startup look at what the previous install
+// could not remove. Declared here for the same reason `data_adoption` above records: an undeclared
+// `.rs` file is not compiled at all, so its whole test suite would report «0 tests, ok» and exit 0.
+mod legacy_sweep;
 mod lifecycle;
 mod logging;
 pub mod notify;
@@ -17,6 +35,9 @@ mod routing_rules;
 mod net_egress;
 mod sidecar;
 pub mod ssh;
+// The logon Scheduled Task behind «Запуск вместе с Windows». Windows-only by its own inner
+// `#![cfg(windows)]`, so no cfg is needed here.
+mod task_scheduler;
 mod tray;
 
 use std::sync::{Arc, Mutex};
@@ -46,13 +67,26 @@ const START_MINIMIZED_MARKER: &str = ".start_minimized";
 /// here so it can never disagree with where the rest of the data lives; its failure mode is not
 /// an error dialog but AMNESIA, the app quietly forgetting every setting the user chose.
 ///
-/// THERE IS NO DATA MIGRATION HERE, AND THAT IS THE POINT. Phase 30.1 plan 08 briefly moved the
-/// data root to `%LOCALAPPDATA%\TrustTunnel\ClientPro` and adopted the old contents into it on
-/// first launch. Both are reverted (see the note above `user_data_dir` in `ssh/mod.rs`): the
-/// data root is the install directory, which is where the data already is, so there is nothing
-/// to adopt FROM. Do not reintroduce an adoption pass without the root move it serves — a
-/// migration that copies `configs.json` without rewriting the absolute paths inside it is
-/// exactly what broke every connect on a real Windows install.
+/// NO MIGRATION RUNS *HERE*, AND THE PROHIBITION THIS COMMENT USED TO CARRY HAS BEEN NARROWED.
+///
+/// It used to say, flatly, that there was no data migration in this application and that an
+/// adoption pass must not be reintroduced. That was correct while the data root WAS the install
+/// directory: the data was already where the application looked for it, so there was nothing to
+/// adopt from. Phase 32 moved the root to `%LOCALAPPDATA%\TrustTunnel Client Pro` (D-05) — the
+/// condition the prohibition was written against — and reintroduced the adoption it serves (D-07).
+/// It runs from `.setup()`, about twenty lines below in this file, not from here.
+///
+/// WHAT IS STILL FORBIDDEN, AND IT IS THE HALF THAT ACTUALLY BIT. A migration that copies
+/// `configs.json` as a blob, without rewriting the absolute paths inside it, is what broke every
+/// connect on a real Windows install. `data_adoption` does not do that: it rewrites the manifest onto
+/// the new root entry by entry. Read that module's own comment before changing anything about the
+/// adoption — it carries the conditions under which one is legitimate, and this comment is not a
+/// second copy of them.
+///
+/// WHAT BELONGS HERE IS STILL ONLY THE ONE STEP. This function points WebView2 at the data root
+/// and does nothing else, because WebView2 reads the variable once and immediately opens and locks
+/// the directory it is given. Copying anything from here would race the profile it is about to
+/// open.
 pub fn init_data_root_early() {
     let webview_data = ssh::user_data_dir().join("webview_data");
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_data);
@@ -286,10 +320,132 @@ pub fn run() {
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .manage(ssh::SshPool::new())
         .setup(|app| {
+            // FIRST, before everything else in this closure. Phase 32-04 (D-07): adopt a legacy
+            // data root that this install no longer reads.
+            //
+            // The bug it fixes (research finding F2): the installer's directory page is present, so
+            // `$INSTDIR` is user-editable. Anyone who chose a custom directory has their servers,
+            // credentials and known hosts in that folder, and after 32-01 named the data root
+            // `%LOCALAPPDATA%\TrustTunnel Client Pro` the application looks there — empty — and
+            // their data is silently orphaned. Nothing reports it; the app simply looks new.
+            //
+            // INLINE AND AWAITED, deliberately, and the opposite choice from the detached
+            // registration spawn further down this file. The project's standing rule is that data
+            // must be correct UNDER the loader and must never pop in afterwards; a detached
+            // adoption would let the window render a server list that the adoption then rewrites,
+            // which is the same class of defect as the one being repaired. It is also why this call
+            // sits ahead of every sweep below rather than beside them: `reconcile_autostart_on_startup`
+            // reads `app_settings.json`, `dns_guard` reads `dns_snapshot.json` and the window-reveal
+            // decision reads the `.start_minimized` marker — all three are files adoption may be
+            // about to bring over, and a reader that runs first reads the empty folder.
+            //
+            // Ahead of `init_logging()` too, for the same reason: the `.enable_logs` flag is one of
+            // the adopted files, so a user who had file logging on keeps it on from this launch
+            // rather than the next. The cost is that this one run's adoption summary does not reach
+            // `app.log` — which is exactly why the adoption marker file carries the summary as its
+            // own content (30.1-REGRESSION.md Repair 7: the previous summary line was unreachable
+            // for precisely this reason, so «it logged nothing» proved nothing).
+            //
+            // ORDERING NOTE, and it is why the module carries its own lock: `single_instance` is
+            // registered up in `run()`'s plugin chain, which the Tauri builder has NOT finished
+            // when this closure runs — a second process launched concurrently therefore gets all
+            // the way through its own adoption before it is told to exit. That is OPEN-5. The
+            // marker gate alone cannot serialise it (both processes can read the marker absent in
+            // the same instant), so `data_adoption` takes an exclusive create-new lock file around
+            // the whole operation. Do not "simplify" that away on the grounds that single-instance
+            // exists.
+            //
+            // ONE EXCEPTION, added by plan 32-08 under the `no-fork` decision: when there
+            // is genuinely something to migrate, the user has not been asked yet — and with no
+            // forked installer page, the only surface that can ask is this window (D-09, drawn by
+            // `MigrationOfferGate.tsx`). So the probe below withholds the adoption for exactly that
+            // case and the window resolves it through `resolve_migration_offer`, which calls this
+            // same entry point. Every other case — already adopted, same folder, nothing found,
+            // nothing to take, a refusal already on file — has no question to ask, so it still
+            // runs right here, ahead of every reader listed above, unchanged.
+            //
+            // Withholding is the safe half of the trade: a launch where the window never opens
+            // adopts nothing and asks again next time, whereas adopting first and asking after
+            // would be asking permission for something already done.
+            //
+            // The answer is READ ONCE, into this binding, because two statements now depend on it:
+            // the adoption itself and the leftover report below. Asking the question twice would
+            // be two lookups of one fact that can disagree — which is what the comments a few lines
+            // up say about `.start_minimized`, and this pair is worse, because the second lookup
+            // happens after the window may already have resolved the offer.
+            let adoption_withheld = data_adoption::first_launch_offer_pending();
+            if adoption_withheld {
+                logging::log_app(
+                    "info",
+                    "[adoption] a legacy install was found elsewhere - waiting for the user's answer",
+                );
+                eprintln!("[adoption] a legacy install was found elsewhere - waiting for the user's answer");
+            } else {
+                data_adoption::run_first_launch_adoption();
+            }
+
             // Initialize file logging (if enabled via flag file)
             logging::init_logging();
             // Initialize activity log (always active, fire-and-forget from UI)
             commands::activity_log::init_activity_log();
+
+            // Phase 32-FIX-11 (UAT gaps G-32-2 / G-32-2b) — say what the last install could not
+            // remove, and what of it is still sitting in the data folder.
+            //
+            // WHY HERE AND NOT WITH THE ADOPTION ABOVE. Two constraints meet at this line and only
+            // this position satisfies both. It must come AFTER the adoption, because the adoption
+            // reads and copies out of the legacy folder and a report that ran first would describe
+            // a folder somebody is still reasoning about. And it must come after `init_logging()`,
+            // because the whole point of this pass is to reach `app.log` — the adoption's own
+            // summary is unreachable there for exactly the reason stated twenty lines above, which
+            // is why that one carries its summary in a marker file instead. A pass whose only
+            // output went nowhere would be the failure it exists to repair, one level up.
+            //
+            // GATED ON THE SAME ANSWER, READ FROM THE SAME BINDING. When the migration offer is
+            // outstanding the adoption is withheld pending the user's reply, and the report is
+            // withheld with it: until he answers, what is in the legacy folder is a question and
+            // not a leftover, and telling him those files are safe to delete while asking whether
+            // to copy them out is two pieces of advice that contradict each other.
+            //
+            // IT CANNOT DELAY THE WINDOW AND IT CANNOT FAIL THE START. Six `metadata()` calls, one
+            // `exists()` and at most one small file read, so it is inline like the sweeps below it
+            // rather than detached. Nothing it does was asked for by anybody, so nothing it fails
+            // at may interrupt anybody: every failure inside it is a line in `app.log`, never a
+            // dialog and never an abort. That is deliberately the opposite of the migration
+            // failure screen, and the difference is what is at stake — a failed migration is the
+            // user's data not arriving, while a failed report is 25 MB of dead bytes staying put.
+            //
+            // IT REMOVES NOTHING. Owner decision `report-only`, 2026-09-06; the module's own
+            // header carries the reasoning and a test reads its source to keep it true.
+            if !adoption_withheld {
+                legacy_sweep::run_startup_report();
+            }
+
+            // Phase 32-FIX-15 (UAT gap G-32-3, owner decision D32-16 `route-record`) — write down,
+            // beside our own binaries, WHICH folder this installation keeps the user's data in.
+            //
+            // WHY THE APPLICATION IS THE ONE THAT KNOWS. The data folder is under the profile of
+            // whichever account approved THIS program's elevation prompt. The uninstaller asks for
+            // the same rights and gets its own answer to «my profile», which under
+            // over-the-shoulder UAC need not be the same account — and Windows will not tell an
+            // elevated process which account owns another elevated process's data. So the side
+            // that knows records the fact and the side that needs it reads the note back, and the
+            // reader refuses on any mismatch with its OWN profile. No identity is recovered
+            // anywhere, which is what keeps D-08 intact.
+            //
+            // WHY HERE. After `init_logging()` for the reason the leftover report above states —
+            // a failure has to be visible in `app.log` — and beside that report because both are
+            // startup facts about the same two folders. It must also come after the adoption:
+            // until the user has answered the migration offer, which folder holds his data is a
+            // question and not a fact, and recording an answer to it would be recording a guess.
+            // It is NOT gated on `adoption_withheld` though, and that difference is deliberate:
+            // the leftover report gives ADVICE about the legacy folder, while this only writes
+            // down where `ssh::user_data_dir()` already points, which is true either way.
+            //
+            // IT CANNOT FAIL THE START. One `fs::write` of one line; every failure is a line in
+            // `app.log`. Losing the note costs a later refusal in the uninstaller, which is the
+            // safe direction (T-32-60).
+            lifecycle::record_data_root_on_startup();
 
             // FIX-A (RC-2): crash-sweep. If the previous session hard-died without
             // restoring system DNS, the machine is still pointing at the dead tunnel
@@ -308,12 +464,28 @@ pub fn run() {
             // `spawn_stale_staged_config_sweep`); it must not sit in front of the window.
             commands::config::spawn_stale_staged_config_sweep();
 
+            // Phase 32: clear the state the abandoned Run-value autostart left behind — the dead
+            // Run values AND the startup-approval entries, for both of Pro's historical names.
+            // Unconditional on purpose: a cheap «does it exist?» gate is exactly why legacy
+            // installs never received earlier fixes. Runs before the reconcile below so the log
+            // reads in the order things happened: clear the dead state, then reconcile the live one.
+            autostart::clear_dead_autostart_registry();
+
+            // …and the one machine-wide logon task the builds before the per-user split wrote.
+            // It sits in the scheduler's ROOT, outside the per-user folder, so the Settings
+            // switch can no longer see it: a user who turns autostart OFF would still be started
+            // at every logon, with highest privileges, by a registration no surface mentions.
+            // Same unconditional shape and the same reason as the line above.
+            autostart::clear_legacy_global_logon_task();
+
             // Owner bug 2026-08-26: an installer run (upgrade / uninstall-first reinstall) deletes
-            // the HKCU Run autostart value, silently undoing the user's «Запуск вместе с системой»
-            // choice. The choice now persists in app_settings.json; put the Run entry back when it
-            // was wiped while that choice says ON. Sub-millisecond (one file read + one registry
-            // probe), so it runs inline like the sweeps above.
-            autostart::reconcile_autostart_on_startup(app.handle());
+            // the OS-level autostart registration, silently undoing the user's «Запуск вместе с
+            // системой» choice. The choice persists in app_settings.json; put the registration back
+            // when it was wiped while that choice says ON. Since phase 32 the registration is a
+            // logon Scheduled Task rather than an HKCU Run value — the Run value could never start
+            // an app whose manifest demands elevation (see autostart.rs). One file read plus one
+            // scheduler lookup, so it still runs inline like the sweeps above.
+            autostart::reconcile_autostart_on_startup();
 
             // Show window unless the start-minimised marker exists in the per-user data root.
             if let Some(window) = app.get_webview_window("main") {
@@ -787,6 +959,11 @@ pub fn run() {
             commands::config::unwatch_config_file,
             commands::config::read_client_config,
             commands::config::save_client_config,
+            // Phase 32 (32-08, `no-fork`) — the migration OFFER. The installer does not ask;
+            // this window does, at first launch, before the adoption runs. Two commands and no
+            // shared state: the probe re-reads the filesystem, and the answer performs or refuses.
+            data_adoption::migration_offer_pending,
+            data_adoption::resolve_migration_offer,
             // Phase 11 — multi-config manifest (configs.json) mutation funnel + safe
             // startup migration. Registered here in the foundation plan (11-02) so no
             // later Wave-2/3 plan needs to edit lib.rs for manifest ops.

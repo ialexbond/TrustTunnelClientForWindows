@@ -189,6 +189,73 @@ function readBoolean(key: string, fallback: boolean): boolean {
   return raw === "true";
 }
 
+/** The boolean-valued members of `AppSettings` — the ones a consumer can read on their own. */
+export type BooleanAppSettingName = {
+  [K in keyof AppSettings]: AppSettings[K] extends boolean ? K : never;
+}[keyof AppSettings];
+
+/**
+ * Read ONE boolean setting the way the Settings screen reads it — key and default taken together,
+ * from `APP_SETTINGS_KEYS` and `APP_SETTINGS_DEFAULTS`.
+ *
+ * G-32-9 — WHY THIS EXISTS, because the alternative looks harmless and is not.
+ *
+ * A consumer outside this hook needs one setting, not the whole group, and reaching for
+ * `localStorage.getItem("tt_auto_connect")` is the obvious way to get it. That line is a SECOND
+ * declaration of what an absent key means, written far from the first one, and the two drifted:
+ * `useAppSettings` returned `APP_SETTINGS_DEFAULTS.autoConnectOnLaunch` (= true) for an absent key
+ * and drew the «Автоподключение при запуске» switch ON, while `useAutoConnect` required the literal
+ * "true" and stood down. Until the user touched that switch the screen promised a feature that was
+ * not armed — and nothing writes the default back to storage, so «until» could be forever.
+ *
+ * That was not deduced. On a real Windows install the WebView leveldb (append-only, so byte offset =
+ * write order) held `tt_auto_connect` as the LAST record in the file, written after the failed
+ * reboot and after a manual connect: at the moment auto-connect should have fired, the key did not
+ * exist.
+ *
+ * So: one function, and `appSettingsContract.test.ts` fails if any module but this one reads those
+ * keys directly. Deliberately NOT a hook — the callers that need it (`useAutoConnect`) read once
+ * inside an effect and must not subscribe to re-renders.
+ *
+ * Boolean-only on purpose. `failoverExcludedIds` is a JSON array whose reader has its own
+ * corrupt-value posture (`readStringArray`), and folding it in here would hide that.
+ */
+export function readAppSettingBoolean(name: BooleanAppSettingName): boolean {
+  return readBoolean(APP_SETTINGS_KEYS[name], APP_SETTINGS_DEFAULTS[name]);
+}
+
+/** What is ACTUALLY in storage for a boolean setting, as opposed to what it resolves to. */
+export type StoredAppSettingState = "absent" | "true" | "false" | "corrupt";
+
+/**
+ * Classify the stored value WITHOUT applying the default.
+ *
+ * Two callers need this and neither is asking «is the setting on?»:
+ *
+ *   - «did the user ever express an opinion?» — `absent` is not the same fact as `false`, and a
+ *     message addressed to someone who deliberately switched a feature ON must not also greet
+ *     someone who has never seen the switch (see `useAutoConnect`'s no-target announcement).
+ *   - diagnostics. The bug was found by reading write ORDER out of the WebView leveldb
+ *     precisely because absent and false are different states of the world; a log line that
+ *     collapsed them would have hidden it.
+ *
+ * It lives HERE, next to the key map, rather than as a `localStorage.getItem` at the call site:
+ * that call site is exactly what `appSettingsContract.test.ts` forbids, and forbids because a
+ * consumer holding the raw key is one edit away from re-deciding what an absent key means.
+ */
+export function classifyStoredAppSetting(
+  name: BooleanAppSettingName,
+): StoredAppSettingState {
+  const raw = localStorage.getItem(APP_SETTINGS_KEYS[name]);
+  if (raw === null) return "absent";
+  if (raw === "true") return "true";
+  if (raw === "false") return "false";
+  // Anything else is somebody else's write (a hand edit, a older build, a partial flush). It reads
+  // as OFF via `readBoolean` — recorded distinctly so «off because corrupt» never reads as a
+  // deliberate «off».
+  return "corrupt";
+}
+
 export interface UseAppSettings {
   settings: AppSettings;
   /**

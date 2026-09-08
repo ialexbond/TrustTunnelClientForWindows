@@ -782,7 +782,18 @@ function App() {
     // hero). The lifecycle hook skips the wipe (and defers the delete side-effects) while switching.
     isSwitching,
   });
-  useAutoConnect({ config, status, setStatus, setError, seedConfigPing: seedRetainedPing, i18n });
+  // G-32-8: `notify` is the SnackBar push. Auto-connect uses it for exactly one outcome — it was
+  // switched on and the manifest names no server to aim at — which is the only stand-down the user
+  // cannot deduce from what they see. Every other outcome goes to activity.log only.
+  useAutoConnect({
+    config,
+    status,
+    setStatus,
+    setError,
+    seedConfigPing: seedRetainedPing,
+    notify: pushSuccess,
+    i18n,
+  });
 
   // ─── Failover lives in Rust (27 D-06, plan 28-09) ───
   // Phase 12's `useAutoSwitch` engine used to be mounted here: a timer that re-read the active

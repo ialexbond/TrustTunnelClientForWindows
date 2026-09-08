@@ -10,7 +10,10 @@ use std::os::windows::process::CommandExt;
 use crate::sidecar;
 use crate::routing_rules;
 use crate::geodata_v2ray::GeoDataState;
-use crate::ssh;
+// `crate::ssh` is no longer imported by name: the one place in this module that reached for it
+// unqualified was the pid-path composition, and phase 32 moved the pid file off the data root.
+// The remaining uses are fully qualified `crate::ssh::user_data_dir()` calls, which is the
+// clearer spelling now that a path in this file may belong to either of two different roots.
 
 /// The single source of truth for VPN connection status (D-01).
 ///
@@ -760,14 +763,75 @@ pub fn set_vpn_status_reconnecting_attempt(
     );
 }
 
+/// The directory the sidecar PID file lives in: the executable's own folder.
+///
+/// **Why not the data root, which is where this used to be joined.** The pid file is process
+/// state, not user data, and it must stay somewhere the UNINSTALLER can name. `$INSTDIR` is the
+/// only root the uninstaller resolves correctly whichever administrator UAC elevated it to,
+/// because the uninstaller sits in that directory. A profile-relative root would resolve to the
+/// ELEVATING account's profile and find nothing — the sidecar kill would become a silent no-op
+/// and the VPN tunnel would outlive the app, on a security product. The uninstall hook states the
+/// same reasoning at its own PREUNINSTALL block, and phase 32 is what made the distinction real:
+/// before it the data root and the install directory were one folder.
+///
+/// **Why not have the installer record the resolved data root in the registry for the uninstaller
+/// to read back** (the alternative research floated): under `perMachine` the uninstaller may be
+/// elevated by a different administrator, so a value in HKCU is exactly as unreachable as the
+/// profile path itself, and a value in HKLM would require the installer to know the real user's
+/// profile — which D-08 rejected on its own terms, every candidate being a heuristic sitting next
+/// to a destructive step. Keeping the pid beside the binaries needs no new registry value and no
+/// new elevation assumption.
+///
+/// Takes the executable rather than calling `current_exe()` itself so the rule is unit-testable:
+/// under `cargo test` the executable is the test binary in `target/debug/deps`, which would make
+/// any assertion depend on where that binary happens to live. Same shape as `own_sidecar_path`
+/// below, which resolves the sidecar binary from the executable for the adjacent reason.
+///
+/// `pub(crate)` because `lifecycle.rs` pins the Rust↔NSIS pid agreement against it from both ends.
+pub(crate) fn sidecar_pid_dir(exe: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    // No executable, no directory — and deliberately NO substitute.
+    //
+    // This used to answer the current directory — a bare «.» — when `current_exe()` failed, on the
+    // reasoning that a path helper must not panic and that a process id is a number rather than a
+    // secret. Both halves are still true; the conclusion was not. A relative answer is composed against
+    // the process's WORKING directory, which is chosen by whoever launched the process — and the
+    // launcher that matters here is the logon scheduled task, whose working directory is
+    // `%WINDIR%\System32`. The file that produces is a dotfile in the Windows system directory
+    // that the uninstaller can never read (its PREUNINSTALL block resolves `${TT_INSTALL_DIR}` =
+    // `$INSTDIR` and nothing else) and that the user will never find.
+    //
+    // So the two outcomes are: no pid file, or a pid file in the wrong place that is equally
+    // unread. The first is a degraded crash-cleanup mode the Job Object (`job_object.rs`,
+    // KILL_ON_JOB_CLOSE) already covers and `save_sidecar_pid` records in the log; the second is
+    // that same degraded mode PLUS litter written into a system folder by an elevated process.
+    // Declining is strictly better (G-32-2e).
+    exe.as_deref()
+        .and_then(|p| p.parent())
+        // The second door into the same misfiling: a bare filename («trusttunnel.exe») has an
+        // EMPTY parent rather than no parent, and joining the basename onto an empty path composes
+        // a RELATIVE path — resolved, once again, against the process's working directory. An
+        // empty answer is «I do not know where», so it is reported as such.
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(|d| d.to_path_buf())
+}
+
 /// Path to the PID file used to track the sidecar process across restarts.
 ///
 /// Built on the per-edition `lifecycle::SIDECAR_PID_BASENAME` (`.sidecar-pro.pid`)
 /// instead of the formerly-shared `.sidecar.pid` (Gemini HIGH isolation, D-07):
 /// Pro and Light must never read or stale-kill each other's sidecar PID when both
-/// are installed in the same data dir.
-fn sidecar_pid_path() -> std::path::PathBuf {
-    ssh::user_data_dir().join(crate::lifecycle::SIDECAR_PID_BASENAME)
+/// are installed in the same directory.
+///
+/// The single composition site. `sidecar.rs`'s Terminated arm calls THIS rather than re-joining
+/// the basename itself — a second join site is how the two ends drift apart, which is the defect
+/// D-07 was added to close.
+/// `None` when the executable's own directory cannot be resolved — see `sidecar_pid_dir`. Every
+/// caller handles that answer once, at its own site, rather than re-deriving a path: the write
+/// declines and says so in the log, and the two read sites treat «no path» exactly as they already
+/// treat «file not present», because both mean the same thing — there is no pid to act on.
+pub(crate) fn sidecar_pid_path() -> Option<std::path::PathBuf> {
+    sidecar_pid_dir(std::env::current_exe().ok())
+        .map(|dir| dir.join(crate::lifecycle::SIDECAR_PID_BASENAME))
 }
 
 /// OS image name of the spawned VPN sidecar (Tauri spawns it via
@@ -777,7 +841,14 @@ fn sidecar_pid_path() -> std::path::PathBuf {
 /// UNRELATED process after a reboot/crash is never force-killed (02-10, Tier-1 A).
 /// Centralized here as the single source so the filter and the spawn name cannot
 /// drift apart.
-const SIDECAR_IMAGE_NAME: &str = "trusttunnel_client.exe";
+///
+/// `pub(crate)` since phase 32: the installer's pre-install hook enumerates this
+/// same file as one of the legacy binaries it removes, and
+/// `lifecycle.rs::the_pre_install_enumeration_names_every_file_the_template_installs`
+/// composes its expectation from THIS constant. A retyped literal in that test
+/// would make it agree with itself rather than with the application — the exact
+/// failure mode the both-ends contract exists to refuse.
+pub(crate) const SIDECAR_IMAGE_NAME: &str = "trusttunnel_client.exe";
 
 /// Build the `taskkill` argument vector for an image-validated, PID-scoped kill of
 /// our stale sidecar (02-10, T-10-01). Factored out as a pure function so the
@@ -806,7 +877,20 @@ fn stale_kill_args(pid: u32) -> Vec<String> {
 /// orphan survives. Surfacing the failure makes that degraded mode VISIBLE in the
 /// log instead of silently swallowed.
 pub(crate) fn save_sidecar_pid(pid: u32) {
-    if let Err(e) = std::fs::write(sidecar_pid_path(), pid.to_string()) {
+    // 32-FIX-08: no resolvable executable directory means there is nowhere the uninstaller could
+    // read the file back from, so nothing is written. Recorded rather than silent: a machine where
+    // the stale-sidecar kill never worked can then be diagnosed from its own log instead of from a
+    // guess (T-32-08-05). No path and no pid in the phrase — D-29, and the value here is a process
+    // id, never a credential.
+    let Some(path) = sidecar_pid_path() else {
+        crate::logging::log_app(
+            "WARN",
+            "Sidecar PID not persisted: the application's own directory could not be resolved — \
+             crash cleanup relies on the Job Object",
+        );
+        return;
+    };
+    if let Err(e) = std::fs::write(path, pid.to_string()) {
         // FIXED phrase + the std::io::Error kind only (no path / no PID beyond the
         // generic kind — D-29). Degraded mode: crash cleanup now leans entirely on
         // the Job Object (job_object.rs).
@@ -936,7 +1020,11 @@ fn stale_pid_kill_allowed(
 /// gated on the candidate process's full executable PATH equaling THIS edition's own
 /// sidecar path (`stale_pid_kill_allowed`); any doubt skips the kill.
 pub fn kill_stale_sidecar() {
-    let pid_path = sidecar_pid_path();
+    // 32-FIX-08: «no path» and «no file» mean the same thing here — there is no recorded pid to
+    // sweep — so the absent path takes the same silent exit the absent file already took.
+    let Some(pid_path) = sidecar_pid_path() else {
+        return;
+    };
     if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
             // AUDIT-2026-06-11 #21: gate the kill on the candidate's FULL EXECUTABLE
@@ -2729,6 +2817,120 @@ pub fn set_plate_language(language: String, state: tauri::State<'_, AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The pid file follows the BINARIES, not the user's data.** (Phase 32, D-05.)
+    ///
+    /// The data root left the install directory in this commit, so the pid file needed a root of
+    /// its own, and the two candidates are not equivalent. `$INSTDIR` is the only root the
+    /// uninstaller resolves correctly whichever administrator UAC elevated it to: the uninstaller
+    /// sits IN that directory. A profile-relative root would resolve to the ELEVATING account's
+    /// profile, find no pid file, and the sidecar kill would become a silent no-op — the tunnel
+    /// outliving the app, on a security product. That exact failure has already shipped once
+    /// (D-07, basename drift) and it is why this agreement is machine-checked from both ends.
+    ///
+    /// The rule is tested rather than the caller because `current_exe()` under `cargo test` points
+    /// at `target/debug/deps`, which would make the assertion depend on where the test binary
+    /// happens to live. A synthetic Program Files path is the input the phase actually creates.
+    #[test]
+    fn the_pid_directory_is_the_executables_own_directory() {
+        let exe =
+            std::path::Path::new("C:\\Program Files\\TrustTunnel Client Pro\\trusttunnel.exe");
+
+        assert_eq!(
+            sidecar_pid_dir(Some(exe.to_path_buf())).as_deref(),
+            exe.parent(),
+            "the pid file must sit beside the binaries — that is what $INSTDIR spells in the \
+             uninstall hook"
+        );
+    }
+
+    /// An unresolvable executable must not panic the pid lookup — and it must not answer the
+    /// process's working directory either.
+    ///
+    /// The substituted `"."` was reached whenever `current_exe()` fails, and the file it produced
+    /// went wherever the process happened to be started from. For the logon scheduled task that is
+    /// `%WINDIR%\System32`: a dotfile in the Windows system directory, written by an elevated
+    /// process, that the uninstaller can never name (it resolves `$INSTDIR` and nothing else) and
+    /// the user will never find. Declining to write is strictly better than misfiling — a missing
+    /// pid file is a degraded crash-cleanup mode the Job Object already covers, while a misfiled
+    /// one is litter in a system folder that still does not get read (G-32-2e).
+    ///
+    /// **This is now the same shape `ssh::resolve_data_root` takes** — refuse rather than
+    /// substitute — but for its own reason, not out of symmetry: 32-FIX-03 made the DATA root
+    /// refuse because a relative data root writes the plaintext credential store somewhere
+    /// readable. This helper refuses because a relative PROGRAM path is unreadable by the one
+    /// consumer that matters. Same verb, different argument; neither follows the other.
+    #[test]
+    fn an_unresolvable_executable_yields_no_sidecar_pid_directory_rather_than_the_process_cwd() {
+        assert_eq!(
+            sidecar_pid_dir(None),
+            None,
+            "with no executable there is NO directory to write the pid file into; answering the \
+             process's working directory files it in %WINDIR%\\System32 under the logon task"
+        );
+        assert_eq!(
+            sidecar_pid_dir(Some(std::path::PathBuf::from("trusttunnel.exe"))),
+            None,
+            "a bare filename has an EMPTY parent, and joining the basename onto an empty path \
+             composes a RELATIVE path — resolved against the process working directory, which is \
+             the same misfiling through a second door"
+        );
+    }
+
+    /// **The pid file's home and the elevation this binary requests are ONE decision, not two.**
+    ///
+    /// `sidecar_pid_dir` puts the pid file beside the binaries, which since phase 32 means
+    /// `C:\Program Files\TrustTunnel Client Pro` — a directory no unelevated process may write to.
+    /// The manifest asking Windows for `requireAdministrator` is the entire reason that write
+    /// succeeds, and nothing in the tree connected the two. Weakening the manifest to `asInvoker`
+    /// would compile, ship, and reduce `save_sidecar_pid` to a warning line nobody reads: after
+    /// that `kill_stale_sidecar` has no pid to sweep and the uninstaller's PREUNINSTALL block
+    /// finds no file, so a crashed sidecar keeps the tunnel up after the program is gone. On a VPN
+    /// client that is the tunnel outliving its owner — a silent no-op with no failing build.
+    ///
+    /// The manifest is LOCATED rather than named: `build.rs` embeds a manifest from this crate
+    /// root, and a rename must turn this contract red rather than quietly into a pass. Finding no
+    /// manifest at all reports an inability to measure — never a pass.
+    #[test]
+    fn the_pid_directory_and_the_elevation_level_are_one_decision() {
+        let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut declaring: Vec<(std::path::PathBuf, String)> = Vec::new();
+        for entry in std::fs::read_dir(crate_root).expect("the crate root is readable") {
+            let path = entry.expect("a readable directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("manifest") {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                if text.contains("requestedExecutionLevel") {
+                    declaring.push((path, text));
+                }
+            }
+        }
+
+        assert!(
+            !declaring.is_empty(),
+            "CANNOT MEASURE: no *.manifest in {} declares a requestedExecutionLevel, so the \
+             elevation this binary requests could not be read. This is not a pass — the pid file \
+             lives beside the binaries in the machine's program folder, and whether the write can \
+             happen at all depends on the level that could not be found.",
+            crate_root.display()
+        );
+
+        for (path, text) in &declaring {
+            assert!(
+                text.contains("level=\"requireAdministrator\""),
+                "{} does not request administrator elevation. The sidecar pid file is written \
+                 beside the binaries in the machine's program folder (see `sidecar_pid_dir`), \
+                 which an unelevated process cannot write to — and the failure is SILENT: \
+                 `save_sidecar_pid` logs a warning and continues, `kill_stale_sidecar` then finds \
+                 no pid to sweep and the uninstaller's PREUNINSTALL block finds no file to read. \
+                 A crashed sidecar would keep the tunnel alive after the program is gone. If the \
+                 elevation level is genuinely being lowered, the pid file must move first and the \
+                 NSIS hook must be taught to read wherever it moved to.",
+                path.display()
+            );
+        }
+    }
 
     // RESEARCH A1 — VpnStatus is the FIRST serde-tagged enum in the tree. Lock the
     // wire contract with a round-trip test so a future variant rename can never

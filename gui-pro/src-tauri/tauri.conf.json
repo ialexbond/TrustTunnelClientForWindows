@@ -47,14 +47,17 @@
       "trusttunnel_client"
     ],
     "resources": [
-      "wintun.dll",
-      "vcruntime140.dll",
-      "vcruntime140_1.dll"
+      "wintun.dll"
     ],
     "windows": {
       "allowDowngrades": true,
+      "signCommand": "node ../../scripts/sign-windows-artifact.cjs %1",
       "nsis": {
+        "installMode": "perMachine",
         "installerHooks": "nsis/installer-hooks.nsh",
+        "headerImage": "assets/installer/header-150x57.bmp",
+        "sidebarImage": "assets/installer/sidebar-164x314.bmp",
+        "installerIcon": "assets/installer/installer.ico",
         "languages": ["Russian", "English"],
         "displayLanguageSelector": false,
         "customLanguageFiles": {

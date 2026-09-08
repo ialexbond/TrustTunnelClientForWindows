@@ -83,6 +83,19 @@ jobs:
       - name: NSIS text gate
         run: npm run nsis:check
 
+      # Signing plumbing. 285 lines of assertions sat beside sign-windows-artifact.cjs
+      # matching no vitest glob, no npm script and no workflow step, so they had never
+      # run in any automated context — a body of tests that reports nothing because
+      # nothing invokes it (WS4 finding 3). They guard the branch that must never break
+      # a build (no certificate configured -> stated skip, exit 0), the fact that the
+      # identity never reaches the log channel, and the post-build judge's refusal to
+      # let a config-emitted define stand in for a signature.
+      # The suite synthesises its own PE fixtures, so it needs no build and no Windows
+      # binaries; the one arm that wants a real vendor signature reports itself NOT
+      # MEASURED here rather than skipping quietly.
+      - name: Signing plumbing tests
+        run: npm run sign:test
+
   # gui-light job removed 2026-05-23 — the Light edition is out of scope
   # until its dedicated redesign milestone. Last on-fork typecheck failed
   # with a Tooltip `position` prop drift in WindowControls.tsx that the
