@@ -176,4 +176,196 @@ mod tests {
         assert!(cmd.starts_with("\"C:\\Program Files\\TrustTunnel Client Pro\\trusttunnel.exe\""));
         assert!(cmd.ends_with("\"%1\""));
     }
+
+    // ── D-03 item 4 / phase 32: the handler is WATCHED, not merely believed ──────
+    //
+    // D-03 item 4 asked to verify first and only then decide whether there was
+    // anything to do. The verdict, re-checked against this file: the registration is
+    // called unconditionally from the startup hook, `register_url_protocols` loops both
+    // schemes and overwrites with no short-circuit, and `is_protocol_registered` is used
+    // only by the read-only `check_url_protocols`. **The code is correct, and phase 32
+    // changed none of it.** The finding is that there was nothing to fix.
+    //
+    // What was missing is anything watching that it STAYS correct now that the
+    // executable's path changes underneath it (32-01 moved the install to Program
+    // Files). If the write path ever short-circuits on an existing key, every handler
+    // registered before the move stays frozen at a path that no longer exists — and it
+    // would be a silent, permanent regression, because the guard that causes it looks
+    // like an optimisation. That is not hypothetical: it is the exact mistake this
+    // module's own comment records, and the reason legacy installs never received the
+    // direct-exe fix.
+    //
+    // The three arms below are SOURCE-SHAPE assertions, bound at compile time by
+    // `include_str!`, so changing the code without changing the rule cannot leave them
+    // green. Each locates its subject first and fails as CANNOT MEASURE when it is
+    // absent — a scan that has lost its subject must never report PASS.
+
+    /// This module's own source, bound at compile time.
+    const PROTOCOL_SRC: &str = include_str!("protocol.rs");
+    /// The bootstrap that calls the registration on every launch.
+    const BOOTSTRAP_SRC: &str = include_str!("../lib.rs");
+
+    /// Blank out `//` comments so a rule cannot trip over the file's own PROSE about
+    /// the very thing it forbids: this module explains at length why there is no
+    /// `is_protocol_registered` short-circuit, and arm 1 scans for exactly that name.
+    ///
+    /// Line-based and deliberately conservative — it also truncates at a `//` that
+    /// happens to sit inside a string literal. That can only ever hide code from a
+    /// scan, never invent a match, so it cannot produce a false accusation; and the
+    /// locate-or-fail check in each arm catches the case where it hid the subject.
+    /// Line COUNT is preserved so indices still line up with the real file.
+    fn without_comments(src: &str) -> String {
+        src.lines()
+            .map(|l| match l.find("//") {
+                Some(i) => &l[..i],
+                None => l,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The source of the top-level item introduced by `signature`, up to the first
+    /// column-0 `}` — the shape rustfmt guarantees for a top-level item. `None` when
+    /// the signature is absent; every caller must report that as an inability to
+    /// measure rather than as an absence of violations.
+    fn item_body<'a>(src: &'a str, signature: &str) -> Option<&'a str> {
+        let start = src.find(signature)?;
+        let rest = &src[start..];
+        let end = rest.find("\n}")? + 2;
+        Some(&rest[..end])
+    }
+
+    // Arm 1 — no exists-check may appear on the WRITE path. `check_url_protocols` may
+    // and does call the probe; it is read-only. The scan is therefore scoped to the two
+    // functions that write, not to the file.
+    #[test]
+    fn the_registration_write_path_has_no_existence_check() {
+        let src = without_comments(PROTOCOL_SRC);
+        for signature in ["pub fn register_url_protocols()", "fn register_protocol("] {
+            let body = item_body(&src, signature).unwrap_or_else(|| {
+                panic!(
+                    "CANNOT MEASURE: `{signature}` was not found in commands/protocol.rs. \
+                     The rule lost its subject — it was renamed or moved. That is not the \
+                     same as having no violations, so this fails rather than passing."
+                )
+            });
+            assert!(
+                !body.contains("is_protocol_registered"),
+                "`{signature}` must never short-circuit on an already-registered key. A \
+                 cheap exists-check is exactly why legacy installs never received the \
+                 direct-exe fix (see this module's own comment), and after the phase-32 \
+                 relocation it would freeze every handler at an executable path that no \
+                 longer exists. Offending body:\n{body}"
+            );
+        }
+    }
+
+    // Arm 2 — the command string must keep being derived from the RUNNING executable.
+    // A stored, configured or hardcoded path would survive the relocation as a stale
+    // value; `current_exe()` is what makes re-registration self-correcting (T-32-13).
+    #[test]
+    fn the_registered_command_is_built_from_the_running_executable() {
+        let src = without_comments(PROTOCOL_SRC);
+
+        let registrar = item_body(&src, "pub fn register_url_protocols()").unwrap_or_else(|| {
+            panic!(
+                "CANNOT MEASURE: `register_url_protocols` was not found in \
+                 commands/protocol.rs — the rule lost its subject."
+            )
+        });
+        assert!(
+            registrar.contains("std::env::current_exe()"),
+            "the exe path handed to the registration must come from the RUNNING \
+             executable, so that a launch from the new install directory rewrites the \
+             handler by itself. Offending body:\n{registrar}"
+        );
+
+        let writer = item_body(&src, "fn register_protocol(").unwrap_or_else(|| {
+            panic!(
+                "CANNOT MEASURE: `register_protocol` was not found in \
+                 commands/protocol.rs — the rule lost its subject."
+            )
+        });
+        assert!(
+            writer.contains("build_protocol_command(exe_path)"),
+            "the value written to shell\\open\\command must be the pure builder's \
+             output applied to that path, not a literal assembled at the write site. \
+             Offending body:\n{writer}"
+        );
+    }
+
+    // Arm 3 — the startup call must stay UNCONDITIONAL. Re-registering on every launch
+    // is what migrates an install across the relocation; behind any condition
+    // («only if not registered», «only on first run») the migration stops happening.
+    //
+    // Measured structurally: the spawn that carries the call must sit at the same block
+    // depth as a known unconditional sibling in the same closure, and must not be
+    // preceded by a line that opens a condition. Wrapping it in `if` would indent it.
+    #[test]
+    fn the_startup_registration_call_is_unconditional() {
+        let src = without_comments(BOOTSTRAP_SRC);
+        let lines: Vec<&str> = src.lines().collect();
+        let indent = |l: &str| l.len() - l.trim_start().len();
+
+        let call = lines
+            .iter()
+            .position(|l| l.contains("commands::protocol::register_url_protocols()"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "CANNOT MEASURE: lib.rs never calls `register_url_protocols`. Either \
+                     the startup registration was deleted — in which case no install ever \
+                     migrates again — or it was renamed and this rule lost its subject."
+                )
+            });
+
+        let spawn = lines[..call]
+            .iter()
+            .rposition(|l| l.contains("std::thread::spawn("))
+            .unwrap_or_else(|| {
+                panic!(
+                    "CANNOT MEASURE: the call to `register_url_protocols` is no longer \
+                     inside a `std::thread::spawn(` — the rule's structural assumption \
+                     no longer holds, so it cannot judge conditionality."
+                )
+            });
+
+        // A statement known to be unconditional in the same closure, used as the
+        // reference depth. If IT moves, this rule reports that it cannot measure.
+        let sibling = lines
+            .iter()
+            .position(|l| l.contains("commands::protocol::capture_cold_start_deeplink()"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "CANNOT MEASURE: the unconditional sibling call \
+                     `capture_cold_start_deeplink` is gone from lib.rs, so there is no \
+                     reference block depth left to compare against."
+                )
+            });
+
+        assert_eq!(
+            indent(lines[spawn]),
+            indent(lines[sibling]),
+            "the registration spawn is nested deeper than its unconditional sibling, so \
+             something now guards it. Re-registration must run on EVERY launch — that is \
+             the only thing that migrates an install whose handler still points at the \
+             pre-relocation path.\n  spawn:   {}\n  sibling: {}",
+            lines[spawn],
+            lines[sibling]
+        );
+
+        let preceding = lines[..spawn]
+            .iter()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or_else(|| {
+                panic!("CANNOT MEASURE: nothing precedes the registration spawn in lib.rs.")
+            });
+        for opener in ["if ", "if let ", "match ", "while ", "else"] {
+            assert!(
+                !preceding.trim_start().starts_with(opener),
+                "the registration spawn is preceded by `{opener}`, so it appears to be \
+                 guarded. It must run on every launch.\n  preceding line: {preceding}"
+            );
+        }
+    }
 }

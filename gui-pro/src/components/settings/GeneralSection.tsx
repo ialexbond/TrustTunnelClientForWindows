@@ -127,10 +127,30 @@ export function GeneralSection({ onSaved, onSaveFailed }: Props) {
   // pair the row is mockable exactly like «Запускать в свёрнутом режиме», and the trap is gone.
   const [autostart, setAutostart] = useState(false);
 
+  // Whether the app could find out at all.
+  //
+  // `get_autostart` has THREE answers, not two: the task is on, the task is off (absent or
+  // disabled), or the Task Scheduler could not be asked — its service stopped by policy or by a
+  // third-party tuner, an apartment refused, this process's own identity unreadable. This row used
+  // to swallow the third with `.catch(() => {})` and stay on its `false` default, so somebody whose
+  // logon task is registered and firing at every logon read a confident OFF. That is this feature's
+  // own defect class pointed the other way — the switch claiming a state the operating system
+  // contradicts — and it is the reading that makes a person switch it on again, or stop trusting
+  // the setting.
+  //
+  // A `false` handle is not an honest way to draw «unknown», so the row says so in words and the
+  // control is disabled: reading and writing go through the same three COM acquisitions, so a read
+  // that could not be made is a write that cannot be made either, and a switch that can be moved
+  // implies the app knows where it stands now. The remedy is in the sentence.
+  const [autostartUnreadable, setAutostartUnreadable] = useState(false);
+
   useEffect(() => {
     invoke<boolean>("get_autostart")
-      .then(seedIfUntouched("autostart", setAutostart))
-      .catch(() => {});
+      .then((value) => {
+        setAutostartUnreadable(false);
+        seedIfUntouched("autostart", setAutostart)(value);
+      })
+      .catch(() => setAutostartUnreadable(true));
   }, []);
 
   const handleAutostartChange = async (value: boolean) => {
@@ -145,7 +165,19 @@ export function GeneralSection({ onSaved, onSaveFailed }: Props) {
       await invoke("set_autostart", { enabled: value });
       onSaved?.();
     } catch {
-      await revertTo(setAutostart, reported, () => invoke<boolean>("get_autostart"));
+      // The re-read is the same command as the mount read and carries the same third answer, so it
+      // updates the same flag. Without this a refused write followed by an unreadable re-read would
+      // put the switch back on the last value the app happened to report and present it as fact.
+      await revertTo(setAutostart, reported, async () => {
+        try {
+          const value = await invoke<boolean>("get_autostart");
+          setAutostartUnreadable(false);
+          return value;
+        } catch (e) {
+          setAutostartUnreadable(true);
+          throw e;
+        }
+      });
       onSaveFailed?.();
     } finally {
       markPending("autostart", false);
@@ -283,11 +315,21 @@ export function GeneralSection({ onSaved, onSaveFailed }: Props) {
         <SettingsRow
           icon={<Power className="h-3.5 w-3.5" />}
           label={autostartLabel}
-          description={t("settings.app.autostart_desc")}
+          // The row's own description slot carries the bad news — no new device, no badge, no
+          // second card. It replaces the ordinary line rather than joining it: a row stating both
+          // what the setting does and that it cannot be read would be claiming two things at once.
+          description={
+            autostartUnreadable
+              ? t("settings.app.autostart_unknown")
+              : t("settings.app.autostart_desc")
+          }
           control={
             <RowToggle
               checked={autostart}
               onChange={handleAutostartChange}
+              // `disabled`, not `busy`: nothing is in flight here, the setting is unavailable —
+              // which is the distinction those two props exist to keep apart.
+              disabled={autostartUnreadable}
               busy={pendingRows.has("autostart")}
               aria-label={autostartLabel}
             />

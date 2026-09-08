@@ -172,6 +172,166 @@ pub const ROUTING_RULES_UNREADABLE_REASON: &str = "routing-rules-unreadable";
 pub const CONFIG_OUTSIDE_DATA_DIR_REASON: &str = "config-outside-data-dir";
 
 // ---------------------------------------------------------------------------
+// 32-FIX-15 — the note this installation leaves about WHERE it keeps the data.
+//
+// This is the one item in this module that touches the filesystem, and it sits here rather than
+// in a module of its own for the reason the two basenames above it exist at all: the name of a
+// file that BOTH ends of the product read has to live in one place, and the writer has to be
+// beside the name. `SIDECAR_PID_BASENAME` and the survivor marker each learned that the hard way
+// (D-07) — a second spelling anywhere is how two ends drift while nothing watches.
+// ---------------------------------------------------------------------------
+
+/// Basename of the file the application writes beside its own binaries on every start, holding
+/// the absolute path of the folder THIS installation keeps the user's data in.
+///
+/// **WHY THIS FILE EXISTS.** The data folder lives under the profile of whichever account
+/// approved the program's elevation prompt (`trusttunnel.exe.manifest:18` asks for
+/// administrator, so under over-the-shoulder UAC that is the supplying administrator and not the
+/// person at the keyboard). The uninstaller asks for the same rights and gets its OWN answer to
+/// «my profile», which need not be the same account; and Windows will not tell an elevated
+/// process which account owns the data of another elevated process. So the account that KNOWS
+/// writes the fact down, and the account that NEEDS it reads the note back. No identity is
+/// recovered anywhere: one side records a fact, the other checks it against a second fact — its
+/// own profile directory — and refuses on any mismatch. That is how D-08 is honoured here rather
+/// than evaded. Owner decision `D32-16` = `route-record`, 2026-09-06.
+///
+/// **WHAT IT IS NOT.** It is not a configuration input. Nothing reads it to DECIDE where data
+/// goes — `ssh::user_data_dir()` remains the single funnel for that, and it derives nothing from
+/// this file. The note is only ever read to check where the data ALREADY went, and every reader
+/// validates it before use, because a file in a world-readable folder is input and never
+/// instruction.
+///
+/// **THE CONFIDENTIALITY CONSEQUENCE, STATED RATHER THAN DISCOVERED.** The install directory is
+/// under Program Files, whose ACL grants `BUILTIN\Users` read by inheritance, so every account on
+/// the machine can read this note — and what it tells them is which account uses the program.
+/// That is exactly the class of path the survivor marker written by 32-FIX-10 already carries,
+/// for the same reason and with the same acceptance (T-32-59). What it does NOT carry: no
+/// credential, no key, no host, and no filename the user chose. One line, one path, composed by
+/// this program from its own rule.
+///
+/// **PER-EDITION, like the pid file and for its reason.** Pro and Light must never read each
+/// other's note if they ever share a directory; distinct names make the two editions' records
+/// mutually invisible (D-07).
+pub const DATA_ROOT_RECORD_BASENAME: &str = ".data-root-pro.txt";
+
+/// What one attempt to write the record did. Every degraded case is a VARIANT rather than a
+/// swallowed error, so each one has a test instead of a hope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataRootRecordOutcome {
+    /// The note is on disk and its single line is the data root.
+    Written,
+    /// There is no directory to write it into — the executable could not be resolved, or what was
+    /// handed in was relative. Nothing was written ANYWHERE; see the writer for why a relative
+    /// answer is worse than no answer.
+    NoExecutableDirectory,
+    /// The data root was not an absolute path, so the note would only ever produce a refusal.
+    NotAbsolute,
+    /// The write itself failed. Path-free reason (D-29), because this string reaches `app.log`.
+    Failed(String),
+}
+
+/// Write the record: the data root, on one line, in the executable's own directory.
+///
+/// Both roots are PARAMETERS rather than resolved in here, for the reason `sidecar_pid_dir` and
+/// `report_legacy_leftovers` both state at their own sites: under `cargo test --lib` the
+/// executable is a test binary somewhere in the build tree, so a function that resolved its own
+/// inputs could only be asserted about wherever that binary happened to live. The production
+/// answers are supplied by [`record_data_root_on_startup`] and nowhere else.
+///
+/// **A RELATIVE DESTINATION IS REFUSED, NOT SUBSTITUTED.** A relative directory is composed
+/// against the process WORKING directory, which is chosen by whoever launched the process — and
+/// the launcher that matters here is the logon scheduled task, whose working directory is
+/// `%WINDIR%\System32`. That would put a dotfile naming the user's profile into the Windows
+/// system directory, written by an elevated process, where the uninstaller can never read it and
+/// the user will never find it. This is 32-FIX-08's rule for the pid file, one file over
+/// (G-32-2e): declining is strictly better than misfiling.
+///
+/// **THE WRITE TRUNCATES.** `fs::write` opens with truncation, so a shorter root after a longer
+/// one leaves no tail of the longer one behind. A record carrying two paths spliced together
+/// would fail the uninstaller's ladder and silently cost the user the erasure they asked for.
+pub fn write_data_root_record(
+    data_root: &std::path::Path,
+    exe_dir: Option<&std::path::Path>,
+) -> DataRootRecordOutcome {
+    let Some(dir) = exe_dir.filter(|d| d.is_absolute()) else {
+        return DataRootRecordOutcome::NoExecutableDirectory;
+    };
+    if !data_root.is_absolute() {
+        return DataRootRecordOutcome::NotAbsolute;
+    }
+    // No trailing newline: the note is the path and nothing else, the same shape `save_sidecar_pid`
+    // writes and the uninstall hook already reads with a bare `FileRead`.
+    match std::fs::write(
+        dir.join(DATA_ROOT_RECORD_BASENAME),
+        data_root.to_string_lossy().as_bytes(),
+    ) {
+        Ok(()) => DataRootRecordOutcome::Written,
+        Err(e) => DataRootRecordOutcome::Failed(record_failure_reason(&e.to_string())),
+    }
+}
+
+/// A write error with anything path-shaped taken out.
+///
+/// The same predicate `legacy_sweep::reason_without_path` applies and for the same reason (D-29):
+/// today `fs::write` formats its errors from the operation and never from the destination, but
+/// «never today» is not a guard, and this string reaches `app.log` — where the destination would
+/// carry the Windows account name.
+fn record_failure_reason(reason: &str) -> String {
+    if reason.contains('\\') || reason.contains('/') {
+        return "the record could not be written".to_string();
+    }
+    reason.to_string()
+}
+
+/// The production entry point: resolve both roots through the accessors that already own them,
+/// write the note, and say in `app.log` what happened.
+///
+/// The data root comes from `ssh::user_data_dir()` — the single accessor every path-confinement
+/// root in this crate derives from — and the program's folder from `sidecar_pid_dir`, which
+/// already answers «the directory the executable is in» for the pid file the installer reads.
+/// Neither is re-derived here; a second lookup is how the two ends of a path come to disagree.
+///
+/// **LOSING THE NOTE MAY NEVER STOP THE APPLICATION STARTING.** Nothing the user asked for
+/// depends on it, so nothing it fails at may interrupt anybody: every outcome is one line in
+/// `app.log`, never a dialog and never an abort. The cost of a missing note is a later REFUSAL in
+/// the uninstaller, which is the safe direction — the same trade `report_legacy_leftovers` makes
+/// one call site below (T-32-60).
+///
+/// **THE LOG LINE NAMES NO PATH.** The note's whole content is a profile-relative folder, i.e.
+/// the account name; `legacy_sweep::folder_for_report` exists because that is not printable as-is.
+/// Here it is simply not printed: what a reader of `app.log` needs is whether the note was
+/// written, and the note itself is the place the path belongs.
+pub(crate) fn record_data_root_on_startup() -> DataRootRecordOutcome {
+    let data_root = crate::ssh::user_data_dir();
+    let exe_dir = crate::commands::vpn::sidecar_pid_dir(std::env::current_exe().ok());
+    let outcome = write_data_root_record(&data_root, exe_dir.as_deref());
+
+    let line = match &outcome {
+        DataRootRecordOutcome::Written => "[data-root] wrote down, beside the program's own files, \
+             which folder this installation keeps your data in"
+            .to_string(),
+        DataRootRecordOutcome::NoExecutableDirectory => {
+            "[data-root] not written down: the program's own folder could not be resolved, and a \
+             note anywhere else is a note nothing reads"
+                .to_string()
+        }
+        DataRootRecordOutcome::NotAbsolute => {
+            "[data-root] not written down: the data folder did not resolve to an absolute path"
+                .to_string()
+        }
+        DataRootRecordOutcome::Failed(reason) => {
+            format!("[data-root] not written down - {reason}")
+        }
+    };
+    // Two channels, copied from the leftover report and for its reason: `log_app` is the durable
+    // one and is a no-op when file logging is off.
+    crate::logging::log_app("info", &line);
+    eprintln!("{line}");
+
+    outcome
+}
+
+// ---------------------------------------------------------------------------
 // Pure decision helpers.
 //
 // All free of any sidecar / `AppHandle` dependency so they can be exercised by
@@ -706,8 +866,13 @@ pub fn per_candidate_attempt_budget(kind: WalkKind, queue_len: usize, index: usi
     }
 }
 
+// `pub(crate)` since 32-FIX-11, for ONE item: `USER_DATA`. The startup leftover report keeps a
+// closed allow-list of legacy binaries, and the property that makes that list safe is that it is
+// disjoint from everything the user owns — which is this list, not a copy of it. A second copy
+// beside this one is how two lists drift and one of them quietly stops being enforced, which is the
+// argument this module's own comments make about the NSIS hook. Nothing else here is exported.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1019,63 +1184,356 @@ mod tests {
     /// alone cannot leave this green — the test binary is rebuilt when the `.nsh` changes.
     ///
     /// **Why this asserts on a prefix and a basename rather than on a resolved absolute path.**
-    /// The data root is the executable's own directory, which the installer spells `$INSTDIR` —
-    /// an NSIS variable that has no value until the uninstaller runs, so Rust cannot resolve it.
+    /// The pid file sits beside the binaries, which the installer spells `$INSTDIR` — an NSIS
+    /// variable that has no value until the uninstaller runs, so Rust cannot resolve it.
     /// The agreement is therefore pinned in three parts, each of which alone would be too weak:
     /// the hook's root is the install directory (not some other folder), the pid path is COMPOSED
-    /// from that root plus the constant production code uses, and Rust's own root really is the
-    /// executable's directory — which is what makes `$INSTDIR` the correct spelling of it.
+    /// from that root plus the constant production code uses, and Rust's own pid directory really
+    /// is the executable's directory — which is what makes `$INSTDIR` the correct spelling of it.
+    ///
+    /// **Re-derived in phase 32, not string-flipped.** The subject of part (3) changed: the data
+    /// root left the install directory in that phase, so asserting on `resolve_data_root` here
+    /// would now pin the wrong function — it would keep passing while the pid file wandered off
+    /// on its own. The subject is the pid-directory accessor, which is what `$INSTDIR` now
+    /// spells. The divergence the phase introduced has its own test below.
     #[test]
     fn the_uninstall_hook_reads_the_pid_file_the_app_writes() {
         let hook = include_str!("../nsis/installer-hooks.nsh");
 
         // (1) The hook's root is the install directory. Pinning the literal is the point: any
         //     other value — a $LOCALAPPDATA subfolder, a vendor\edition pair — means the hook is
-        //     looking somewhere the app does not write.
+        //     looking somewhere the app does not write. `$LOCALAPPDATA` in particular is a trap
+        //     here: under `installMode: perMachine` NSIS resolves it to %ProgramData%, a folder
+        //     nothing writes, and the kill would silently become a no-op.
         assert!(
-            hook.contains("!define TT_DATA_ROOT \"$INSTDIR\""),
-            "the uninstall hook must define the data root as the install directory — that is \
-             where the app writes"
+            hook.contains("!define TT_INSTALL_DIR \"$INSTDIR\""),
+            "the uninstall hook must define the install directory as $INSTDIR — that is where \
+             the app writes its pid file"
         );
 
         // (2) The pid path is composed from THAT root plus the SAME constant production code
-        //     uses (`commands/vpn.rs::sidecar_pid_path` joins it onto `ssh::user_data_dir()`).
+        //     uses (`commands/vpn.rs::sidecar_pid_path` joins it onto `sidecar_pid_dir`).
         //     Hard-coding the basename here would make this test agree with itself rather than
         //     with the application.
         let want_pid =
-            format!("!define TT_SIDECAR_PID_FILE \"${{TT_DATA_ROOT}}\\{SIDECAR_PID_BASENAME}\"");
+            format!("!define TT_SIDECAR_PID_FILE \"${{TT_INSTALL_DIR}}\\{SIDECAR_PID_BASENAME}\"");
         assert!(
             hook.contains(&want_pid),
-            "the uninstall hook's pid path must be built from the data root plus \
+            "the uninstall hook's pid path must be built from the install directory plus \
              {SIDECAR_PID_BASENAME}; expected the line: {want_pid}"
         );
 
-        // (3) Rust's end of the agreement: the data root really is the executable's directory,
-        //     so `$INSTDIR` is the right NSIS spelling of it. Without this the first two
-        //     assertions would keep passing if the Rust helper moved the data elsewhere.
-        let install = std::path::Path::new("C:\\Users\\u\\AppData\\Local\\TrustTunnel Client Pro");
+        // (3) Rust's end of the agreement: the pid directory really is the executable's own
+        //     directory, so `$INSTDIR` is the right NSIS spelling of it. Without this the first
+        //     two assertions would keep passing if the Rust helper moved the pid file elsewhere.
+        let install = std::path::Path::new("C:\\Program Files\\TrustTunnel Client Pro");
         assert_eq!(
-            crate::ssh::resolve_data_root(Some(install.join("trusttunnel.exe"))).0,
-            install,
-            "the app's data root must be the executable's own directory, else $INSTDIR is the \
+            crate::commands::vpn::sidecar_pid_dir(Some(install.join("trusttunnel.exe"))).as_deref(),
+            Some(install),
+            "the pid file must live in the executable's own directory, else $INSTDIR is the \
              wrong spelling of it and the hook is reading the wrong folder"
         );
 
-        // (4) The hook must READ the pid file through the composed define, never through a
-        //     hand-written path. A second, literal path is how the two ends drift back apart.
+        // (4) Every pid read composes its path from the SAME constant. A hand-written path is how
+        //     the two ends drift back apart.
+        //
+        //     RE-DERIVED IN 32-FIX-09, BECAUSE THE PREMISE «THERE IS ONE PID PATH» STOPPED BEING
+        //     TRUE. The pre-install hook now stops this edition's VPN core before it removes the
+        //     binaries that core holds open (UAT gap G-32-2), and it must read the pid file of the
+        //     LEGACY folder — `$R9`, the discovered and validated path — not of `$INSTDIR`, which
+        //     is the folder being installed INTO. `${TT_SIDECAR_PID_FILE}` is rooted at
+        //     `${TT_INSTALL_DIR}` by construction, so it is the wrong path there and the correct
+        //     read could not be spelled with it.
+        //
+        //     The rule is re-derived rather than deleted or string-flipped, and it is STRONGER
+        //     than it was on two counts. (i) The second root is not merely tolerated: the whole
+        //     composition is built here from `SIDECAR_PID_BASENAME`, so renaming that constant
+        //     reddens the pre-install read exactly as it already reddens the uninstall one — the
+        //     basename cannot acquire a second spelling in this file. (ii) It is no longer
+        //     VACUOUS. The trigger used to be `.contains(".pid")`, and after the define was
+        //     introduced no read line carried that text any more, so this loop matched ZERO lines
+        //     and passed over nothing. It now recognises a read either way and reports an
+        //     inability to measure when it finds none.
+        let legacy_read = format!("\"$R9\\{SIDECAR_PID_BASENAME}\"");
+        let mut pid_reads = 0usize;
         for line in hook.lines() {
             let l = line.trim();
-            if (l.starts_with("IfFileExists") || l.starts_with("FileOpen")) && l.contains(".pid") {
-                assert!(
-                    l.contains("${TT_SIDECAR_PID_FILE}"),
-                    "the hook must read the pid file through TT_SIDECAR_PID_FILE, not a literal \
-                     path: {l}"
-                );
+            let is_read = (l.starts_with("IfFileExists") || l.starts_with("FileOpen"))
+                && (l.contains(".pid") || l.contains("${TT_SIDECAR_PID_FILE}"));
+            if !is_read {
+                continue;
             }
+            pid_reads += 1;
+            assert!(
+                l.contains("${TT_SIDECAR_PID_FILE}") || l.contains(&legacy_read),
+                "the hook reads the pid file through a hand-written path. Exactly two \
+                 compositions are legitimate — `${{TT_SIDECAR_PID_FILE}}` for the uninstaller, \
+                 which runs inside the install directory, and {legacy_read} for the pre-install \
+                 hook, which must read the DISCOVERED legacy folder rather than the one being \
+                 installed into. Anything else is a third spelling of {SIDECAR_PID_BASENAME} that \
+                 nothing keeps in step with Rust: {l}"
+            );
         }
+        assert!(
+            pid_reads > 0,
+            "CANNOT MEASURE: the hook reads no pid file at all. Both the uninstall kill and the \
+             pre-install core termination depend on that read, so zero reads means this rule lost \
+             its subject — not that every read is well composed."
+        );
     }
 
-    /// **The uninstaller must not delete the user's data.** An UPDATE runs the uninstaller.
+    /// **The user's data and the binaries are two different places, and must stay that way.**
+    ///
+    /// This is the invariant phase 32 exists to install, written down where it goes red rather
+    /// than where it is explained. Before that phase ONE noun served as both: `user_data_dir()`
+    /// returned the executable's own folder, and that was tolerable only because the install
+    /// itself lived under `%LOCALAPPDATA%`. With `installMode: perMachine` the binaries move to
+    /// Program Files, whose ACL grants `BUILTIN\Users` read by inheritance over child objects —
+    /// so re-identifying the two would put the plaintext `ssh_credentials.json` in a directory
+    /// every account on the machine can read. It is a confidentiality regression with no error
+    /// message, no failing build, and nothing else watching for it.
+    ///
+    /// The two accessors are asked about the SAME executable deliberately: that shared input is
+    /// what makes the answer a statement about the RULES rather than about two unrelated paths
+    /// that happen to differ today.
+    #[test]
+    fn the_data_root_and_the_pid_directory_are_not_the_same_place() {
+        let exe = std::path::Path::new("C:\\Program Files\\TrustTunnel Client Pro\\trusttunnel.exe");
+
+        let data_root = crate::ssh::resolve_data_root(Some(exe.to_path_buf()))
+            .expect("a Windows test host always has an absolute local-app-data location")
+            .0;
+        // 32-FIX-08: the accessor answers an OPTION now — it declines rather than substituting the
+        // process working directory when the executable cannot be resolved. Here the executable is
+        // given, so an absent answer would itself be the failure this contract is about.
+        let pid_dir = crate::commands::vpn::sidecar_pid_dir(Some(exe.to_path_buf()))
+            .expect("an absolute executable path always has a parent directory");
+
+        assert_eq!(
+            pid_dir,
+            exe.parent().unwrap(),
+            "the pid file follows the binaries — that is what makes $INSTDIR readable by the \
+             uninstaller whichever administrator elevated it"
+        );
+        assert_ne!(
+            data_root, pid_dir,
+            "the data root must NOT be the install directory again: under Program Files that \
+             folder is world-readable and the credential store is plaintext. If this assertion \
+             fails, the data root has been re-derived from the executable somewhere."
+        );
+    }
+
+    /// The two full-line markers 32-FIX-15 wrote around the one region permitted to erase the
+    /// user's data. The region is found by NAME, never by line number: a rule keyed to a line
+    /// number stops describing the file the first time somebody adds a paragraph above it.
+    const ERASE_REGION_BEGIN: &str = "BEGIN REGION TT_ERASE_DATA_ROOT";
+    const ERASE_REGION_END: &str = "END REGION TT_ERASE_DATA_ROOT";
+
+    /// The register the resolution ladder leaves the validated data root in, and the only removal
+    /// target the erasure region is allowed to name.
+    ///
+    /// **WHY `$R8` AND NOT `$R9`, which the ladder used while it removed nothing.** `$R9` is
+    /// spoken for: in `NSIS_HOOK_PREINSTALL` it holds the DISCOVERED LEGACY INSTALL PATH, and
+    /// `remediation-hygiene.sh` rule 12 arm (c) forbids `RMDir /r "$R9"` across the whole file
+    /// because on every pre-32 machine that folder is the user's data root. That gate scans
+    /// statements file-wide and cannot tell the two meanings of `$R9` apart, so leaving the
+    /// erasure on `$R9` would have made a deliberate, guarded branch indistinguishable from the
+    /// single most dangerous line this installer could contain. The answer is to give the data
+    /// root its own name rather than to teach the gate an exception: rule 12 keeps its full
+    /// strength over the legacy path, and arm (2) below watches this register instead.
+    const DATA_ROOT_REGISTER: &str = "$R8";
+
+    /// How the hook spells the framework's bundle-identifier folder. Always the define, never the
+    /// expansion: `${BUNDLEID}` comes from `installer.nsi` and a rule matching the expanded
+    /// `com.trusttunnel.gui` would go quiet the moment the identifier changed.
+    const BUNDLE_ID_REF: &str = "${BUNDLEID}";
+
+    /// The per-user variable the erasure region must NEVER compose a path from.
+    ///
+    /// Under `perMachine` this uninstaller runs elevated, and `SetShellVarContext current` then
+    /// resolves the profile of whichever administrator approved the elevation prompt — not
+    /// necessarily the person uninstalling. That is D-08, and it is why the folder is taken from
+    /// the note the APPLICATION wrote instead. The template's own erasure composes from this
+    /// variable, which is exactly why its removal of the local bundle folder cannot be relied on.
+    const UNTRUSTED_PER_USER_VAR: &str = "$LOCALAPPDATA";
+
+    /// The other edition's product name, which is also its key name in the programs list.
+    ///
+    /// NOT read from `gui-light/src-tauri/tauri.conf.json`, deliberately: that tree does not
+    /// travel to the release branch, so an `include_str!` of it would compile here and fail
+    /// there. Measured instead, on a real Windows install on 2026-09-07, under both hives:
+    /// `HKCU\...\Uninstall\TrustTunnel Client Light` → DisplayName `TrustTunnel Client Light`
+    /// (Light installs per-user), nothing under HKLM. Recorded in `32-ERASURE-EVIDENCE.md` (e).
+    pub(crate) const OTHER_EDITION_PRODUCT_NAME: &str = "TrustTunnel Client Light";
+
+    /// The two registry keys the two editions SHARE, and which Pro's uninstaller removed
+    /// unconditionally until 32-FIX-16 — breaking Light's `trusttunnel://` and `tt://` handling
+    /// on any machine that still had Light installed. That is `T-24`, and the evidence measured
+    /// it live on a real disk rather than reasoning about it.
+    const SHARED_SCHEME_KEYS: [&str; 2] = [
+        "DeleteRegKey HKCU \"Software\\Classes\\trusttunnel\"",
+        "DeleteRegKey HKCU \"Software\\Classes\\tt\"",
+    ];
+
+    /// The region's head, in order, exactly as it must be written: the two conditions as one
+    /// conjunction with NOTHING between them.
+    ///
+    /// Neither is decoration. `$DeleteAppDataCheckboxState` is assigned in exactly one place, the
+    /// confirm page's leave function, so it is 0 on every path that shows no pages — it is what
+    /// actually holds during an update. `$UpdateMode <> 1` guards a manually invoked
+    /// `uninstall.exe /UPDATE`, which is the only way that variable is ever 1 (32-FIX-14 measured
+    /// it: a real in-app update runs the installer as `/S` and never starts the uninstaller at
+    /// all). Do not call the second one «the update guard»; a contract pinned to the wrong
+    /// mechanism is a green test guarding nothing.
+    const ERASE_CONDITIONS: [&str; 2] = [
+        "${If} $DeleteAppDataCheckboxState = 1",
+        "${AndIf} $UpdateMode <> 1",
+    ];
+
+    /// The project's definition of a removal statement, in ONE place: a non-comment line whose
+    /// first token is `Delete ` or `RMDir`. `DeleteRegKey` and `DeleteRegValue` are deliberately
+    /// NOT removals here — they take registry keys, not the user's files, and the scheme-key
+    /// contract in this module judges them by their own rule.
+    fn is_removal_statement(line: &str) -> bool {
+        let l = line.trim();
+        !l.starts_with(';') && (l.starts_with("Delete ") || l.starts_with("RMDir"))
+    }
+
+    /// **THE SHARED PREDICATE.** For one line of the hook, plus the fact of which region it sits
+    /// in, answer whether that line is forbidden — and say why.
+    ///
+    /// Everything the narrowed user-data guard asserts goes through here, so the arms can be
+    /// exercised against written-out fixtures as well as against the shipped file. That is the
+    /// discipline 32-FIX-09 established when it narrowed the D-06 rule: a narrowed safety rule
+    /// that can no longer reject the thing it was written to reject is worse than no rule at all,
+    /// because it reads as coverage. Fixtures keep the arms red-capable whatever the real file
+    /// happens to contain today.
+    fn erasure_violation(line: &str, inside_region: bool) -> Option<String> {
+        let l = line.trim();
+        if !is_removal_statement(l) {
+            return None;
+        }
+        let names_install_dir = l.contains("$INSTDIR") || l.contains("${TT_INSTALL_DIR}");
+
+        // (1) UNCHANGED AND UNWEAKENED, IN EVERY REGION. No removal aimed at an install-directory
+        //     spelling may name an artifact the user owns. Under D-05 the install directory IS
+        //     the data root on every machine installed before phase 32, and an UPDATE runs this
+        //     uninstaller. This is the rule that was missing until phase 30.1.
+        if names_install_dir && USER_DATA.iter().any(|name| l.contains(name)) {
+            return Some(format!(
+                "removes a user artifact from the install directory — under D-05 that folder is \
+                 the data root on every pre-32 machine, and an UPDATE runs this uninstaller: {l}"
+            ));
+        }
+
+        // (1b) AND THE RECURSIVE FORM, ANYWHERE. `RMDir /r "$INSTDIR"` takes the servers, the
+        //      saved passwords, the known hosts and the browser profile in one statement and
+        //      names none of them, so arm (1) would report nothing. Permitting this INSIDE the
+        //      erasure region would be no better: the region is for the data root the application
+        //      recorded, and on a pre-32 machine that is not the install directory but the folder
+        //      the ladder refuses (rung 5).
+        if l.starts_with("RMDir /r")
+            && (l.contains("\"$INSTDIR\"") || l.contains("\"${TT_INSTALL_DIR}\""))
+        {
+            return Some(format!(
+                "recursively removes the install directory — everything an existing user has, in \
+                 one line, and D-06 exists to prevent exactly this: {l}"
+            ));
+        }
+
+        // (2) THE HOLE THIS ARM CLOSES, and it is new in 32-FIX-16. The rule above only ever
+        //     examined removals naming an install-directory spelling, so a removal aimed at the
+        //     register holding the RESOLVED DATA ROOT would not have been looked at anywhere in
+        //     the file. Now exactly one region may name it; everywhere else it is forbidden.
+        //
+        //     The bundle-identifier folder goes with it, and for the same reason: it lives in the
+        //     uninstalling person's profile, so a removal of it outside the conjunction would run
+        //     during an update too.
+        if !inside_region && (l.contains(DATA_ROOT_REGISTER) || l.contains(BUNDLE_ID_REF)) {
+            return Some(format!(
+                "removes a per-user folder ({DATA_ROOT_REGISTER} or {BUNDLE_ID_REF}) OUTSIDE the \
+                 TT_ERASE_DATA_ROOT region, so it runs without the ticked-and-not-updating \
+                 conjunction — i.e. during a routine update: {l}"
+            ));
+        }
+
+        // (2b) INSIDE the region the data root goes by NAME, as one recursive removal — but no
+        //      line may ENUMERATE a file the user owns. The permission is for the folder the
+        //      application recorded, not for a list of the user's filenames growing back beside
+        //      a destructive step. Same `USER_DATA` list as arm (1), never a second copy of it:
+        //      a name added for either guard is enforced by both.
+        if inside_region {
+            if let Some(name) = USER_DATA.iter().find(|name| l.contains(*name)) {
+                return Some(format!(
+                    "the erasure region names the user artifact `{name}` on a removal line. The \
+                     region removes the recorded data root as a whole; a list of the user's own \
+                     filenames beside a recursive delete is the pre-30.1 shape growing back: {l}"
+                ));
+            }
+        }
+
+        None
+    }
+
+    /// **ARM (3) AS A PREDICATE.** Given the region's executable statements in order, is its head
+    /// exactly the two conditions, conjoined, with nothing between them?
+    ///
+    /// Taking a slice rather than reading the file is what lets the arm be fed a head that lost
+    /// the not-updating conjunct and a head with a statement wedged between the two conditions —
+    /// the two shapes that would arm this branch during an update.
+    fn erase_region_head_violation(statements: &[String]) -> Option<String> {
+        let head: Vec<&str> = statements.iter().take(2).map(String::as_str).collect();
+        if head.len() == 2 && head[0] == ERASE_CONDITIONS[0] && head[1] == ERASE_CONDITIONS[1] {
+            return None;
+        }
+        Some(format!(
+            "the erasure region must OPEN with `{}` immediately followed by `{}` and nothing \
+             between them; its first statements are {:?}. A region that lost the second conjunct, \
+             or grew a statement between the two, erases a live user's servers and saved \
+             passwords during what they experience as maintenance — this project did exactly that \
+             for years before phase 30.1",
+            ERASE_CONDITIONS[0], ERASE_CONDITIONS[1], head
+        ))
+    }
+
+    /// Every line of the hook, paired with whether it sits INSIDE the erasure region.
+    ///
+    /// The markers themselves are reported as outside: they are comments, so nothing is judged by
+    /// them anyway, and counting them as inside would let a removal be smuggled onto the same
+    /// line as a marker. Panics when either marker is missing — a scan that lost its subject must
+    /// report an inability to measure, never an absence of violations.
+    fn hook_lines_by_region(hook: &str) -> Vec<(String, bool)> {
+        let mut inside = false;
+        let mut saw_begin = false;
+        let mut saw_end = false;
+        let mut out = Vec::new();
+        for line in hook.lines() {
+            if line.contains(ERASE_REGION_BEGIN) {
+                saw_begin = true;
+                inside = true;
+                out.push((line.to_string(), false));
+                continue;
+            }
+            if line.contains(ERASE_REGION_END) {
+                saw_end = true;
+                inside = false;
+                out.push((line.to_string(), false));
+                continue;
+            }
+            out.push((line.to_string(), inside));
+        }
+        assert!(
+            saw_begin && saw_end,
+            "CANNOT MEASURE: the hook has no `{ERASE_REGION_BEGIN}` / `{ERASE_REGION_END}` pair \
+             (begin seen: {saw_begin}, end seen: {saw_end}). Every arm below is about where a \
+             line sits relative to that region, so a missing marker means the scan lost its \
+             subject rather than that the file is clean."
+        );
+        out
+    }
+
+    /// **The uninstaller deletes the user's data in exactly ONE branch, and nowhere else.**
+    /// An UPDATE runs the uninstaller.
     ///
     /// This is not hypothetical and it is not new: until phase 30.1 this hook unconditionally
     /// deleted `ssh_credentials.json`, `known_hosts.json`, `routing_rules.json` and the rest on
@@ -1083,85 +1541,2556 @@ mod tests {
     /// routing rules. The server list survived only by accident — `configs.json` and the
     /// per-server `.toml` files were never in that list.
     ///
-    /// The subjects are ALL of it: the data root is the install directory, so a `Delete` or
-    /// `RMDir` naming any user artifact under `$INSTDIR` — or under `${TT_DATA_ROOT}`, which is
-    /// the same folder — destroys live data. Comment lines are excluded, because the hook
-    /// documents by name exactly what it no longer deletes and a raw scan would flag its own
-    /// explanation.
+    /// **WHAT 32-FIX-16 CHANGED, AND IN WHICH DIRECTION.** The owner ticked a box captioned
+    /// «удалить остатки» and got a folder still full of the saved configs and passwords, and said what
+    /// he expects of it in one line: «галочка должна работать как "Удалить полностью"». So the
+    /// rule is NARROWED — the TT_ERASE_DATA_ROOT region may now remove the data root the
+    /// application itself recorded — and WIDENED in the same edit, because the old rule only ever
+    /// looked at removals naming an install-directory spelling and would not have examined a
+    /// data-root removal placed anywhere in the file. Narrowing without arm (2) would have opened
+    /// the file, not one branch of it.
+    ///
+    /// Four arms:
+    ///   1. every removal, in every region, still obeys the pre-30.1 rule and the recursive-form
+    ///      rule — neither becomes permissible anywhere;
+    ///   2. outside the region, no removal may name the register holding the resolved data root;
+    ///   3. the region opens with the two conditions as one conjunction with nothing between them;
+    ///   4. and the region actually CONTAINS the erasure, because a guard around an empty branch
+    ///      is the shape this phase keeps finding — a check that cannot fail.
     #[test]
     fn the_uninstaller_never_deletes_user_data() {
         let hook = include_str!("../nsis/installer-hooks.nsh");
+        let lines = hook_lines_by_region(hook);
 
-        // Every artifact the app persists into its data root. Anything the uninstaller removes
-        // from this list is data the user loses on a routine update.
-        const USER_DATA: &[&str] = &[
-            "configs.json",
-            "ssh_credentials.json",
-            "known_hosts.json",
-            "routing_rules.json",
-            "exclusions.json",
-            "active_groups.json",
-            "connection_history.json",
-            "app_settings.json",
-            "dns_snapshot.json",
-            "trusttunnel_client.toml",
-            "webview_data",
-            "geodata",
-            "resolved",
-            "group_cache",
-            "runtime",
-            "logs",
-        ];
-
-        let mut offenders: Vec<String> = Vec::new();
-        for line in hook.lines() {
-            let l = line.trim();
-            if l.starts_with(';') {
-                continue; // prose, including the record of what used to be deleted here
-            }
-            let is_removal = l.starts_with("Delete ") || l.starts_with("RMDir");
-            if !is_removal {
-                continue;
-            }
-            // Only removals aimed at the data root can destroy user data. $TEMP leftovers and
-            // the icon caches under $LOCALAPPDATA are install-scoped and stay.
-            if !(l.contains("$INSTDIR") || l.contains("${TT_DATA_ROOT}")) {
-                continue;
-            }
-            if USER_DATA.iter().any(|name| l.contains(name)) {
-                offenders.push(l.to_string());
-            }
-        }
-
+        // Arms (1), (1b) and (2), over the shipped file.
+        let offenders: Vec<String> = lines
+            .iter()
+            .filter_map(|(l, inside)| erasure_violation(l, *inside))
+            .collect();
         assert!(
             offenders.is_empty(),
-            "the uninstaller deletes user data from the data root — an UPDATE runs the \
-             uninstaller, so these lines wipe the user's servers, passwords and routing rules \
-             during what they experience as an update:\n  {}",
+            "the uninstaller reaches the user's data outside the one branch that is allowed to:\n  \
+             {}",
             offenders.join("\n  ")
         );
 
-        // The stance must be stated, not merely true by accident: an undocumented absence is what
-        // the next reader "fixes" by adding a tidy-up list back.
+        // The statements of the region itself, in order, prose removed.
+        let region: Vec<String> = lines
+            .iter()
+            .filter(|(_, inside)| *inside)
+            .map(|(l, _)| l.trim().to_string())
+            .filter(|l| !l.is_empty() && !l.starts_with(';'))
+            .collect();
         assert!(
-            hook.contains("DetailPrint \"Keeping user data in ${TT_DATA_ROOT}\""),
+            !region.is_empty(),
+            "CANNOT MEASURE: the TT_ERASE_DATA_ROOT region contains no statements at all"
+        );
+
+        // Arm (3): the head is the conjunction, and nothing sits between the two conditions.
+        assert!(
+            erase_region_head_violation(&region).is_none(),
+            "{}",
+            erase_region_head_violation(&region).unwrap_or_default()
+        );
+
+        // Arm (4): the erasure EXISTS. Everything above constrains where the removal may be; this
+        // is the arm that says there is one. Without it the whole contract would stay green over
+        // a checkbox that promises «Удалить полностью» and removes nothing — which is precisely
+        // the defect the owner reported, wearing a full set of passing tests.
+        let erasure = format!("RMDir /r \"{DATA_ROOT_REGISTER}\"");
+        assert!(
+            region.iter().any(|l| l == &erasure),
+            "the TT_ERASE_DATA_ROOT region does not contain `{erasure}`, so ticking the box \
+             removes nothing of the user's data. The caption promises a clean machine; a guard \
+             around an empty branch is how that promise is broken silently."
+        );
+
+        // The default stance must be STATED, not merely true by accident: an undocumented absence
+        // is what the next reader "fixes" by adding a tidy-up list back.
+        //
+        // Named through the language files since 32-FIX-18 (G-32-6): the sentence the owner read
+        // in a real uninstall log was English inside a Russian pane. The key is asserted, not the
+        // text — the text lives in `Russian.nsh` and is free to be reworded there.
+        assert!(
+            hook.contains("DetailPrint \"$(uninstallDataKept)\""),
             "the hook must say out loud that the user's data is kept, so the omission reads as a \
              decision rather than as something forgotten"
         );
 
-        // And the recursive form must never be aimed at the data root at all. `RMDir /r
-        // \"$INSTDIR\"` takes everything in one line and would not be caught by the name list.
-        for line in hook.lines() {
-            let l = line.trim();
-            if l.starts_with(';') {
-                continue;
-            }
+        // ── THE ARMS MUST STILL BE ABLE TO FAIL, AND THAT IS ASSERTED HERE RATHER THAN TRUSTED ──
+        //
+        // Copied discipline from 32-FIX-09: the fixtures are written out in full and checked
+        // against the SHARED predicates, so every arm stays red-capable regardless of what the
+        // real hook file contains today. Without them this test would quietly become a tautology
+        // the day somebody restructures the hook — and it would keep printing PASS beside a
+        // recursive delete running as Administrator.
+        for (fixture, inside, what) in [
+            (
+                "RMDir /r \"$R8\"",
+                false,
+                "a data-root removal OUTSIDE the region — it would run during a routine update",
+            ),
+            (
+                "RMDir /r \"$INSTDIR\"",
+                false,
+                "a recursive removal of the install directory, which is the data root on every \
+                 pre-32 machine",
+            ),
+            (
+                "RMDir /r \"$INSTDIR\"",
+                true,
+                "the same recursive removal, smuggled INSIDE the region — the narrowing must not \
+                 have made it permissible there",
+            ),
+            (
+                "Delete \"${TT_INSTALL_DIR}\\ssh_credentials.json\"",
+                false,
+                "a named removal of the credential store from the install directory",
+            ),
+            (
+                "RMDir /r \"$LOCALAPPDATA\\${BUNDLEID}\"",
+                false,
+                "a bundle-identifier removal OUTSIDE the region — a per-user folder taken \
+                 without the conjunction",
+            ),
+            (
+                "Delete \"$R8\\ssh_credentials.json\"",
+                true,
+                "an enumerated user filename INSIDE the region — the pre-30.1 list growing back \
+                 beside the recursive delete",
+            ),
+        ] {
             assert!(
-                !(l.starts_with("RMDir /r")
-                    && (l.contains("\"$INSTDIR\"") || l.contains("\"${TT_DATA_ROOT}\""))),
-                "a recursive removal of the data root deletes everything the user has: {l}"
+                erasure_violation(fixture, inside).is_some(),
+                "the narrowed user-data rule no longer rejects {what}: `{fixture}`. Narrowing a \
+                 safety rule until it accepts everything is the failure this block exists to \
+                 catch — the rule would keep passing while the erasure ran on every update."
             );
         }
+        // …and the one shape the owner asked for must still be permitted, or the box does nothing.
+        assert!(
+            erasure_violation("RMDir /r \"$R8\"", true).is_none(),
+            "the rule rejects the data-root removal INSIDE its own region, so the checkbox cannot \
+             be armed at all and G-32-3 reopens"
+        );
+
+        // The same treatment for arm (3): two heads that must be rejected, and the real one that
+        // must be accepted.
+        for (head, what) in [
+            (
+                vec![ERASE_CONDITIONS[0].to_string(), "Push $0".to_string()],
+                "a region head that lost the not-updating conjunct",
+            ),
+            (
+                vec![
+                    ERASE_CONDITIONS[0].to_string(),
+                    "DetailPrint \"resolving\"".to_string(),
+                    ERASE_CONDITIONS[1].to_string(),
+                ],
+                "a region head with a statement wedged between the two conditions",
+            ),
+            (
+                vec![ERASE_CONDITIONS[1].to_string(), ERASE_CONDITIONS[0].to_string()],
+                "a region head with the two conditions in the wrong order",
+            ),
+        ] {
+            assert!(
+                erase_region_head_violation(&head).is_some(),
+                "the region-head rule no longer rejects {what}: {head:?}. That shape is how a \
+                 routine update walks into the erasure branch."
+            );
+        }
+    }
+
+    /// The two language files the hook's `$(name)` references are resolved against, verbatim.
+    ///
+    /// Both travel to the release branch under `gui-pro/src-tauri/**`, so `include_str!` of them
+    /// compiles here and there alike. Read rather than transcribed: a list of key names typed into
+    /// this file would go stale the first time somebody adds a string, and would then certify a
+    /// reference `makensis` cannot resolve.
+    const RUSSIAN_NSH: &str = include_str!("../nsis/Russian.nsh");
+    const ENGLISH_NSH: &str = include_str!("../nsis/English.nsh");
+
+    /// Every key declared by a language file: `LangString name ${LANG_X} "text"` -> `name`.
+    fn langstring_keys(language_file: &str) -> Vec<String> {
+        language_file
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("LangString "))
+            .filter_map(|rest| rest.split_whitespace().next())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// **THE SHARED PREDICATE for G-32-6.** For one line of the hook, is it a log line the
+    /// installer prints as a hard-coded literal rather than through a `LangString`?
+    ///
+    /// The details pane is Russian for a Russian user and English for an English one, and every
+    /// line in it that is not routed through the language files is Russian for nobody: it is a
+    /// fragment of source text wedged into a translated log. The owner read four of them in his
+    /// own uninstall (G-32-6). Written as a predicate rather than as a grep over the file so the
+    /// arm can be exercised against fixtures — a rule that can no longer reject the shape it was
+    /// written to reject is worse than no rule, because it reads as coverage.
+    ///
+    /// A translated line is `DetailPrint "$(name)"` or `DetailPrint "$(name) $SOMETHING"` — the
+    /// argument must OPEN with the reference. Trailing runtime values (a path, a register) are
+    /// exactly how the existing lines are written and are not text to translate.
+    fn untranslated_log_line(line: &str) -> Option<String> {
+        let l = line.trim();
+        if l.starts_with(';') {
+            return None;
+        }
+        let arg = l.strip_prefix("DetailPrint ")?.trim();
+        if arg.starts_with("\"$(") {
+            return None;
+        }
+        Some(format!(
+            "prints a hard-coded literal into a translated details pane: {l}. Move the text to \
+             nsis/Russian.nsh, mirror it in nsis/English.nsh and reference it as $(name)."
+        ))
+    }
+
+    /// Which of the two language files, if any, fail to declare a key the hook references.
+    fn undeclared_langstring(key: &str) -> Option<String> {
+        let missing: Vec<&str> = [("Russian.nsh", RUSSIAN_NSH), ("English.nsh", ENGLISH_NSH)]
+            .iter()
+            .filter(|(_, file)| !langstring_keys(file).iter().any(|k| k == key))
+            .map(|(name, _)| *name)
+            .collect();
+        if missing.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "the hook references $({key}), which {} does not declare. `makensis` answers an \
+             unresolved LangString with a warning and an EMPTY line in the details pane — the user \
+             reads nothing at all where a sentence was meant to be.",
+            missing.join(" and ")
+        ))
+    }
+
+    /// **Every line this installer prints is translatable, and every reference resolves.**
+    ///
+    /// G-32-6: real install and uninstall logs carried four English sentences —
+    /// «Refreshing icon cache...», «Keeping user data», «Cleaning registry entries...»,
+    /// «Removing temporary update files...» — in the middle of an otherwise Russian pane. Every
+    /// other line of those same macros had gone through a `LangString` for phases; these four were
+    /// simply missed, and nothing was watching for the next one.
+    ///
+    /// Two arms, and the second is not decoration: routing a line through `$(name)` without
+    /// declaring the key in BOTH language files trades an English sentence for an EMPTY one, which
+    /// is worse — `makensis` emits a warning nobody reads and the pane prints a blank.
+    #[test]
+    fn every_log_line_the_installer_prints_is_translatable() {
+        let hook = include_str!("../nsis/installer-hooks.nsh");
+
+        // The scan must have a subject. A hook with no `DetailPrint` at all would pass both arms
+        // while telling the user nothing, so an empty set is reported as an inability to measure.
+        let log_lines: Vec<&str> = hook
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with(';') && l.starts_with("DetailPrint "))
+            .collect();
+        assert!(
+            log_lines.len() > 20,
+            "CANNOT MEASURE: the hook has only {} `DetailPrint` statement(s). This macro pair \
+             announces a legacy sweep, an erasure and five uninstall steps; a count that low means \
+             the scan lost its subject rather than that the file is clean.",
+            log_lines.len()
+        );
+
+        // Arm (1): no literal survives.
+        let literals: Vec<String> = log_lines
+            .iter()
+            .filter_map(|l| untranslated_log_line(l))
+            .collect();
+        assert!(
+            literals.is_empty(),
+            "the installer prints untranslated text into the details pane:\n  {}",
+            literals.join("\n  ")
+        );
+
+        // Arm (2): every reference resolves, in both languages.
+        let undeclared: Vec<String> = log_lines
+            .iter()
+            .filter_map(|l| {
+                let start = l.find("\"$(")? + 3;
+                let end = l[start..].find(')')? + start;
+                undeclared_langstring(&l[start..end])
+            })
+            .collect();
+        assert!(
+            undeclared.is_empty(),
+            "the installer references language keys that do not exist:\n  {}",
+            undeclared.join("\n  ")
+        );
+
+        // ── BOTH ARMS MUST STILL BE ABLE TO FAIL ────────────────────────────────────────────
+        //
+        // Same discipline as the erasure contract above: the fixtures are written out in full and
+        // pushed through the SHARED predicates, so neither arm can quietly become a tautology the
+        // day the real file stops containing the shape it was written to catch.
+        for (fixture, what) in [
+            (
+                "DetailPrint \"Keeping user data\"",
+                "the exact line the owner read in his uninstall log",
+            ),
+            (
+                "  DetailPrint \"Refreshing icon cache...\"",
+                "an indented literal — indentation must not buy an exemption",
+            ),
+            (
+                "DetailPrint \"Removing $R9\\wintun.dll\"",
+                "a literal carrying a runtime value, which is still a literal sentence",
+            ),
+        ] {
+            assert!(
+                untranslated_log_line(fixture).is_some(),
+                "the translation rule no longer rejects {what}: `{fixture}`"
+            );
+        }
+        for (fixture, what) in [
+            ("DetailPrint \"$(legacyDataKept)\"", "a plain reference"),
+            (
+                "  DetailPrint \"$(legacyRemoving) $R9\\wintun.dll\"",
+                "a reference followed by a runtime value",
+            ),
+            (
+                "; DetailPrint \"Keeping user data\"",
+                "a COMMENTED-OUT literal, which prints nothing and must not be reported",
+            ),
+            ("Delete \"$TEMP\\trusttunnel_setup.exe\"", "a line that is not a log line at all"),
+        ] {
+            assert!(
+                untranslated_log_line(fixture).is_none(),
+                "the translation rule now rejects {what}, which is legitimate: `{fixture}`"
+            );
+        }
+        assert!(
+            undeclared_langstring("aKeyNobodyEverDeclared").is_some(),
+            "the declaration lookup accepts a key neither language file declares, so arm (2) \
+             would stay green over a reference that prints an empty line to the user"
+        );
+        assert!(
+            undeclared_langstring("legacyDataKept").is_none(),
+            "CANNOT MEASURE: the declaration lookup rejects `legacyDataKept`, which both language \
+             files demonstrably declare — the parser is reading something other than the keys"
+        );
+    }
+
+    /// The statement the uninstaller prints to say the user's data is being LEFT ALONE.
+    ///
+    /// Held as a whole statement rather than as a key name, because what this contract is about is
+    /// WHERE that line is printed from, and only a whole statement can be located in the file.
+    const DATA_KEPT_ANNOUNCEMENT: &str = "DetailPrint \"$(uninstallDataKept)\"";
+
+    /// The LogicLib closer the guarded announcement must sit inside.
+    const ENDIF: &str = "${EndIf}";
+
+    /// **De Morgan, in NSIS.** Turn one conjunct of the erasure guard into the corresponding
+    /// disjunct of its negation: `${If} $X = 1` -> `${If} $X <> 1`,
+    /// `${AndIf} $Y <> 1` -> `${OrIf} $Y = 1`.
+    ///
+    /// **WHY THE INVERSE IS DERIVED AND NEVER TYPED OUT.** The announcement's guard has to be the
+    /// exact complement of the erasure's guard — that is the whole content of G-32-7. A second,
+    /// hand-written copy of those conditions would agree with the first only until somebody edited
+    /// one of them, and the failure that follows is silent: the pane goes on printing «данные
+    /// сохраняются» on the pass that destroys them, which is precisely the sentence the owner read
+    /// over the deleted passwords. Deriving it means the region's conditions have exactly one
+    /// definition, `ERASE_CONDITIONS`, and this contract reddens the moment the two drift.
+    ///
+    /// AND / OR IS NOT COSMETIC. `NOT (A AND B)` is `NOT A OR NOT B`. Written with `${AndIf}` the
+    /// announcement would print only when the box was unticked AND the run was a manual
+    /// `/UPDATE` — i.e. almost never — and an ordinary unticked uninstall, which is the one case
+    /// the sentence exists for, would say nothing at all.
+    fn negated_condition(condition: &str) -> String {
+        let (keyword, test) = condition
+            .split_once(' ')
+            .unwrap_or_else(|| panic!("CANNOT MEASURE: `{condition}` is not `<keyword> <test>`"));
+        let keyword = match keyword {
+            "${If}" => "${If}",
+            "${AndIf}" => "${OrIf}",
+            "${OrIf}" => "${AndIf}",
+            other => panic!(
+                "CANNOT MEASURE: `{other}` is not a LogicLib keyword this negation understands, \
+                 so the complement of the erasure guard cannot be derived and the announcement \
+                 cannot be judged against anything"
+            ),
+        };
+        let test = if test.contains(" <> ") {
+            test.replace(" <> ", " = ")
+        } else if test.contains(" = ") {
+            test.replace(" = ", " <> ")
+        } else {
+            panic!(
+                "CANNOT MEASURE: `{test}` uses neither ` = ` nor ` <> `, so it cannot be negated"
+            )
+        };
+        format!("{keyword} {test}")
+    }
+
+    /// **THE SHARED PREDICATE for G-32-7.** Given every executable statement of the hook in order,
+    /// each tagged with whether it sits inside the erasure region: is the kept-data announcement
+    /// printed on exactly the path that keeps the data, and on no other?
+    ///
+    /// The required shape, and nothing looser:
+    ///
+    /// ```text
+    ///   ${If} $DeleteAppDataCheckboxState <> 1
+    ///   ${OrIf} $UpdateMode = 1
+    ///     DetailPrint "$(uninstallDataKept)"
+    ///   ${EndIf}
+    /// ```
+    ///
+    /// Both surrounding conditions are DERIVED from `ERASE_CONDITIONS`, so this cannot drift away
+    /// from the branch it is the complement of.
+    fn kept_announcement_violation(statements: &[(String, bool)]) -> Option<String> {
+        let guard = [
+            negated_condition(ERASE_CONDITIONS[0]),
+            negated_condition(ERASE_CONDITIONS[1]),
+        ];
+        let at: Vec<usize> = statements
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, _))| s == DATA_KEPT_ANNOUNCEMENT)
+            .map(|(i, _)| i)
+            .collect();
+
+        if at.len() != 1 {
+            return Some(format!(
+                "the hook prints `{DATA_KEPT_ANNOUNCEMENT}` {} time(s); it must print it exactly \
+                 once. Zero leaves the kept-data stance unstated, which reads as an oversight and \
+                 gets «fixed» by somebody adding a tidy-up list. More than one puts the same claim \
+                 on paths this rule cannot then tell apart.",
+                at.len()
+            ));
+        }
+        let i = at[0];
+
+        if statements[i].1 {
+            return Some(format!(
+                "`{DATA_KEPT_ANNOUNCEMENT}` sits INSIDE the TT_ERASE_DATA_ROOT region, which is \
+                 the one branch that destroys the data. That is the G-32-7 sentence with its sign \
+                 flipped, not a fix."
+            ));
+        }
+
+        if i < 2 || statements[i - 2].0 != guard[0] || statements[i - 1].0 != guard[1] {
+            let before: Vec<&str> = statements[i.saturating_sub(2)..i]
+                .iter()
+                .map(|(s, _)| s.as_str())
+                .collect();
+            return Some(format!(
+                "`{DATA_KEPT_ANNOUNCEMENT}` is not guarded by the complement of the erasure \
+                 branch. It must be preceded, immediately, by `{}` then `{}`; it is preceded by \
+                 {before:?}. Unguarded, this line announces that the user's servers and saved \
+                 passwords are being kept on the very pass that deletes them — which is what the \
+                 was read in a real log above the removal of the data folder (G-32-7).",
+                guard[0], guard[1]
+            ));
+        }
+
+        match statements.get(i + 1) {
+            Some((s, _)) if s == ENDIF => None,
+            other => Some(format!(
+                "`{DATA_KEPT_ANNOUNCEMENT}` is not closed by `{ENDIF}` on the next statement; the \
+                 next statement is {:?}. An unclosed guard swallows everything that follows into \
+                 the keep-path branch, starting with the removals below it.",
+                other.map(|(s, _)| s.as_str())
+            )),
+        }
+    }
+
+    /// Every executable statement of the hook, in order, tagged with whether it sits inside the
+    /// erasure region. Comments and blank lines are dropped: they print nothing and guard nothing.
+    fn hook_statements_by_region(hook: &str) -> Vec<(String, bool)> {
+        hook_lines_by_region(hook)
+            .into_iter()
+            .map(|(l, inside)| (l.trim().to_string(), inside))
+            .filter(|(l, _)| !l.is_empty() && !l.starts_with(';'))
+            .collect()
+    }
+
+    /// **The uninstaller says it is keeping the data only where it is keeping the data.**
+    ///
+    /// G-32-7, and it is the narrowest possible defect with the widest possible consequence. The
+    /// behaviour was already right: on a real uninstall pass everything he ticked the box for was
+    /// correctly destroyed. The SENTENCE was wrong — printed unconditionally, eight lines above
+    /// the erasure region, so his log read:
+    ///
+    /// ```text
+    ///   Keeping user data
+    ///   Удаление файла: C:\Program Files\TrustTunnel Client Pro\.sidecar-pro.pid
+    ///   Удаляется папка с данными этой установки: C:\Users\<user>\AppData\Local\...
+    /// ```
+    ///
+    /// The details pane is the only window in which a person learns what just happened to their
+    /// saved passwords. A false sentence there is not cosmetic: it is the program stating the
+    /// opposite of what it did, at the one moment the statement matters.
+    ///
+    /// **WHAT THIS CONTRACT DOES NOT DO.** It does not touch the removal, the guard, the ladder or
+    /// the order of anything. It constrains WHERE ONE `DetailPrint` MAY BE PRINTED FROM, and it
+    /// derives that place from `ERASE_CONDITIONS` so the answer cannot drift away from the branch
+    /// it is the complement of.
+    #[test]
+    fn the_kept_data_announcement_prints_only_where_the_data_is_kept() {
+        let hook = include_str!("../nsis/installer-hooks.nsh");
+        let statements = hook_statements_by_region(hook);
+        assert!(
+            statements.len() > 100,
+            "CANNOT MEASURE: the hook scan produced only {} statement(s) — it lost its subject",
+            statements.len()
+        );
+        assert!(
+            kept_announcement_violation(&statements).is_none(),
+            "{}",
+            kept_announcement_violation(&statements).unwrap_or_default()
+        );
+
+        // ── THE DERIVATION MUST BE RIGHT, AND THE ARM MUST STILL BE ABLE TO FAIL ─────────────
+        assert_eq!(
+            negated_condition("${If} $DeleteAppDataCheckboxState = 1"),
+            "${If} $DeleteAppDataCheckboxState <> 1"
+        );
+        assert_eq!(
+            negated_condition("${AndIf} $UpdateMode <> 1"),
+            "${OrIf} $UpdateMode = 1"
+        );
+        for condition in ERASE_CONDITIONS {
+            assert_eq!(
+                negated_condition(&negated_condition(condition)),
+                condition,
+                "negating `{condition}` twice does not return it, so the derived complement is not \
+                 the complement of anything"
+            );
+        }
+
+        // Fixtures, written out in full and pushed through the SHARED predicate. Without them this
+        // contract would quietly become a tautology the day somebody restructured the hook — and it
+        // would keep printing PASS beside a sentence that lies about the user's passwords.
+        let guard = [
+            negated_condition(ERASE_CONDITIONS[0]),
+            negated_condition(ERASE_CONDITIONS[1]),
+        ];
+        let stmt = |s: &str, inside: bool| (s.to_string(), inside);
+        let well_formed = vec![
+            stmt("Delete \"${TT_SIDECAR_PID_FILE}\"", false),
+            stmt(&guard[0], false),
+            stmt(&guard[1], false),
+            stmt(DATA_KEPT_ANNOUNCEMENT, false),
+            stmt(ENDIF, false),
+            stmt(ERASE_CONDITIONS[0], true),
+            stmt(ERASE_CONDITIONS[1], true),
+            stmt("RMDir /r \"$R8\"", true),
+        ];
+        assert!(
+            kept_announcement_violation(&well_formed).is_none(),
+            "the rule rejects the shape it exists to require, so the announcement cannot be \
+             written correctly at all: {:?}",
+            kept_announcement_violation(&well_formed)
+        );
+
+        for (fixture, what) in [
+            (
+                vec![
+                    stmt("Delete \"${TT_SIDECAR_PID_FILE}\"", false),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, false),
+                    stmt(ERASE_CONDITIONS[0], true),
+                    stmt(ERASE_CONDITIONS[1], true),
+                    stmt("RMDir /r \"$R8\"", true),
+                ],
+                "THE G-32-7 DEFECT ITSELF: the announcement printed unconditionally, above the \
+                 region that erases the data",
+            ),
+            (
+                vec![
+                    stmt(&guard[0], false),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, false),
+                    stmt(ENDIF, false),
+                ],
+                "a guard that lost the not-updating disjunct, so a manual /UPDATE run prints \
+                 nothing where the data is in fact kept",
+            ),
+            (
+                vec![
+                    stmt(&guard[0], false),
+                    stmt("${AndIf} $UpdateMode = 1", false),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, false),
+                    stmt(ENDIF, false),
+                ],
+                "De Morgan inverted -- AND where the complement needs OR, which silences the line \
+                 on the ordinary unticked uninstall it exists for",
+            ),
+            (
+                vec![
+                    stmt(&guard[0], false),
+                    stmt(&guard[1], false),
+                    stmt("DetailPrint \"$(eraseDataRootRemoved)\"", false),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, false),
+                    stmt(ENDIF, false),
+                ],
+                "a statement wedged between the guard and the announcement, so what the guard \
+                 covers is no longer what this rule read",
+            ),
+            (
+                vec![
+                    stmt(&guard[0], false),
+                    stmt(&guard[1], false),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, false),
+                    stmt("Delete \"${TT_DATA_ROOT_RECORD}\"", false),
+                ],
+                "an unclosed guard, which swallows the statements below it into the keep path",
+            ),
+            (
+                vec![
+                    stmt(ERASE_CONDITIONS[0], true),
+                    stmt(ERASE_CONDITIONS[1], true),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, true),
+                    stmt("RMDir /r \"$R8\"", true),
+                ],
+                "the announcement moved INSIDE the erasure region -- the same lie, relocated",
+            ),
+            (
+                vec![stmt("Delete \"${TT_SIDECAR_PID_FILE}\"", false)],
+                "the announcement deleted altogether, leaving the kept-data stance unstated",
+            ),
+            (
+                vec![
+                    stmt(&guard[0], false),
+                    stmt(&guard[1], false),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, false),
+                    stmt(ENDIF, false),
+                    stmt(&guard[0], false),
+                    stmt(&guard[1], false),
+                    stmt(DATA_KEPT_ANNOUNCEMENT, false),
+                    stmt(ENDIF, false),
+                ],
+                "the announcement printed twice, which this rule must not average over",
+            ),
+        ] {
+            assert!(
+                kept_announcement_violation(&fixture).is_some(),
+                "the kept-data rule no longer rejects {what}. A rule that accepts the defect it \
+                 was written for reads as coverage and is worse than no rule."
+            );
+        }
+    }
+
+    /// **Neither scheme key is removed without first probing for the other edition.** This is
+    /// `T-24`, compiled — and it was a PRESENT DEFECT, not a risk.
+    ///
+    /// `Software\Classes\trusttunnel` and `Software\Classes\tt` are registered at runtime by
+    /// BOTH editions (`protocol.rs`), into the same per-user hive, under the same two names. Pro's
+    /// uninstaller deleted them under no condition at all — not the checkbox, not `$UpdateMode`,
+    /// not a presence check — so uninstalling Pro on a machine that still had Light installed
+    /// broke Light's `trusttunnel://` and `tt://` handling. 32-ERASURE-EVIDENCE.md (e) measured
+    /// both keys present and Light installed, on a real disk, on 2026-09-06.
+    ///
+    /// WHAT IS ASSERTED, and why it is two things rather than one:
+    ///   1. a probe naming the OTHER EDITION precedes both removals — otherwise the gate could be
+    ///      keyed to anything at all, including something always true;
+    ///   2. the removals are CONDITIONAL — a probe whose answer nothing branches on is a read
+    ///      with no effect, which is the shape a refactor leaves behind when it deletes the
+    ///      `${If}` and keeps the `ReadRegStr`.
+    #[test]
+    fn the_uninstaller_spares_the_other_edition_s_scheme_keys() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_POSTUNINSTALL");
+        assert!(
+            scheme_key_violation(&body).is_none(),
+            "{}",
+            scheme_key_violation(&body).unwrap_or_default()
+        );
+
+        // The arm must still be able to fail. Fixtures, checked against the shared predicate, so
+        // it stays red-capable whatever the hook contains today — the 32-FIX-09 discipline.
+        for (fixture, what) in [
+            (
+                vec![
+                    SHARED_SCHEME_KEYS[0].to_string(),
+                    SHARED_SCHEME_KEYS[1].to_string(),
+                ],
+                "the unconditional pair as it stood before 32-FIX-16 — the measured T-24 defect",
+            ),
+            (
+                vec![
+                    "ReadRegStr $R0 HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TrustTunnel Client Light\" \"DisplayName\"".to_string(),
+                    SHARED_SCHEME_KEYS[0].to_string(),
+                    SHARED_SCHEME_KEYS[1].to_string(),
+                ],
+                "a probe whose answer nothing branches on — the removals still run unconditionally",
+            ),
+            (
+                vec![
+                    "${If} $R0 == \"\"".to_string(),
+                    SHARED_SCHEME_KEYS[0].to_string(),
+                    SHARED_SCHEME_KEYS[1].to_string(),
+                    "${EndIf}".to_string(),
+                ],
+                "a condition with no probe behind it — gated on something that never names Light",
+            ),
+        ] {
+            assert!(
+                scheme_key_violation(&fixture).is_some(),
+                "the T-24 rule no longer rejects {what}. A narrowed rule that accepts everything \
+                 reads as coverage while Pro's uninstall keeps disarming Light's URL handler."
+            );
+        }
+        // …and the shape the hook actually ships must be accepted, or the rule is unsatisfiable.
+        assert!(
+            scheme_key_violation(&[
+                format!("ReadRegStr $R0 HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{OTHER_EDITION_PRODUCT_NAME}\" \"DisplayName\""),
+                "${If} $R0 == \"\"".to_string(),
+                SHARED_SCHEME_KEYS[0].to_string(),
+                SHARED_SCHEME_KEYS[1].to_string(),
+                "${EndIf}".to_string(),
+            ])
+            .is_none(),
+            "the T-24 rule rejects probe-then-gate, which is the only shape that both cleans up \
+             after Pro and leaves Light's handler alone"
+        );
+    }
+
+    /// For a macro body: is either shared scheme key removed without a preceding probe for the
+    /// other edition, or without being gated on one?
+    fn scheme_key_violation(body: &[String]) -> Option<String> {
+        for key in SHARED_SCHEME_KEYS {
+            let Some(at) = body.iter().position(|l| l.trim() == key) else {
+                continue; // the key is not removed at all, which is also fine
+            };
+            let before = &body[..at];
+            if !before
+                .iter()
+                .any(|l| l.starts_with("ReadRegStr") && l.contains(OTHER_EDITION_PRODUCT_NAME))
+            {
+                return Some(format!(
+                    "`{key}` runs with no preceding probe naming `{OTHER_EDITION_PRODUCT_NAME}`. \
+                     Both editions register those two schemes into the same per-user hive, so \
+                     this line disarms the other edition's URL handler on a machine that still \
+                     has it (T-24, measured live in 32-ERASURE-EVIDENCE.md (e))."
+                ));
+            }
+            if !before.iter().any(|l| l.starts_with("${If}")) {
+                return Some(format!(
+                    "`{key}` is not gated on anything: a probe runs before it, but nothing \
+                     branches on the answer, so the key is still removed unconditionally. A read \
+                     with no effect is what a refactor leaves behind when it drops the `${{If}}`."
+                ));
+            }
+        }
+        None
+    }
+
+    /// **The per-user folders the erasure removes are composed from the RECORDED root, never from
+    /// the elevated process's idea of «the current user».**
+    ///
+    /// The template's own erasure does `SetShellVarContext current` and removes
+    /// `$LOCALAPPDATA\${BUNDLEID}`. Under `perMachine` that resolves the profile of whichever
+    /// administrator approved the elevation prompt, which under over-the-shoulder UAC need not be
+    /// the person uninstalling — D-08. On a real Windows install all three identities coincide and
+    /// the template's line happens to hit the right folder; that is a property of that machine,
+    /// not of the code, and 32-ERASURE-EVIDENCE.md (c) says so in as many words.
+    ///
+    /// So this region composes the bundle folder from the parent of the folder the ladder already
+    /// validated — a path the application itself recorded and rung 7 checked against the
+    /// uninstalling profile — and names `$LOCALAPPDATA` nowhere at all.
+    #[test]
+    fn the_erasure_composes_the_per_user_folders_from_the_resolved_root() {
+        let region: Vec<String> = hook_lines_by_region(HOOK_NSH)
+            .into_iter()
+            .filter(|(_, inside)| *inside)
+            .map(|(l, _)| l.trim().to_string())
+            .filter(|l| !l.is_empty() && !l.starts_with(';'))
+            .collect();
+
+        assert!(
+            region
+                .iter()
+                .any(|l| is_removal_statement(l) && l.contains(BUNDLE_ID_REF)),
+            "the erasure region removes no `{BUNDLE_ID_REF}` folder. The framework creates one in \
+             the user's profile on every start, so a «Удалить полностью» that leaves it behind \
+             leaves a trace the owner asked to be gone."
+        );
+        for l in &region {
+            assert!(
+                untrusted_per_user_composition(l).is_none(),
+                "{}",
+                untrusted_per_user_composition(l).unwrap_or_default()
+            );
+        }
+
+        // The arm has to be able to fail, and it has to keep letting the ONE legitimate mention
+        // through — rung 5 refuses a note that names the folder itself, which is a comparison and
+        // not a composition. A rule that could not tell those apart would have to be deleted the
+        // first time it fired, and a deleted rule guards nothing.
+        for (fixture, what) in [
+            (
+                "RMDir /r \"$LOCALAPPDATA\\${BUNDLEID}\"",
+                "a removal composed from the elevated process's idea of «the current user»",
+            ),
+            (
+                "StrCpy $R6 \"$LOCALAPPDATA\"",
+                "the same path copied into a register first, which is the same mistake one line \
+                 later",
+            ),
+        ] {
+            assert!(
+                untrusted_per_user_composition(fixture).is_some(),
+                "the D-08 composition rule no longer rejects {what}: `{fixture}`"
+            );
+        }
+        assert!(
+            untrusted_per_user_composition("${OrIf} $R8 == \"$LOCALAPPDATA\"").is_none(),
+            "the D-08 composition rule rejects rung 5's REFUSAL of a note naming the profile root \
+             itself — that is a comparison, and refusing it is what the rung is for"
+        );
+    }
+
+    /// Does this region line COMPOSE a path from the elevated process's idea of «the current
+    /// user», rather than merely comparing against it?
+    ///
+    /// The distinction is the whole rule. Rung 5 legitimately names `$LOCALAPPDATA` in an
+    /// `${OrIf}` to REFUSE a note pointing at the profile root itself. Everything else — a
+    /// removal, a `StrCpy`, a printed path — is the D-08 mistake: under UAC that variable is the
+    /// elevating administrator's profile, not the uninstalling person's.
+    fn untrusted_per_user_composition(line: &str) -> Option<String> {
+        let l = line.trim();
+        if !l.contains(UNTRUSTED_PER_USER_VAR) {
+            return None;
+        }
+        if l.starts_with("${If}") || l.starts_with("${OrIf}") || l.starts_with("${AndIf}") {
+            return None; // a comparison, i.e. a refusal — see rung 5
+        }
+        Some(format!(
+            "the erasure region composes a path from `{UNTRUSTED_PER_USER_VAR}`, which in an \
+             elevated uninstaller resolves the ELEVATING administrator's profile rather than the \
+             uninstalling person's (D-08). The folder must be composed from the root the ladder \
+             validated: {l}"
+        ))
+    }
+
+    // ── The pre-install hook's body, pinned from Rust ─────────────────────────────────────
+    //
+    // Phase 32 added `NSIS_HOOK_PREINSTALL`: it discovers the LEGACY install from the registry
+    // and, in this plan, reports what it would remove without removing anything. The four tests
+    // below are what keep it that way. They matter more than an ordinary contract test for one
+    // reason: when plan 32-06 turns the removal live, this macro deletes files on a real user's
+    // disk, one directory away from their SSH credentials and their browser profile — with no
+    // rehearsal machine anywhere to catch a mistake first.
+    //
+    // `include_str!` binds every assertion at COMPILE time, so editing the `.nsh` alone cannot
+    // leave any of them green.
+
+    /// The installer hook file, bound at COMPILE time. Editing the `.nsh` rebuilds the test
+    /// binary, so no assertion below can stay green while the file it is about moves underneath
+    /// it. The two older tests spell their own `include_str!` inline; both forms read the same
+    /// file, and this one exists so the four pre-install arms cannot drift onto a different path.
+    const HOOK_NSH: &str = include_str!("../nsis/installer-hooks.nsh");
+
+    /// The call-site spelling of the survivor-marker write, in ONE place because four rules read
+    /// it: the two arms added by 32-FIX-10, the user-data guard whose reach they extend, and the
+    /// stale-marker arm that has to prove the pre-install macro contains no such removal.
+    const MARKER_WRITE: &str = "!insertmacro TT_MARK_SURVIVOR";
+
+    /// The reference form of the survivor marker's path, as every statement that names it spells
+    /// it. Never the expanded path: the define is what keeps the basename in one place, and a rule
+    /// that matched the expansion would go quiet the moment the define did its job.
+    const MARKER_PATH_REF: &str = "${TT_LEGACY_SURVIVOR_MARKER}";
+
+    /// The flag `TT_MARK_SURVIVOR` raises when it writes, and `NSIS_HOOK_POSTINSTALL` reads when
+    /// deciding whether a marker on disk belongs to THIS install or to an earlier one.
+    const MARKER_SEEN_FLAG: &str = "$TT_LEGACY_SURVIVOR_SEEN";
+
+    /// Every artifact the app persists into its data root.
+    ///
+    /// Two readers, deliberately: the uninstall hook must not delete any of these during what
+    /// the user experiences as an update, and the pre-install hook must not name any of them in
+    /// its removal enumeration. A name added here is enforced by both guards at once, and the
+    /// shell gate (`remediation-hygiene.sh` rule 12) carries the same list as their backstop.
+    ///
+    /// Every name is read off the source that owns it, never recalled:
+    /// `commands/manifest.rs` (`configs.json` + the per-server `.toml` files),
+    /// `commands/ssh_commands.rs:741`, `ssh/mod.rs:291`, `routing_rules.rs:128,280`,
+    /// `geodata.rs:57,61,82`, `commands/history.rs:15`, `app_settings.rs:121`,
+    /// `dns_guard.rs:34`, `diagnostics.rs:73`, `net_egress.rs:83` (`runtime`),
+    /// `logging.rs:181,221` (`logs`, `.enable_logs`), `lib.rs:35,98`
+    /// (`.start_minimized`, `tray_hint_shown`), and `webview_data`, which Tauri owns.
+    ///
+    /// THE PER-SERVER `.toml` FILES CANNOT BE ENUMERATED AT ALL — the user names them. That is
+    /// not a gap in this list; it is the argument for the shape of the thing this list guards.
+    /// A removal built as a deny-list of known data names could never be safe, because the most
+    /// numerous data files here have no known names. The enumeration is therefore a closed
+    /// allow-list of binaries, and this const is the check on that list rather than a substitute
+    /// for it.
+    /// A THIRD reader since 32-FIX-11, and the reason this constant is `pub(crate)`:
+    /// `legacy_sweep` asserts that its closed list of legacy binaries contains no name from this
+    /// list, over the WHOLE list rather than over samples. It reads this one rather than keeping
+    /// its own — a name added here is then enforced by three guards at once instead of by two and
+    /// a copy that somebody forgot.
+    pub(crate) const USER_DATA: &[&str] = &[
+        "configs.json",
+        "ssh_credentials.json",
+        "known_hosts.json",
+        "routing_rules.json",
+        "exclusions.json",
+        "active_groups.json",
+        "connection_history.json",
+        "app_settings.json",
+        "dns_snapshot.json",
+        "trusttunnel_client.toml",
+        "webview_data",
+        "geodata",
+        "resolved",
+        "group_cache",
+        "runtime",
+        "logs",
+        "tray_hint_shown",
+        ".start_minimized",
+        ".enable_logs",
+    ];
+
+    /// The executable statements inside one hook macro, prose removed.
+    ///
+    /// Scoped to a SINGLE macro on purpose. A scan over the whole file would be satisfied — or
+    /// violated — by the unrelated uninstall macros, which legitimately delete things; a rule
+    /// that cannot say which macro it is judging is not evidence about either.
+    ///
+    /// Comment lines are dropped for the reason `the_uninstaller_never_deletes_user_data`
+    /// already records: these hooks document BY NAME exactly what they deliberately do not
+    /// remove, so a raw scan flags the hook's own explanation as the violation it explains.
+    ///
+    /// Panics when the macro is not found. That is the point — a scan that lost its subject
+    /// must report an inability to measure, never an absence of violations.
+    ///
+    /// `pub(crate)` since 32-FIX-11 so the leftover report's own contract can read the SAME
+    /// extraction — including this panic. A second extractor beside it would be a second opinion
+    /// about where the macro ends, and the two could disagree without anything saying so.
+    pub(crate) fn hook_macro_statements(hook: &str, macro_name: &str) -> Vec<String> {
+        let opener = format!("!macro {macro_name}");
+        let mut found = false;
+        let mut inside = false;
+        let mut out = Vec::new();
+        for line in hook.lines() {
+            let l = line.trim();
+            if !inside && l == opener {
+                found = true;
+                inside = true;
+                continue;
+            }
+            if inside && l == "!macroend" {
+                inside = false;
+                continue;
+            }
+            if !inside || l.is_empty() || l.starts_with(';') {
+                continue;
+            }
+            out.push(l.to_string());
+        }
+        assert!(
+            found,
+            "CANNOT MEASURE: `!macro {macro_name}` is not in installer-hooks.nsh. The rule that \
+             called this has lost its subject — it was renamed or deleted — so it can say nothing \
+             about violations. Reporting PASS here would be a green tick over nothing."
+        );
+        out
+    }
+
+    /// The backslash-separated segments of the first double-quoted argument on an NSIS line,
+    /// lower-cased for the case-insensitive comparison Windows paths require.
+    ///
+    /// WHY SEGMENTS AND NOT A SUBSTRING SEARCH, which is what the uninstall arm uses. The
+    /// pre-install enumeration legitimately names `vcruntime140.dll` — a Microsoft runtime DLL
+    /// this package no longer ships but every legacy folder still holds (owner decision
+    /// `drop-now`, 2026-09-06) — whose filename CONTAINS the data-folder name `runtime`. A
+    /// substring predicate
+    /// would flag that correct line as a data deletion, permanently and falsely, and the usual
+    /// repair for a rule that cries wolf is to delete the rule. The uninstall arm keeps its
+    /// wider substring form because every subject it scans is a data filename, so there is
+    /// nothing there for it to false-flag.
+    fn quoted_path_segments(line: &str) -> Vec<String> {
+        let inner = line.split('"').nth(1).unwrap_or(line);
+        inner
+            .split('\\')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .collect()
+    }
+
+    /// The artifact ONE pre-install line is about, in a single normalised spelling — or `None`
+    /// when the line is about no artifact at all.
+    ///
+    /// The whole point is that four line shapes name the SAME artifact four different ways, and a
+    /// rule that cannot line them up cannot tell «this file was removed and its outcome reported»
+    /// from «this file was removed and nobody looked»:
+    ///
+    /// | Shape | Example | Subject |
+    /// |---|---|---|
+    /// | announcement / outcome report | `DetailPrint "$(legacyRemoving) $R9\wintun.dll"` | `$R9\wintun.dll` |
+    /// | file removal | `Delete "$R9\wintun.dll"` | `$R9\wintun.dll` |
+    /// | file re-check | `${If} ${FileExists} "$R9\wintun.dll"` | `$R9\wintun.dll` |
+    /// | registry removal / re-check | `DeleteRegKey HKCU "${UNINSTKEY}"` | `HKCU\${UNINSTKEY}` |
+    ///
+    /// THE REGISTRY CASE IS THE ONE THAT NEEDS THE REJOINING. NSIS spells a key as a bare root
+    /// keyword followed by a quoted path, while the progress line the user reads spells it as one
+    /// string, `HKCU\...`. Comparing the quoted parts alone would silently treat the announcement
+    /// and the deletion as two unrelated artifacts, and the arm below would then pass while
+    /// reporting nothing about the only removal that is not a file.
+    ///
+    /// A `DetailPrint` that carries neither removal key — the «found a previous install» header,
+    /// the «your data stays» footer — yields `None` rather than a subject. Those lines are prose
+    /// about the operation, not claims about an artifact, and counting them would inflate every
+    /// set this arm compares.
+    fn pre_install_subject(line: &str) -> Option<String> {
+        let quoted = line.split('"').nth(1)?;
+
+        // Checked FIRST, because a printed line can contain a registry root INSIDE its quotes and
+        // must be read as the printed string, not re-parsed as an NSIS registry operation.
+        if line.starts_with("DetailPrint") {
+            let target = quoted
+                .strip_prefix("$(legacyRemoving)")
+                .or_else(|| quoted.strip_prefix("$(legacyRemoveFailed)"))?;
+            return Some(target.trim().to_string());
+        }
+
+        for root in ["HKCU", "HKLM", "HKCR", "HKU", "SHCTX"] {
+            if line.split_whitespace().any(|t| t == root) {
+                return Some(format!("{root}\\{quoted}"));
+            }
+        }
+
+        Some(quoted.to_string())
+    }
+
+    /// Whether an NSIS removal defers to the next restart.
+    ///
+    /// `/REBOOTOK` hands the path to the session manager's pending-rename list, which the kernel
+    /// executes at the next boot. Matched case-insensitively as a whole token, never as a
+    /// substring: a filename that happened to contain the word would otherwise pass for a
+    /// scheduled deletion.
+    fn is_deferred_removal(line: &str) -> bool {
+        line.starts_with("Delete")
+            && line
+                .split_whitespace()
+                .any(|t| t.eq_ignore_ascii_case("/REBOOTOK"))
+    }
+
+    /// Whether a subject `pre_install_subject` produced names a REGISTRY KEY rather than a file.
+    ///
+    /// Two rules below have to exclude it and for two different reasons that both stand alone:
+    /// `DeleteRegKey` has no deferred form, so a registry key cannot be scheduled for the next
+    /// restart; and a registry key is not a path on disk, so writing one into the survivor marker
+    /// would hand the application something it cannot act on.
+    fn is_registry_subject(subject: &str) -> bool {
+        ["HKCU\\", "HKLM\\", "HKCR\\", "HKU\\", "SHCTX\\"]
+            .iter()
+            .any(|root| subject.starts_with(root))
+    }
+
+    /// One artifact's group inside the pre-install enumeration: where it is announced, where its
+    /// own outcome report sits, and where the NEXT artifact's announcement begins.
+    ///
+    /// THE INTERVAL `(report, next_announce)` IS THE ONLY HANDLE A POSITIONAL RULE HAS ON «INSIDE
+    /// ITS OWN FAILURE BRANCH». The statement list is flat — `${If}` and `${EndIf}` are ordinary
+    /// statements to this scan, not a tree — so no rule here can literally see nesting. What it
+    /// CAN see is that the outcome report is printed only inside the failure branch, and that the
+    /// next artifact's announcement is outside it: anything strictly between the two belongs to
+    /// this artifact's branch tail and to nothing else. That is weaker than parsing the
+    /// conditional and it is stated as such rather than implied.
+    struct PreInstallGroup {
+        subject: String,
+        /// `None` when the artifact is announced with no outcome report of its own. The
+        /// set-equality arm reports that case in its own words; the rules below only need to know
+        /// that there is no branch to look inside.
+        report: Option<usize>,
+        next_announce: usize,
+    }
+
+    /// The announced artifacts of `NSIS_HOOK_PREINSTALL`, in order, each with the bounds of its
+    /// own failure branch. Built from `pre_install_subject`, so subjects line up with the existing
+    /// set equality in exactly the same normalised spelling.
+    fn pre_install_groups(body: &[String]) -> Vec<PreInstallGroup> {
+        let announced: Vec<(usize, String)> = body
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with("DetailPrint") && l.contains("$(legacyRemoving)"))
+            .filter_map(|(i, l)| pre_install_subject(l).map(|s| (i, s)))
+            .collect();
+
+        announced
+            .iter()
+            .enumerate()
+            .map(|(n, (i, subject))| {
+                let next_announce = announced.get(n + 1).map(|(j, _)| *j).unwrap_or(body.len());
+                let report = (*i..next_announce).find(|k| {
+                    let l = &body[*k];
+                    l.starts_with("DetailPrint")
+                        && l.contains("$(legacyRemoveFailed)")
+                        && pre_install_subject(l).as_deref() == Some(subject.as_str())
+                });
+                PreInstallGroup {
+                    subject: subject.clone(),
+                    report,
+                    next_announce,
+                }
+            })
+            .collect()
+    }
+
+    /// **The pre-install hook never removes a directory recursively.**
+    ///
+    /// Aimed at the discovered legacy path, `RMDir /r` destroys the credentials, the known
+    /// hosts, the routing rules, the geodata and the browser profile in one statement, with no
+    /// second chance and no name written down that anyone could review. Under D-05 that path is
+    /// the user's data root on a default install: the binaries are leaving the folder and the
+    /// data is staying, which is exactly why the removal has to name files one at a time.
+    ///
+    /// This arm also catches the shape the name-based arm below cannot: a recursive removal
+    /// mentions none of the files it takes.
+    #[test]
+    fn the_pre_install_hook_never_removes_a_directory_recursively() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+
+        for l in &body {
+            let recursive = l.starts_with("RMDir")
+                && l.split_whitespace()
+                    .any(|t| t.eq_ignore_ascii_case("/r"));
+            assert!(
+                !recursive,
+                "the pre-install hook removes a directory recursively. Aimed at the discovered \
+                 legacy path this takes the user's servers, saved passwords, known hosts, routing \
+                 rules and browser profile in one line: {l}"
+            );
+        }
+    }
+
+    /// Whether an NSIS statement launches another program at all.
+    ///
+    /// Three doors, and all three have to be watched together: the built-in `Exec*` family, the
+    /// `nsExec::` plugin the other hooks use, and `System::Call`, which is `ShellExecute` by
+    /// another name and would otherwise walk straight past a rule that only knew the first two.
+    fn executes_a_program(line: &str) -> bool {
+        let first = line.split_whitespace().next().unwrap_or_default();
+        first.starts_with("Exec")            // Exec, ExecWait, ExecShell(Wait)
+            || first.starts_with("nsExec::") // the plugin the other hooks use
+            || first.starts_with("System::Call") // FFI: ShellExecute by another name
+    }
+
+    /// The ONE invocation shape the pre-install hook is permitted (owner decision `route-b`,
+    /// 2026-09-06): a process termination whose target is a REGISTER holding the validated
+    /// process id — never a path, never a filename, never an image name.
+    ///
+    /// Every clause below is load-bearing, and each closes a different way the permission could
+    /// be widened into uselessness:
+    ///
+    /// | Clause | Rejects |
+    /// |---|---|
+    /// | the command is single-quoted and starts with `taskkill` | `ExecWait '"$R9\uninstall.exe"'` — the whole subject of D-06 |
+    /// | `/PID` present | `taskkill /F /IM trusttunnel_client.exe` — the image-name kill the owner rejected by name, because that filename is the Light edition's too |
+    /// | the LAST token is a bare NSIS register | `taskkill /F /PID 1234` (a literal nobody validated) and any path smuggled in as the target |
+    /// | plain `nsExec::Exec`, not its logging or capturing variants | both of those put the child's LOCALIZED console bytes somewhere a person reads: the capturing form onto the stack, the logging form straight into the details window, where code page 866 output is rendered as 1251 and the owner sees mojibake (G-32-4) |
+    ///
+    /// 32-FIX-16 tightened the last clause from «not the capturing form» to «the plain form
+    /// only». Until then the logging form was the shape this project recommended, and it is what
+    /// printed two lines of unreadable characters at the owner during a real uninstall.
+    fn is_validated_pid_termination(line: &str) -> bool {
+        let Some(cmd) = line.split('\'').nth(1) else {
+            return false;
+        };
+        if !line.trim_start().starts_with("nsExec::Exec '") {
+            return false;
+        }
+        let mut tokens = cmd.split_whitespace();
+        if tokens.next() != Some("taskkill") {
+            return false;
+        }
+        let rest: Vec<&str> = tokens.collect();
+        if !rest.iter().any(|t| t.eq_ignore_ascii_case("/PID")) {
+            return false;
+        }
+        // A bare register: `$R0`..`$R9` or `$0`..`$9`. Anything with a separator, a quote or a
+        // dot in it is a path or a literal, and is not a process id this hook validated.
+        let Some(target) = rest.last() else {
+            return false;
+        };
+        let is_register = target.starts_with('$')
+            && target.len() >= 2
+            && target.len() <= 3
+            && target[1..]
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == 'R' || c == 'r');
+        is_register
+    }
+
+    /// **The pre-install hook invokes nothing but a termination aimed at a validated process id.**
+    /// This is D-06, compiled.
+    ///
+    /// The uninstall.exe sitting on existing users' disks belongs to the OLD build and cannot be
+    /// patched. On every install predating the 30.1 fix it deletes `ssh_credentials.json`,
+    /// `known_hosts.json`, `routing_rules.json` and the rest unconditionally — and under D-05
+    /// that folder is the data root the new install is about to keep using. Running it would
+    /// destroy the data in the very act of preserving it.
+    ///
+    /// The assertion pins the INVOCATION SHAPE, not the uninstaller's filename, and the
+    /// difference is load-bearing: `uninstall.exe` legitimately appears in the removal
+    /// enumeration, so a name-based rule would collide with the correct line and have to be
+    /// weakened until it measured nothing.
+    ///
+    /// # NARROWED ON 2026-09-06, ON A RECORDED INSTRUCTION
+    ///
+    /// **What changed.** The rule used to read «executes nothing». It now reads «never invokes the
+    /// legacy uninstaller, and invokes nothing whose target is not a literal process id read from
+    /// this edition's own pid file» — one permitted shape, defined in
+    /// `is_validated_pid_termination` above, and everything else still refused.
+    ///
+    /// **Why.** The VPN core was terminated by NOTHING in the installer, so it held its own image
+    /// and (through a run-time `LoadLibrary`) `wintun.dll` mapped while the hook tried to delete
+    /// them — two of the three binaries that survived a real install
+    /// (G-32-2). Stopping it needs a kill, and killing the RIGHT one needs a process id, because
+    /// both editions ship a binary named `trusttunnel_client`: an image-name kill would end the
+    /// co-installed Light edition's live VPN session. The plugin bundled with the pinned bundler
+    /// exports no kill-by-pid entry point (its whole export table is `FindProcess`,
+    /// `FindProcessCurrentUser`, `KillProcess`, `KillProcessCurrentUser`, `RunAsUser`,
+    /// `SemverCompare`, `StrReplace`), so a command invocation is the only remaining route — and
+    /// the letter of the old rule forbade every invocation, including this one.
+    ///
+    /// **Why the SUBJECT is unchanged.** D-06's subject is that the legacy uninstaller is never
+    /// run. It still cannot be: an invocation naming a path is not a pid termination, so the arm
+    /// below rejects it, and the second assertion proves that against the exact shape rather than
+    /// leaving it to be believed. Nor can the rejected image-name kill sneak back as a command
+    /// line — `/IM` carries no `/PID` and its target is a filename, not a register.
+    ///
+    /// **Who authorised it.** The owner, on 2026-09-06, answering plan 32-FIX-09's blocking
+    /// decision: «По номеру процесса» — option `route-b`. He was shown the cost of narrowing a
+    /// compiled safety rule beside a destructive step and accepted it; he rejected the image-name
+    /// route by name. Recorded in `32-FIX-09-SUMMARY.md`.
+    #[test]
+    fn the_pre_install_hook_never_executes_another_program() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+
+        for l in &body {
+            assert!(
+                !executes_a_program(l) || is_validated_pid_termination(l),
+                "the pre-install hook makes an invocation that is not a termination aimed at a \
+                 validated process id. D-06's subject stands: the legacy uninstaller is the OLD \
+                 build's, cannot be patched, and deletes the credentials, known hosts and routing \
+                 rules that folder now holds as the data root — running it would destroy the data \
+                 in the act of preserving it. The one shape permitted here (owner decision \
+                 `route-b`, 2026-09-06) is `nsExec::Exec 'taskkill /F /PID $Rn'`, whose \
+                 target is a register this hook validated as decimal digits: {l}"
+            );
+        }
+
+        // THE RULE MUST STILL FAIL ON ITS ORIGINAL SUBJECT, AND THAT IS ASSERTED HERE RATHER THAN
+        // TRUSTED. A narrowed safety rule that can no longer reject the thing it was written to
+        // reject is worse than no rule: it reads as coverage. These fixtures are checked against
+        // the predicate directly, so the arm stays falsifiable whatever the hook file happens to
+        // contain today.
+        for forbidden in [
+            // The subject of D-06 itself, in each of the three shapes that could run it.
+            "ExecWait '\"$R9\\uninstall.exe\" /S'",
+            "Exec '\"$R9\\uninstall.exe\"'",
+            "nsExec::Exec '\"$R9\\uninstall.exe\" /S'",
+            "System::Call 'shell32::ShellExecuteW(i 0, t \"open\", t \"$R9\\uninstall.exe\")'",
+            // The image-name kill the owner rejected by name: it would end the co-installed Light
+            // edition's live VPN session, because that filename belongs to both editions.
+            "nsExec::Exec 'taskkill /F /IM trusttunnel_client.exe'",
+            // A process id nobody validated, and a target that is a path rather than a register.
+            "nsExec::Exec 'taskkill /F /PID 1234'",
+            "nsExec::Exec 'taskkill /F /PID $R9\\.sidecar-pro.pid'",
+            // Capturing the tool's output — localized and code-page dependent on this platform.
+            "nsExec::ExecToStack 'taskkill /F /PID $R0'",
+            // And, since 32-FIX-16, the LOGGING form too: it copies the child's console bytes
+            // into the details window, where a Russian console's code page 866 is rendered as
+            // 1251 and the owner reads mojibake (G-32-4). Correct kill, unreadable log.
+            "nsExec::ExecToLog 'taskkill /F /PID $R0'",
+        ] {
+            assert!(
+                executes_a_program(forbidden) && !is_validated_pid_termination(forbidden),
+                "the narrowed D-06 rule no longer rejects `{forbidden}`. Narrowing a safety rule \
+                 until it accepts everything is the failure this assertion exists to catch — the \
+                 rule would keep passing while the legacy uninstaller ran and destroyed the data \
+                 root it was written to protect."
+            );
+        }
+        assert!(
+            is_validated_pid_termination("nsExec::Exec 'taskkill /F /PID $R0'"),
+            "the narrowed D-06 rule rejects the ONE shape the owner authorised, so the hook cannot \
+             stop the VPN core at all and G-32-2 reopens."
+        );
+    }
+
+    /// **The pre-install hook stops the VPN core before it removes anything.**
+    ///
+    /// THE OTHER HALF OF G-32-2, AND THE HALF NOTHING IN THE INSTALLER EVER TOUCHED. Its sibling
+    /// `the_pre_install_hook_closes_the_app_before_it_removes_anything` covers the main
+    /// executable. The VPN core is a SECOND process, and the installer terminated it nowhere:
+    /// `CheckIfAppIsRunning` (`utils.nsh:22`) takes one image name and is invoked only with
+    /// `${MAINBINARYNAME}.exe`, and the string `trusttunnel_client.exe` occurs nowhere in the
+    /// template or in `utils.nsh`. The only thing that ever stopped the core is the Windows Job
+    /// Object (`job_object.rs:4`, KILL_ON_JOB_CLOSE), which fires AFTER the parent dies —
+    /// asynchronously, after this hook has already finished, and with a documented degraded path
+    /// at `job_object.rs:143-149`.
+    ///
+    /// So reordering alone would have fixed at most one of the three survivors. The core holds its
+    /// own image mapped and, through a run-time `LoadLibrary`, holds `wintun.dll` too — neither
+    /// binary IMPORTS wintun, which is why the core alone pins it. Those are the other two.
+    ///
+    /// WHAT IT MEASURES, in two parts, because either alone is satisfiable by the wrong thing:
+    ///   1. a termination aimed at a VALIDATED PROCESS ID precedes the first `Delete` — the kill;
+    ///   2. the core's image name appears in a process-level statement before that same `Delete` —
+    ///      the wait, and the thing that aims this rule at the CORE rather than at some other pid.
+    ///
+    /// The image name comes from `SIDECAR_IMAGE_NAME` and is never retyped, so renaming the
+    /// constant reddens this rule instead of silently un-aiming it. Part 2 is restricted to
+    /// process-level statements on purpose: the enumeration below legitimately prints and deletes
+    /// a path ending in that same filename, and a rule that counted those would pass over a hook
+    /// that terminates nothing at all.
+    #[test]
+    fn the_pre_install_hook_stops_the_vpn_core_before_it_removes_anything() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+        let core = crate::commands::vpn::SIDECAR_IMAGE_NAME;
+
+        let Some(removal) = body
+            .iter()
+            .position(|l| l.split_whitespace().next() == Some("Delete"))
+        else {
+            panic!(
+                "CANNOT MEASURE: `NSIS_HOOK_PREINSTALL` contains no `Delete` statement at all. \
+                 The enumeration is the whole point of the macro, so zero removals means this \
+                 rule lost its subject — reporting PASS here would be a green tick over nothing."
+            );
+        };
+
+        let kill = body.iter().position(|l| is_validated_pid_termination(l));
+        let waits_on_core = body.iter().position(|l| {
+            let first = l.split_whitespace().next().unwrap_or_default();
+            let process_level = first.starts_with("nsis_tauri_utils::")
+                || first.starts_with("nsExec::")
+                || first.starts_with("Exec");
+            process_level && l.contains(core)
+        });
+
+        let survivors = format!(
+            "{core} and wintun.dll survive on the user's disk when this does not run — the core \
+             holds its own image mapped, and it holds wintun.dll through a run-time LoadLibrary \
+             (neither binary imports it). NSIS `Delete` on a mapped image fails SILENTLY, so the \
+             removal is a no-op nothing can notice, and 25 MB of the previous install stay beside \
+             the user's credential store (G-32-2)."
+        );
+
+        let Some(kill) = kill else {
+            panic!(
+                "the pre-install hook NEVER STOPS THE VPN CORE: no termination aimed at a \
+                 validated process id appears in the macro, while statement {removal} removes a \
+                 file.\n  {survivors}\n  removal [{removal}]: {}",
+                body[removal]
+            );
+        };
+        let Some(waits) = waits_on_core else {
+            panic!(
+                "the pre-install hook names {core} in no process-level statement, so nothing here \
+                 is aimed at the VPN CORE — a pid termination alone could be aimed at anything, \
+                 and nothing waits for the core's images to be unmapped.\n  {survivors}"
+            );
+        };
+
+        assert!(
+            kill < removal && waits < removal,
+            "the pre-install hook removes before it stops the VPN core. Core termination: \
+             statement {kill}. Wait on {core}: statement {waits}. First `Delete`: statement \
+             {removal}.\n  {survivors}\n  termination [{kill}]: {}\n  wait        [{waits}]: {}\n  \
+             removal     [{removal}]: {}",
+            body[kill],
+            body[waits],
+            body[removal]
+        );
+    }
+
+    /// **The VPN core is stopped even when the registry knows nothing about a previous install.**
+    ///
+    /// G-32-11, AND THE HALF OF IT NOBODY HAD WRITTEN DOWN. The sibling rule above proves the
+    /// core-stop step precedes the removals. It does NOT prove the step RUNS: the block it measures
+    /// sits inside `${If} $R9 != ""`, and `$R9` is the legacy install discovered from HKCU. That
+    /// probe is deliberately blind to HKLM — it exists to catch the pre-32 currentUser installs the
+    /// template cannot see — so on a machine whose previous install was ALREADY the perMachine
+    /// build there is no HKCU record, `$R9` stays empty, and the whole core-stop step stands down.
+    /// In silence: the announcement is inside the same branch, so nothing is printed either.
+    ///
+    /// That is a real Windows install on build `h2vn6t`. His install log closes the program, carries
+    /// no core line of any kind, and stops at `Extract: trusttunnel.exe` on the NSIS retry dialog;
+    /// the app's own log next launch shows the pid file had held a dead process id. Two mechanisms
+    /// fit that evidence and the log cannot tell them apart, which is why the fix closes both.
+    ///
+    /// WHAT IT MEASURES: a termination aimed at a validated process id, a read of THIS
+    /// installation's pid file, and a process-level statement naming the core image — all three
+    /// before the FIRST statement that mentions `$R9`. Position rather than nesting is the only
+    /// handle a flat statement list gives, and here it is the right one: everything from the first
+    /// mention of `$R9` onwards is downstream of a probe that legitimately comes back empty.
+    ///
+    /// The image name comes from `SIDECAR_IMAGE_NAME` and the pid path from the hook's own
+    /// `${TT_SIDECAR_PID_FILE}` define, so neither can be retyped into a spelling nothing keeps in
+    /// step with Rust — rule 13 of `remediation-hygiene.sh` guards the second from the other side.
+    #[test]
+    fn the_pre_install_hook_stops_the_vpn_core_before_it_knows_of_any_legacy_install() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+        let core = crate::commands::vpn::SIDECAR_IMAGE_NAME;
+
+        let Some(first_r9) = body.iter().position(|l| l.contains("$R9")) else {
+            panic!(
+                "CANNOT MEASURE: `NSIS_HOOK_PREINSTALL` never mentions $R9, so the legacy probe \
+                 this rule is positioned against is gone. The rule would pass over anything."
+            );
+        };
+
+        let kill = body
+            .iter()
+            .position(|l| is_validated_pid_termination(l.as_str()));
+        let read = body.iter().position(|l| {
+            (l.starts_with("IfFileExists") || l.starts_with("FileOpen"))
+                && l.contains("${TT_SIDECAR_PID_FILE}")
+        });
+        let waits = body.iter().position(|l| {
+            l.split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .starts_with("nsis_tauri_utils::")
+                && l.contains(core)
+        });
+
+        let why = format!(
+            "on a machine whose previous install was already the perMachine build there is NO \
+             HKCU record, so every step keyed on $R9 stands down — including the one that stops \
+             {core}. The core then still holds its own image, and wintun.dll through a run-time \
+             LoadLibrary, while the script overwrites the folder: the installer shows the \
+             file-in-use retry dialog and its log says nothing about why (G-32-11)."
+        );
+
+        for (what, at) in [
+            ("termination aimed at a validated process id", kill),
+            ("read of ${TT_SIDECAR_PID_FILE}", read),
+            ("process-level statement naming the core image", waits),
+        ] {
+            let Some(at) = at else {
+                panic!(
+                    "the pre-install hook has NO unconditional core-stop step: no {what} appears \
+                     anywhere in the macro.\n  {why}"
+                );
+            };
+            assert!(
+                at < first_r9,
+                "the pre-install hook's only {what} is statement {at}, which is at or after the \
+                 first mention of $R9 (statement {first_r9}) and is therefore reachable only when \
+                 a LEGACY install was discovered.\n  {why}\n  step   [{at}]: {}\n  first \
+                 $R9 [{first_r9}]: {}",
+                body[at],
+                body[first_r9]
+            );
+        }
+    }
+
+    /// **No path through the unconditional core-stop step is silent.**
+    ///
+    /// THE INVERSE OF THE RULE THE BLOCK WAS ALREADY WRITTEN TO OBEY. The core-stop announcement
+    /// is printed only when a pid candidate survives validation, on the correct principle that a
+    /// hook must not claim to be stopping the core while doing nothing. The hole that principle
+    /// leaves is the one that made G-32-11 undiagnosable: a step that says nothing reads exactly
+    /// like a step that never ran, and the real log — which is complete up to the retry dialog
+    /// — cannot distinguish «no pid file», «a pid file naming a dead process» and «this code was
+    /// never reached». All three were live hypotheses for a day.
+    ///
+    /// WHAT IT MEASURES, over the region from the pid read to the label every path leaves by:
+    ///   1. every `Goto <done>` is IMMEDIATELY preceded by a `DetailPrint` — no branch escapes
+    ///      without a sentence;
+    ///   2. the statement immediately before the `<done>` label is a `DetailPrint` — the
+    ///      fall-through path is covered too, and it is the one a new branch is most likely to
+    ///      join by accident;
+    ///   3. the branch the pid-file existence test jumps to when the file is ABSENT opens with a
+    ///      `DetailPrint` — the real-world case, and the one the old block was silent about;
+    ///   4. at least four DISTINCT `$(name)` references are printed in the region, so a block
+    ///      that printed one sentence on every path could not satisfy the first three arms
+    ///      vacuously.
+    ///
+    /// The label names are read from the file where it is possible — the absent-branch target is
+    /// taken from the `IfFileExists` line itself — and named only where it is not. A rename of the
+    /// terminator reports CANNOT MEASURE rather than passing over a region it can no longer find.
+    #[test]
+    fn no_path_through_the_pre_install_core_stop_is_silent() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+        const DONE: &str = "tt_preinstall_target_core_done";
+
+        let Some(start) = body.iter().position(|l| {
+            l.starts_with("IfFileExists") && l.contains("${TT_SIDECAR_PID_FILE}")
+        }) else {
+            panic!(
+                "CANNOT MEASURE: the pre-install hook never tests for ${{TT_SIDECAR_PID_FILE}}, so \
+                 the unconditional core-stop region this rule is about does not exist. Its \
+                 absence is a failure of the rule above, and a PASS here would paper over it."
+            );
+        };
+        let Some(end) = body.iter().position(|l| l.trim() == format!("{DONE}:")) else {
+            panic!(
+                "CANNOT MEASURE: the core-stop region has no `{DONE}:` terminator. It was renamed \
+                 or removed, so this rule cannot see the branches it exists to check."
+            );
+        };
+        assert!(
+            end > start,
+            "CANNOT MEASURE: `{DONE}:` (statement {end}) precedes the pid read (statement \
+             {start}), so the region between them is not the core-stop step."
+        );
+
+        let region = &body[start..=end];
+        let is_print = |s: &String| s.starts_with("DetailPrint");
+        let leaves = format!("Goto {DONE}");
+
+        for (i, l) in region.iter().enumerate() {
+            if l.trim() != leaves {
+                continue;
+            }
+            let previous = i.checked_sub(1).map(|p| &region[p]);
+            assert!(
+                previous.is_some_and(is_print),
+                "a path out of the core-stop step prints nothing: statement {i} of the region is \
+                 `{l}` and the statement before it is `{}`. Silence here reads identically to a \
+                 step that never ran, which is the whole of G-32-11 — the install log \
+                 carries no core line at all and three different explanations fit it.",
+                previous.map(String::as_str).unwrap_or("<the region's first statement>")
+            );
+        }
+
+        let before_done = region
+            .len()
+            .checked_sub(2)
+            .map(|p| &region[p])
+            .expect("the region holds the read and the terminator, so it has at least 2 statements");
+        assert!(
+            is_print(before_done),
+            "the fall-through path into `{DONE}:` prints nothing — the statement before the label \
+             is `{before_done}`. A branch that reaches the terminator without a Goto says nothing \
+             at all, and that is the shape G-32-11 was made of."
+        );
+
+        let absent_label = body[start]
+            .split_whitespace()
+            .last()
+            .expect("an IfFileExists statement has tokens")
+            .to_string();
+        let Some(absent_at) = region
+            .iter()
+            .position(|l| l.trim() == format!("{absent_label}:"))
+        else {
+            panic!(
+                "CANNOT MEASURE: the pid-file test jumps to `{absent_label}` when the file is \
+                 absent, and no such label is declared inside the region. The branch cannot be \
+                 checked, and it is the real-world case."
+            );
+        };
+        assert!(
+            region.get(absent_at + 1).is_some_and(is_print),
+            "the branch taken when there is NO pid file prints nothing: `{absent_label}:` is \
+             followed by `{}`. «There was no record of a core to stop» is a fact the log must \
+             carry — its absence is indistinguishable from the step never running (G-32-11).",
+            region
+                .get(absent_at + 1)
+                .map(String::as_str)
+                .unwrap_or("<the end of the region>")
+        );
+
+        let mut printed: Vec<&str> = region
+            .iter()
+            .filter(|l| is_print(l))
+            .filter_map(|l| l.split_once("$(").and_then(|(_, r)| r.split_once(')')))
+            .map(|(key, _)| key)
+            .collect();
+        printed.sort_unstable();
+        printed.dedup();
+        assert!(
+            printed.len() >= 4,
+            "the core-stop step reports {} distinct sentence(s) ({printed:?}). One sentence on \
+             every path would satisfy the arms above while telling the reader nothing — the point \
+             is that «stopped», «no record», «the record names nothing alive» and «a core is \
+             running that is not ours to stop by name» are DIFFERENT outcomes and the log has to \
+             say which one happened.",
+            printed.len()
+        );
+    }
+
+    /// **The hook waits for the main binary's FILE to be writable, not merely for its process to
+    /// leave the process list.**
+    ///
+    /// WHY THE PROCESS POLL IS NOT THE ANSWER TO THIS QUESTION. It asks the plugin whether the
+    /// image name is still in the process list. What the script does three lines later is open
+    /// each file with write access, and the two answers are allowed to differ: a scanner reading
+    /// the freshly closed binary, or any other holder that denies write sharing, keeps the file
+    /// busy after its process is gone. NSIS answers that with the file-in-use retry dialog, which
+    /// is what the owner got on build `h2vn6t` (G-32-11) — his log closes the program and then
+    /// stops dead at `Extract: trusttunnel.exe`.
+    ///
+    /// So the wait is made out of the same call the extraction makes, and both outcomes print.
+    ///
+    /// THE MODE IS ASSERTED, AND IT IS THE ONE ARM WITH TEETH OF ITS OWN. NSIS `FileOpen` mode
+    /// `w` is CREATE_ALWAYS: pointed at `trusttunnel.exe` it would TRUNCATE the installed binary
+    /// to zero bytes — a probe that destroys what it is probing. Mode `a` opens for read/write
+    /// without changing a byte. The existence check in front of it is the other half: `a` is
+    /// OPEN_ALWAYS, so without a guard it would CREATE the file on a clean machine and leave an
+    /// empty executable behind if the install were cancelled.
+    #[test]
+    fn the_pre_install_hook_waits_for_the_main_binary_file_to_be_writable() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+        let binary = "$INSTDIR\\${MAINBINARYNAME}.exe";
+
+        let Some(open_at) = body
+            .iter()
+            .position(|l| l.starts_with("FileOpen") && l.contains(binary))
+        else {
+            panic!(
+                "the pre-install hook never opens `{binary}` for writing, so nothing verifies the \
+                 file can actually be overwritten before the script starts overwriting it. A \
+                 process that has left the process list can still have its image file held by \
+                 somebody else; NSIS answers that with the retry dialog the owner had to press \
+                 through (G-32-11), and the log says only that the program was being closed."
+            );
+        };
+
+        let mode = body[open_at]
+            .split_whitespace()
+            .last()
+            .expect("a FileOpen statement has tokens");
+        assert_eq!(
+            mode, "a",
+            "the writability probe opens `{binary}` in mode `{mode}`. Only `a` is safe here: `w` \
+             is CREATE_ALWAYS and would TRUNCATE the installed binary to zero bytes, and `r` \
+             asks for read access, which a mapped image grants — so the probe would report the \
+             file free while the extraction below still fails.\n  probe: {}",
+            body[open_at]
+        );
+
+        let guarded = body[..open_at]
+            .iter()
+            .any(|l| l.starts_with("IfFileExists") && l.contains(binary));
+        assert!(
+            guarded,
+            "the writability probe is not guarded by an existence test. Mode `a` is OPEN_ALWAYS: \
+             on a clean machine it CREATES `{binary}`, leaving an empty executable in the install \
+             folder if the install is cancelled before extraction."
+        );
+
+        let process_poll = body
+            .iter()
+            .position(|l| {
+                l.starts_with("nsis_tauri_utils::FindProcess") && l.contains("${MAINBINARYNAME}.exe")
+            })
+            .expect("the process poll is the subject of an older rule and must still be here");
+        assert!(
+            process_poll < open_at,
+            "the writability probe (statement {open_at}) runs BEFORE the process poll (statement \
+             {process_poll}). It would then spend its whole ceiling waiting for a program nobody \
+             has asked to close yet."
+        );
+
+        let first_removal = body
+            .iter()
+            .position(|l| l.split_whitespace().next() == Some("Delete"));
+        if let Some(removal) = first_removal {
+            assert!(
+                open_at < removal,
+                "the writability probe (statement {open_at}) runs after the first removal \
+                 (statement {removal}). `Delete` on a file another process holds open fails \
+                 SILENTLY, so the removals are exactly what the wait exists to protect."
+            );
+        }
+
+        let done = body[open_at + 1..]
+            .iter()
+            .take_while(|l| !l.starts_with("Pop"))
+            .filter(|l| l.starts_with("DetailPrint"))
+            .count();
+        assert!(
+            done >= 2,
+            "the writability wait reports {done} outcome(s). Both have to print: a step that \
+             speaks only when it fails cannot be told apart from a step that never ran, and \
+             telling those apart is what G-32-11 needed."
+        );
+    }
+
+    /// **Every polling loop in the pre-install hook has a counted ceiling.**
+    ///
+    /// A loop that sleeps is a loop waiting on the world — on a process to exit, on a file to be
+    /// released — and the world is entitled never to oblige. Without a counter such a loop is an
+    /// installer that hangs on a progress page with no cancel and no message, which is a worse
+    /// outcome than the file-in-use dialog it was written to avoid. Every wait in this hook is
+    /// therefore expressed as a counted loop of ~10 s that reports and walks on.
+    ///
+    /// WHAT IT MEASURES: each backward `Goto` whose label is declared earlier in the macro and
+    /// whose span contains a `Sleep`. The `Sleep` is the discriminator, and it is what keeps the
+    /// rule off the two character-at-a-time loops that trim and validate the pid — those consume
+    /// their input and cannot spin. Inside each span the rule requires a counter increment and a
+    /// comparison against a small literal ceiling.
+    ///
+    /// Zero polling loops is reported as an inability to measure, never as a pass: this rule is
+    /// exactly the shape that goes quietly vacuous when the thing it guards is renamed.
+    #[test]
+    fn every_polling_loop_in_the_pre_install_hook_has_a_counted_ceiling() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+
+        let mut loops = 0usize;
+        for (i, l) in body.iter().enumerate() {
+            let Some(target) = l.strip_prefix("Goto ") else {
+                continue;
+            };
+            let label = format!("{}:", target.trim());
+            let Some(head) = body[..i].iter().position(|s| s.trim() == label) else {
+                continue; // a forward Goto: a branch, not a loop
+            };
+            let span = &body[head..=i];
+            if !span.iter().any(|s| s.starts_with("Sleep")) {
+                continue; // not a wait on the world
+            }
+            loops += 1;
+
+            assert!(
+                span.iter()
+                    .any(|s| s.starts_with("IntOp") && s.contains("+ 1")),
+                "the polling loop at `{label}` counts nothing, so nothing can bound it. An \
+                 installer that waits forever on a process that never exits is stuck on a page \
+                 with no cancel and no message."
+            );
+
+            let ceiling = span
+                .iter()
+                .filter(|s| s.starts_with("${If}") && s.contains(">="))
+                .filter_map(|s| s.split_whitespace().last())
+                .filter_map(|n| n.parse::<u32>().ok())
+                .find(|n| *n > 0 && *n <= 200);
+            assert!(
+                ceiling.is_some(),
+                "the polling loop at `{label}` has no `${{If}} $Rn >= <n>` ceiling with a small \
+                 literal bound, so its only exit is the world obliging. Bound it and report the \
+                 give-up, exactly as the other waits in this macro do."
+            );
+        }
+
+        assert!(
+            loops > 0,
+            "CANNOT MEASURE: `NSIS_HOOK_PREINSTALL` contains no polling loop at all — no backward \
+             `Goto` whose span sleeps. Either every wait has been removed, or the shape this rule \
+             recognises has changed; reporting PASS over an empty set is the vacuous tick this \
+             file refuses."
+        );
+    }
+
+    /// **No file the user owns is removed, or even reported as removable, by the pre-install hook.**
+    ///
+    /// The defect class here is not a wholesale delete — arm 1 covers that — but a list that
+    /// grows a data file by accident: someone adds a name that looks like an install artifact
+    /// and is not. The report is scanned as well as the removals, deliberately. In this plan
+    /// nothing is deleted, so scanning removals alone would measure an empty set and pass
+    /// vacuously; and the report is what plan 32-06 promotes into the real removal list, so a
+    /// data file that reaches the report is a data file that will reach the delete.
+    #[test]
+    fn the_pre_install_hook_never_names_a_file_the_user_owns() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+
+        let mut subjects = 0usize;
+        let mut offenders: Vec<String> = Vec::new();
+        for l in &body {
+            let removal =
+                l.starts_with("Delete") || l.starts_with("RMDir") || l.starts_with("DeleteReg");
+            // The report lines, keyed off the language strings they actually print — so renaming
+            // a key without revisiting this rule takes the rule's subject away and trips the
+            // locate-or-fail below rather than passing quietly. BOTH printed forms are scanned:
+            // the announcement, and the outcome line plan 32-06 added. They name the same artifact
+            // by construction, so a data file that reached one reached the other, and a rule that
+            // watched only one half would be repairable by deleting the half it watched.
+            //
+            // EXTENDED BY 32-FIX-10, over one more printed form and one more statement kind:
+            //   * `$(legacyRemoveOnReboot)` — the third printed line about an artifact. It names
+            //     the same path the other two do, so it is the same class of subject and belongs
+            //     in the same scan.
+            //   * the survivor-marker WRITE. This one matters most: it is the only statement here
+            //     that puts a path into a FILE that outlives the installer, in a folder the
+            //     program-folder ACL grants every account on the machine read access to. The
+            //     reach is extended rather than copied — a second list of user filenames beside
+            //     this one is how the two drift and one of them stops being enforced.
+            let reported = l.starts_with("DetailPrint")
+                && (l.contains("$(legacyRemoving)")
+                    || l.contains("$(legacyRemoveFailed)")
+                    || l.contains("$(legacyRemoveOnReboot)"));
+            let marker_write = l.starts_with(MARKER_WRITE);
+            if !(removal || reported || marker_write) {
+                continue;
+            }
+            subjects += 1;
+            let segments = quoted_path_segments(l);
+            for name in USER_DATA {
+                if segments.iter().any(|s| s == &name.to_ascii_lowercase()) {
+                    offenders.push(format!("{l}   <- names '{name}', which is the user's"));
+                }
+            }
+        }
+
+        assert!(
+            subjects > 0,
+            "CANNOT MEASURE: the pre-install hook names nothing removable at all. The whole point \
+             of the macro is to enumerate the legacy install, so zero subjects means this rule \
+             lost its subject — not that the hook is clean."
+        );
+        assert!(
+            offenders.is_empty(),
+            "the pre-install hook names the user's own files among the artifacts it would \
+             remove. On a default install that folder is the data root (D-05), so these are the \
+             servers, saved passwords, known hosts and browser profile the migration exists to \
+             preserve:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// **Every file the template installs appears in the pre-install enumeration.**
+    ///
+    /// The failure this guards is silent by construction: a resource added to `tauri.conf.json`
+    /// later — a third DLL, a second sidecar — is installed by the template into the legacy
+    /// folder on old machines and then left there forever, because nobody thought to add it
+    /// here. Nothing fails; there is simply an orphan on disk. So the expectation is stated
+    /// against the template's own installed-file list rather than against whatever the hook
+    /// happens to say.
+    ///
+    /// Names come from constants wherever the crate owns one — `SIDECAR_IMAGE_NAME` for the VPN
+    /// core — and the main binary is asserted as the DEFINE `${MAINBINARYNAME}`, not as the
+    /// literal `trusttunnel.exe`. That is stronger than a literal: the main binary is
+    /// `trusttunnel` while the product is `TrustTunnel Client Pro`, and a path built from the
+    /// product name matches nothing on disk while looking exactly like a hook that had nothing
+    /// to do. Requiring the define makes that mistake unrepresentable.
+    ///
+    /// The remaining literals (the two runtime DLLs, the adapter DLL, `uninstall.exe`) have no
+    /// Rust constant to source from — they are bundler resources and an NSIS `WriteUninstaller`
+    /// target. They were read off the emitted script at `installer.nsi:624-626` and `:636`.
+    ///
+    /// # Why two of these are no longer bundle resources, and are still required here
+    ///
+    /// Owner decision `drop-now` (2026-09-06, plan 32-FIX-13) removed `vcruntime140.dll` and
+    /// `vcruntime140_1.dll` from `resources` in `tauri.conf.json`: neither shipped binary imports
+    /// them statically (the main binary imports only the Universal CRT forwarders
+    /// `api-ms-win-crt-*`, the VPN core is statically linked and imports no CRT at all), neither
+    /// declares a delay-load import directory at all, and neither resolves them by name at run
+    /// time. So the template no longer installs them.
+    ///
+    /// The expected list below deliberately did NOT shrink with the package, and this is the one
+    /// place that has to say why, because the test's own name reads the other way. The subject of
+    /// this rule is not "what the template installs today" — it is **"what a legacy folder on a
+    /// user's disk can contain"**, and the template installed both libraries into every legacy
+    /// folder that exists. Shrinking the enumeration in step with `resources` would strand roughly
+    /// 170 KB in every one of those folders forever, silently, with nothing reporting it — which is
+    /// a fresh instance of the exact defect (G-32-2) this whole remediation exists to close. A file
+    /// stops being a removal target when no machine can still hold it, not when we stop shipping it.
+    ///
+    /// The practical consequence: the two entries below are now pinned by history rather than by a
+    /// live `resources` line, so nothing upstream keeps them in step any more. That is the cost of
+    /// the decision, recorded rather than smoothed over. They may be dropped from this list only
+    /// when installs predating 2026-09-06 are no longer reachable — not before.
+    #[test]
+    fn the_pre_install_enumeration_names_every_file_the_template_installs() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+
+        let enumerated: Vec<&String> = body
+            .iter()
+            .filter(|l| l.starts_with("DetailPrint") && l.contains("$(legacyRemoving)"))
+            .collect();
+
+        assert!(
+            !enumerated.is_empty(),
+            "CANNOT MEASURE: the pre-install hook enumerates ZERO artifacts. Either the macro was \
+             emptied or the language key it prints was renamed. A scan that lost its subject must \
+             say so — reporting PASS over an empty set is the vacuous shape this file refuses."
+        );
+
+        let sidecar = crate::commands::vpn::SIDECAR_IMAGE_NAME;
+        let expected: Vec<(&str, &str)> = vec![
+            (
+                "${MAINBINARYNAME}.exe",
+                "the main binary, taken from the template's define so a product-name path can \
+                 never be substituted for it",
+            ),
+            (
+                "vcruntime140.dll",
+                "NOT a bundle resource any more (owner decision `drop-now`, 2026-09-06) — required \
+                 here because every install made before that date put it in the legacy folder, and \
+                 the installer is the only thing that will ever take it back out",
+            ),
+            (
+                "vcruntime140_1.dll",
+                "same as above: dropped from the package, kept as a removal target because copies \
+                 already exist on disk",
+            ),
+            ("wintun.dll", "the network adapter DLL, installer.nsi:626"),
+            (sidecar, "the VPN core, from commands::vpn::SIDECAR_IMAGE_NAME"),
+            (
+                "uninstall.exe",
+                "the legacy uninstaller — left behind it keeps an Add/Remove-Programs entry alive \
+                 that deletes the data root when clicked (installer.nsi:636)",
+            ),
+        ];
+
+        let mut missing: Vec<String> = Vec::new();
+        for (name, why) in &expected {
+            if !enumerated.iter().any(|l| l.contains(name)) {
+                missing.push(format!("{name}   ({why})"));
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "the template installs files the pre-install enumeration does not name, so they \
+             would be orphaned in the legacy folder forever with nothing reporting it:\n  {}\n\
+             Enumeration as it stands:\n  {}",
+            missing.join("\n  "),
+            enumerated
+                .iter()
+                .map(|l| l.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+    }
+
+    /// **Every artifact the pre-install hook removes reports what actually happened to it.**
+    ///
+    /// THIS ARM EXISTS BECAUSE THE DRY RUN COULD NOT COVER IT, AND SAID SO. Plan 32-06 shipped the
+    /// removal log-only first and the printed list was read against a real machine before
+    /// anything could delete — that is the phase's whole safety mechanism, and it proved the
+    /// *enumeration*. It structurally cannot prove the *deletion*: NSIS `Delete` on a file another
+    /// process holds open fails silently, sets no error the surrounding code reads, and the install
+    /// walks on. `trusttunnel.exe` and `trusttunnel_client.exe` are exactly the sort of thing that
+    /// is running when somebody reinstalls, so this is the realistic case and not the exotic one.
+    ///
+    /// A progress list that prints the same line whether or not the file went is the application
+    /// claiming what it did not do — the one thing this project's patterns forbid everywhere else.
+    /// So the shape is pinned rather than reviewed: announce, remove, LOOK AGAIN, and print a
+    /// distinct line if the artifact survived.
+    ///
+    /// The order is asserted, not merely the presence, and that is the difference between «the
+    /// outcome was checked» and «the words appear somewhere in the macro». A re-check that runs
+    /// before its own removal reports the state of the world beforehand, which is worse than no
+    /// re-check at all because it looks like evidence.
+    ///
+    /// The set equality is what enforces the OTHER half of the decision. He approved a list
+    /// of exactly nine artifacts, and explicitly declined a tenth (`.sidecar-pro.pid`) when offered
+    /// it. A removal of something never announced, or an announcement never removed, breaks this
+    /// arm — so the list a human read cannot be quietly grown or quietly shrunk afterwards.
+    #[test]
+    fn every_artifact_the_pre_install_hook_removes_reports_what_actually_happened() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+
+        let mut announced: Vec<(usize, String)> = Vec::new();
+        let mut removed: Vec<(usize, String)> = Vec::new();
+        let mut rechecked: Vec<(usize, String)> = Vec::new();
+        let mut reported: Vec<(usize, String)> = Vec::new();
+
+        for (i, l) in body.iter().enumerate() {
+            let Some(subject) = pre_install_subject(l) else {
+                continue;
+            };
+            if l.starts_with("DetailPrint") {
+                // `pre_install_subject` already refused every DetailPrint that carries neither
+                // removal key, so this branch is exactly the two we care about.
+                if l.contains("$(legacyRemoving)") {
+                    announced.push((i, subject));
+                } else {
+                    reported.push((i, subject));
+                }
+            } else if l.starts_with("Delete") || l.starts_with("RMDir") {
+                removed.push((i, subject));
+            } else if l.contains("${FileExists}") || l.starts_with("EnumRegValue") {
+                // Validation check (d) also spells `${FileExists}`, one branch above and long
+                // before the enumeration. It lands in this list harmlessly: every lookup below is
+                // «an entry for this subject AT A LATER INDEX than the removal», which an earlier
+                // line can never satisfy.
+                rechecked.push((i, subject));
+            }
+        }
+
+        assert!(
+            !announced.is_empty(),
+            "CANNOT MEASURE: the pre-install hook announces ZERO artifacts, so this rule has no \
+             subject and can say nothing about outcome reporting. Reporting PASS over an empty \
+             set is the vacuous shape this file refuses."
+        );
+
+        let after = |v: &[(usize, String)], subject: &str, min: usize| -> Option<usize> {
+            v.iter()
+                .find(|(i, s)| *i > min && s == subject)
+                .map(|(i, _)| *i)
+        };
+
+        let mut broken: Vec<String> = Vec::new();
+        for (i, subject) in &announced {
+            let Some(j) = after(&removed, subject, *i) else {
+                broken.push(format!(
+                    "{subject}   <- announced but never removed. The progress list tells the user \
+                     it is going and it stays on disk."
+                ));
+                continue;
+            };
+            let Some(k) = after(&rechecked, subject, j) else {
+                broken.push(format!(
+                    "{subject}   <- removed with no existence re-check afterwards. A `Delete` on a \
+                     file another process holds open fails SILENTLY, so without the second look \
+                     there is nothing that could ever notice."
+                ));
+                continue;
+            };
+            if after(&reported, subject, k).is_none() {
+                broken.push(format!(
+                    "{subject}   <- re-checked but with no failure line to print when it survived. \
+                     The check is then invisible and the install reports success either way."
+                ));
+            }
+        }
+        assert!(
+            broken.is_empty(),
+            "the pre-install hook removes artifacts without honestly reporting the outcome. The \
+             dry run the owner read proved the ENUMERATION and explicitly could not prove the \
+             DELETION — this arm is what closes that gap, and these artifacts fall through \
+             it:\n  {}",
+            broken.join("\n  ")
+        );
+
+        let names = |v: &[(usize, String)]| -> Vec<String> {
+            let mut n: Vec<String> = v.iter().map(|(_, s)| s.clone()).collect();
+            n.sort();
+            n.dedup();
+            n
+        };
+        let announced_names = names(&announced);
+        assert_eq!(
+            names(&removed),
+            announced_names,
+            "the set of artifacts REMOVED differs from the set ANNOUNCED. A reviewer approved a \
+             list of exactly nine artifacts after reading it on a real machine, and declined a \
+             tenth when it was offered; a removal that does not appear in the announcement is a \
+             deletion no human ever reviewed."
+        );
+        assert_eq!(
+            names(&reported),
+            announced_names,
+            "the set of artifacts whose FAILURE is reportable differs from the set announced — so \
+             some artifact can fail to be removed and the install will still look like it worked."
+        );
+    }
+
+    /// **Every artifact that survived its removal is scheduled for the next restart, and only
+    /// those.**
+    ///
+    /// WHAT IS LEFT AFTER 32-FIX-07 AND 32-FIX-09, AND WHY IT IS NOT NOTHING. Those two plans
+    /// terminate the application and this edition's VPN core and wait for both before the first
+    /// `Delete`. That closes the ordinary case. It cannot close A HANDLE THAT OUTLIVES ITS
+    /// PROCESS: `wintun.dll` is loaded by the core at run time through `LoadLibrary`, and the
+    /// adapter driver can hold a reference to it after the loading process is gone. On such a
+    /// machine every termination did its job and `Delete` still fails — silently, as it always
+    /// does — and without a deferred attempt the file is orphaned in the legacy folder forever.
+    ///
+    /// TWO ASSERTIONS, AND THE SECOND IS THE IMPORTANT ONE.
+    ///   1. COVERAGE — every announced FILE artifact has a deferred removal inside its own failure
+    ///      branch. The registry artifact is excluded, and must be: `DeleteRegKey` has no deferred
+    ///      form.
+    ///   2. SCOPE — the set of deferred-removal subjects is a SUBSET of the announced set. A
+    ///      deferred delete is executed at boot by the session manager with SYSTEM authority, in
+    ///      no user session, and cannot be recalled between the install and the restart. A target
+    ///      outside the nine artifacts the owner read on a real machine is therefore a
+    ///      system-authority deletion nobody approved — which is a strictly worse failure than the
+    ///      orphan this whole mechanism exists to prevent.
+    ///
+    /// A THIRD, SMALLER ONE: the reboot flag is raised in each of those branches. `/REBOOTOK`
+    /// raises it by itself ONLY when the pending-rename registration succeeds; when it fails, NSIS
+    /// sets the error flag and leaves the reboot flag down. A scheduled deletion with the flag
+    /// down is a deletion the user is never offered the restart for, and therefore never
+    /// completes — the mechanism silently reduced to nothing.
+    ///
+    /// «INSIDE ITS OWN FAILURE BRANCH» IS POSITIONAL AND SAYS SO. See `PreInstallGroup`: this
+    /// scan is flat, so what is measured is «strictly between this artifact's outcome report and
+    /// the next artifact's announcement», which brackets the branch tail without parsing the
+    /// conditional. Do not credit it with more.
+    #[test]
+    fn every_survived_artifact_is_scheduled_for_the_next_restart() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+        let groups = pre_install_groups(&body);
+
+        assert!(
+            !groups.is_empty(),
+            "CANNOT MEASURE: the pre-install hook announces ZERO artifacts, so this rule has no \
+             subject and can say nothing about deferred removals. Reporting PASS over an empty \
+             set is the vacuous shape this file refuses."
+        );
+
+        let deferred: Vec<(usize, String)> = body
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| is_deferred_removal(l))
+            .filter_map(|(i, l)| pre_install_subject(l).map(|s| (i, s)))
+            .collect();
+
+        // (1) COVERAGE, plus the reboot flag that makes a schedule reachable by the user.
+        let mut broken: Vec<String> = Vec::new();
+        for g in &groups {
+            if is_registry_subject(&g.subject) {
+                continue;
+            }
+            let Some(report) = g.report else {
+                broken.push(format!(
+                    "{}   <- announced with no outcome report of its own, so it has no failure \
+                     branch for a deferred removal to live in",
+                    g.subject
+                ));
+                continue;
+            };
+            let in_branch = |pred: &dyn Fn(&str) -> bool| {
+                (report + 1..g.next_announce).any(|k| pred(&body[k]))
+            };
+            if !in_branch(&|l: &str| {
+                is_deferred_removal(l) && pre_install_subject(l).as_deref() == Some(&g.subject)
+            }) {
+                broken.push(format!(
+                    "{}   <- survives its removal and is then ORPHANED. A handle can outlive the \
+                     process that opened it (the VPN core loads wintun.dll through LoadLibrary and \
+                     a driver can hold it past the core's exit), so terminating everything is not \
+                     enough: without `Delete /REBOOTOK` in this branch the file stays in the legacy \
+                     folder forever, beside the user's credential store, with nothing that will \
+                     ever try again.",
+                    g.subject
+                ));
+            }
+            if !in_branch(&|l: &str| l.starts_with("SetRebootFlag")) {
+                broken.push(format!(
+                    "{}   <- scheduled for the next restart with the reboot flag left down. \
+                     `/REBOOTOK` raises it only when the pending-rename registration succeeds, so \
+                     the flag is raised explicitly or the finish page never offers the restart — \
+                     and a deletion waiting for a restart nobody is offered never happens.",
+                    g.subject
+                ));
+            }
+        }
+        assert!(
+            broken.is_empty(),
+            "the pre-install hook leaves a survived artifact with no last resort:\n  {}",
+            broken.join("\n  ")
+        );
+
+        // (2) SCOPE — the assertion that keeps a boot-time, system-authority deletion inside the
+        //     list a human actually read.
+        let announced: Vec<&String> = groups.iter().map(|g| &g.subject).collect();
+        let strays: Vec<String> = deferred
+            .iter()
+            .filter(|(_, s)| !announced.iter().any(|a| *a == s))
+            .map(|(i, s)| format!("{s}   <- statement {i}: {}", body[*i]))
+            .collect();
+        assert!(
+            strays.is_empty(),
+            "the pre-install hook schedules a deletion of something it never announced. A \
+             deferred delete is executed at the next boot BY THE SESSION MANAGER, WITH SYSTEM \
+             AUTHORITY, outside any user session, and cannot be recalled between the install and \
+             the restart — so a target outside the nine artifacts read and approved on \
+             a real machine is a system-authority deletion no human ever reviewed:\n  {}",
+            strays.join("\n  ")
+        );
+
+        // (3) The registry artifact keeps none, because there is nothing for it to keep.
+        let registry_deferred: Vec<&(usize, String)> = deferred
+            .iter()
+            .filter(|(_, s)| is_registry_subject(s))
+            .collect();
+        assert!(
+            registry_deferred.is_empty(),
+            "a registry key is scheduled for deferred deletion. `DeleteRegKey` has no deferred \
+             form; the pending-rename list deletes FILES, so this schedules the removal of a file \
+             whose path is a registry key — a no-op at best: {registry_deferred:?}"
+        );
+    }
+
+    /// **The survivor marker is written only when something survived, and never carries anything
+    /// but an announced artifact's path.**
+    ///
+    /// WHY A FILE AT ALL. The removal report is honest and, since 32-FIX-07, on screen. It is
+    /// still ephemeral: it lives in a window that closes, it reaches no log, and it triggers no
+    /// retry. That is exactly how three surviving binaries reached the owner as a green install
+    /// (UAT gaps G-32-2 / G-32-2b). The marker is what makes the failure outlive the installer.
+    ///
+    /// ITS PRESENCE IS THE SIGNAL, WHICH IS THE WHOLE REASON IT MUST BE CONDITIONAL. A file
+    /// written on every install carries no information at all; the application reading it at first
+    /// launch (32-FIX-11) would have to parse it before it learned anything, and an empty one
+    /// would be indistinguishable from a failure to write. So the writes must sit inside failure
+    /// branches and nowhere else.
+    ///
+    /// WHAT IS ASSERTED, AND WHAT COULD NOT BE — stated rather than implied, because the weaker
+    /// property is easy to read as the stronger one:
+    ///   * ASSERTED: every marker write sits strictly between its own artifact's outcome report
+    ///     and the next artifact's announcement, and every announced FILE artifact has exactly one.
+    ///     That brackets the failure branch (see `PreInstallGroup`) without parsing the `${If}`.
+    ///   * NOT ASSERTED: that the write is lexically nested inside the conditional. This scan is
+    ///     flat and cannot see nesting. A statement placed between the report and the next
+    ///     announcement but outside the `${EndIf}` would satisfy this rule; nothing here would
+    ///     catch it.
+    ///   * COUNT: the marker writes are compared against the DEFERRED REMOVALS, not against the
+    ///     outcome reports. There are nine reports and eight file branches — the registry branch
+    ///     reports and legitimately writes no marker, because a registry key is not a path the
+    ///     application could act on. Comparing against the reports would build a permanent
+    ///     off-by-one into the rule and the usual repair for that is to delete the rule.
+    ///
+    /// AND A STALE MARKER IS NOT THE SAME AS NO MARKER. The file sits in the install directory and
+    /// survives an upgrade, so a run with no survivors must not leave the PREVIOUS install's list
+    /// behind for the application to read as fresh. That removal is asserted in
+    /// `NSIS_HOOK_POSTINSTALL`, guarded on the flag the write macro raises, and it is asserted to
+    /// be ABSENT from `NSIS_HOOK_PREINSTALL` — where it would be a tenth removal target in a macro
+    /// whose removal set is pinned equal to the nine artifacts the owner reviewed.
+    #[test]
+    fn the_survivor_marker_is_written_only_when_something_survived() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+        let groups = pre_install_groups(&body);
+
+        let writes: Vec<(usize, String)> = body
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with(MARKER_WRITE))
+            .filter_map(|(i, l)| pre_install_subject(l).map(|s| (i, s)))
+            .collect();
+
+        assert!(
+            !writes.is_empty(),
+            "CANNOT MEASURE: the pre-install hook writes the survivor marker NOWHERE (looked for \
+             `{MARKER_WRITE}`). Either the write was removed or its call-site spelling changed, so \
+             this rule has lost its subject — reporting PASS over an empty set is the vacuous \
+             shape this file refuses."
+        );
+
+        // (a) every write sits inside the failure branch of the artifact it names, and every file
+        //     artifact has one.
+        let mut broken: Vec<String> = Vec::new();
+        for g in &groups {
+            let file_artifact = !is_registry_subject(&g.subject);
+            let inside = g.report.is_some_and(|report| {
+                writes
+                    .iter()
+                    .any(|(i, s)| *i > report && *i < g.next_announce && s == &g.subject)
+            });
+            if file_artifact && !inside {
+                broken.push(format!(
+                    "{}   <- no marker write inside its failure branch. Either it survives without \
+                     leaving a trace the installer window's closing cannot erase, or the write was \
+                     moved OUT of the branch — and a marker written whether or not anything \
+                     survived is always present, which means it carries no information at all.",
+                    g.subject
+                ));
+            }
+            if !file_artifact && inside {
+                broken.push(format!(
+                    "{}   <- a registry key is written into the survivor marker. The marker is a \
+                     list of PATHS the application acts on; a registry key is not one.",
+                    g.subject
+                ));
+            }
+        }
+        assert!(
+            broken.is_empty(),
+            "the survivor marker does not describe exactly the artifacts that survived:\n  {}",
+            broken.join("\n  ")
+        );
+
+        // (b) COUNT — one write per deferred removal, so a write cannot be added anywhere else in
+        //     the macro without also being a scheduled removal, and vice versa.
+        let deferred = body.iter().filter(|l| is_deferred_removal(l)).count();
+        assert_eq!(
+            writes.len(),
+            deferred,
+            "the number of marker writes ({}) differs from the number of deferred removals ({}). \
+             They are the same event seen twice — an artifact that survived — so a difference means \
+             either a survivor is scheduled without being recorded, or something is recorded that \
+             was never scheduled.",
+            writes.len(),
+            deferred
+        );
+
+        // (c) the stale-marker removal is NOT in the pre-install macro, and it is not an oversight
+        //     that it is not. See the doc comment above.
+        let stray_removal: Vec<&String> = body
+            .iter()
+            .filter(|l| l.starts_with("Delete") && l.contains(MARKER_PATH_REF))
+            .collect();
+        assert!(
+            stray_removal.is_empty(),
+            "the pre-install hook removes the survivor marker. That is a TENTH removal target in a \
+             macro whose removal set is asserted equal to the NINE artifacts the owner read on his \
+             own machine and approved — the arm that enforces it goes red the moment this line \
+             exists. The stale-marker removal belongs in NSIS_HOOK_POSTINSTALL, guarded on \
+             `{MARKER_SEEN_FLAG}`: {stray_removal:?}"
+        );
+
+        // (d) and it IS in the post-install macro, guarded, so a marker from an earlier install
+        //     cannot be read as this one's.
+        let post = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_POSTINSTALL");
+        let guard = post
+            .iter()
+            .position(|l| l.starts_with("StrCmp") && l.contains(MARKER_SEEN_FLAG));
+        let removal = post
+            .iter()
+            .position(|l| l.starts_with("Delete") && l.contains(MARKER_PATH_REF));
+        match (guard, removal) {
+            (Some(g), Some(r)) => assert!(
+                g < r,
+                "the post-install hook removes the survivor marker BEFORE it checks whether this \
+                 install wrote it (guard at statement {g}, removal at statement {r}), so the file \
+                 the pre-install hook just wrote is deleted before anything can read it."
+            ),
+            _ => panic!(
+                "the post-install hook does not remove a stale survivor marker under the \
+                 `{MARKER_SEEN_FLAG}` guard (guard: {guard:?}, removal: {removal:?}). The marker \
+                 lives in the install directory and survives an upgrade, so without this a machine \
+                 whose PREVIOUS install had a survivor hands the next install that old list, and \
+                 the application reports artifacts that went long ago as fresh failures."
+            ),
+        }
+
+        // (e) the write macro still TRUNCATES on the first survivor of a run.
+        //
+        //     ADDED AFTER A MUTATION THAT SHOULD HAVE GONE RED AND DID NOT. The stale-marker
+        //     removal in POSTINSTALL only covers the run that wrote NOTHING; the run that DID
+        //     write relies entirely on the first write truncating, or it appends to the previous
+        //     install's list and the file describes two machines at once. Deleting the flag logic
+        //     out of `TT_MARK_SURVIVOR` broke exactly that and every arm here stayed green,
+        //     because no rule read inside a macro that is not a hook. It does now.
+        //
+        //     `hook_macro_statements` cannot be reused: it matches the opener EXACTLY and this
+        //     macro takes a parameter, so it would report CANNOT MEASURE on a macro that is
+        //     plainly there.
+        let mark_macro: Vec<&str> = {
+            let mut inside = false;
+            let mut out = Vec::new();
+            for raw in HOOK_NSH.lines() {
+                let l = raw.trim();
+                if !inside && l.starts_with("!macro TT_MARK_SURVIVOR") {
+                    inside = true;
+                    continue;
+                }
+                if inside && l == "!macroend" {
+                    break;
+                }
+                if inside && !l.is_empty() && !l.starts_with(';') {
+                    out.push(l);
+                }
+            }
+            out
+        };
+        assert!(
+            !mark_macro.is_empty(),
+            "CANNOT MEASURE: `!macro TT_MARK_SURVIVOR` has no body in installer-hooks.nsh, so this \
+             rule cannot say anything about how the marker is written."
+        );
+        for (needle, why) in [
+            (
+                "\" w",
+                "the FIRST survivor of a run must open the marker in truncating mode, or this \
+                 install appends to the PREVIOUS install's list and the file describes two \
+                 machines at once — which the application would read as one",
+            ),
+            (
+                "\" a",
+                "the survivors after the first must APPEND, or each one overwrites the last and \
+                 the marker names a single artifact however many survived",
+            ),
+            (
+                "StrCpy $TT_LEGACY_SURVIVOR_SEEN",
+                "the write must RAISE the flag, or NSIS_HOOK_POSTINSTALL deletes the marker this \
+                 run just wrote, believing it belongs to an earlier install",
+            ),
+            (
+                "StrCmp $TT_LEGACY_SURVIVOR_SEEN",
+                "the write must READ the flag, or it cannot tell the first survivor of a run from \
+                 the rest and one of the two modes above is unreachable",
+            ),
+        ] {
+            assert!(
+                mark_macro.iter().any(|l| l.contains(needle)),
+                "`TT_MARK_SURVIVOR` no longer contains `{needle}`: {why}.\n  body: {mark_macro:?}"
+            );
+        }
+
+        // (f) the marker's own filename is not something the user owns, and its path is composed
+        //     on the install directory rather than on a profile-relative root.
+        let basename_define = HOOK_NSH
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with("!define TT_LEGACY_SURVIVOR_MARKER_BASENAME "))
+            .and_then(|l| l.split('"').nth(1).map(str::to_string));
+        let Some(basename) = basename_define else {
+            panic!(
+                "CANNOT MEASURE: installer-hooks.nsh carries no \
+                 `!define TT_LEGACY_SURVIVOR_MARKER_BASENAME` — the marker's filename is not in one \
+                 place, so nothing here can say what the installer writes."
+            );
+        };
+        assert!(
+            !basename.contains('\\') && !basename.contains('/'),
+            "the survivor marker's basename carries a path separator ({basename}), so the define \
+             below it composes a path this rule cannot reason about"
+        );
+        assert!(
+            !USER_DATA.iter().any(|n| n.eq_ignore_ascii_case(&basename)),
+            "the survivor marker is named after a file the USER owns ({basename}). The uninstaller \
+             removes the marker as install state, so this would delete the user's own file during \
+             what they experience as an update."
+        );
+
+        let defines: Vec<&str> = HOOK_NSH
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("!define TT_"))
+            .collect();
+        assert!(
+            defines
+                .iter()
+                .any(|l| l.starts_with("!define TT_LEGACY_SURVIVOR_MARKER ")
+                    && l.contains("${TT_INSTALL_DIR}")),
+            "the survivor marker's path is not composed on ${{TT_INSTALL_DIR}}. It has to be: under \
+             perMachine a profile-relative root resolves to the ELEVATING administrator's profile, \
+             which under UAC need not be the person installing (D-08), and the application looking \
+             for this file is in the install directory.\n  defines: {defines:?}"
+        );
+        assert!(
+            !defines.iter().any(|l| l.contains("$LOCALAPPDATA")),
+            "a define in this block names the local-profile variable. Under perMachine it resolves \
+             to %ProgramData% — a folder nothing here writes — so the composed path would point \
+             somewhere the installer never puts anything and the failure would be silent:\n  {}",
+            defines
+                .iter()
+                .filter(|l| l.contains("$LOCALAPPDATA"))
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+    }
+
+    /// **The pre-install hook closes the application before it removes anything.**
+    ///
+    /// THIS DEFECT WAS PREDICTED IN WRITING, ON THIS VERY FILE, AND DOWNGRADED TO A LOG LINE.
+    /// The doc comment of `every_artifact_the_pre_install_hook_removes_reports_what_actually_happened`
+    /// — thirty lines above — says outright that NSIS `Delete` on a file another process holds
+    /// open «fails silently», that `trusttunnel.exe` and `trusttunnel_client.exe` are «exactly
+    /// the sort of thing that is running when somebody reinstalls», and that this is «the
+    /// realistic case and not the exotic one». The measure chosen was to REPORT the failure
+    /// rather than to PREVENT it, and the report went into the installer's details pane, which
+    /// is collapsed by default. On a real Windows install three binaries survived a real install
+    /// and the three failure lines that said so were never on screen (UAT gaps G-32-2 /
+    /// G-32-2b). Reporting is not a substitute for ordering, and this arm is the ordering.
+    ///
+    /// WHAT IT MEASURES: inside `NSIS_HOOK_PREINSTALL`, every termination step must precede the
+    /// first removal. A termination step is the inserted macro (`!insertmacro
+    /// CheckIfAppIsRunning`) or the plugin's process-finding entry point
+    /// (`nsis_tauri_utils::FindProcess`) — matched on the statement's LEADING TOKENS, so the
+    /// same words appearing inside a quoted string a `DetailPrint` hands the user cannot satisfy
+    /// the rule.
+    ///
+    /// WHAT IT DELIBERATELY DOES NOT COVER, and it is the larger half of the defect. This reads
+    /// the SOURCE hook. Where that hook's expansion sits relative to the TEMPLATE's own
+    /// `CheckIfAppIsRunning` — `installer.nsi:614` against `:617` — is a cross-file fact about
+    /// the GENERATED script, which is build output, is not git-tracked, and is therefore
+    /// unreachable from `include_str!`. That fact is what actually put three binaries on the
+    /// a real disk, and it is measured by `scripts/nsis-text-gate.cjs` rule 10 instead. Neither
+    /// half is sufficient alone; do not credit this arm with the other one's property.
+    #[test]
+    fn the_pre_install_hook_closes_the_app_before_it_removes_anything() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_PREINSTALL");
+
+        let is_termination = |l: &str| {
+            let mut tokens = l.split_whitespace();
+            match (tokens.next(), tokens.next()) {
+                (Some("!insertmacro"), Some("CheckIfAppIsRunning")) => true,
+                (Some("nsis_tauri_utils::FindProcess"), _) => true,
+                _ => false,
+            }
+        };
+
+        let first_removal = body
+            .iter()
+            .position(|l| l.split_whitespace().next() == Some("Delete"));
+        let first_termination = body.iter().position(|l| is_termination(l.as_str()));
+
+        // Checked BEFORE the termination arm, and the order matters: a macro with nothing to
+        // remove says nothing about whether removal is safely ordered, so its verdict must be
+        // «cannot measure» rather than either a pass or an ordering failure.
+        let Some(removal) = first_removal else {
+            panic!(
+                "CANNOT MEASURE: `NSIS_HOOK_PREINSTALL` contains no `Delete` statement at all. \
+                 The enumeration is the whole point of the macro, so zero removals means this \
+                 rule lost its subject — reporting PASS here would be a green tick over nothing."
+            );
+        };
+
+        let Some(termination) = first_termination else {
+            panic!(
+                "the pre-install hook TERMINATES NOTHING: neither `!insertmacro \
+                 CheckIfAppIsRunning` nor `nsis_tauri_utils::FindProcess` appears in the macro, \
+                 while statement {removal} removes a file. `Delete` on an image a live process \
+                 has mapped fails SILENTLY, so that removal is a no-op nothing can notice:\n  \
+                 removal: {}",
+                body[removal]
+            );
+        };
+
+        assert!(
+            termination < removal,
+            "the pre-install hook removes before it closes the application. First termination \
+             step: statement {termination}. First `Delete`: statement {removal}. NSIS `Delete` \
+             on a mapped image fails SILENTLY — this exact ordering left trusttunnel.exe, \
+             trusttunnel_client.exe and wintun.dll on a real disk after a real install \
+             (G-32-2), next to the credential store.\n  termination [{termination}]: {}\n  \
+             removal     [{removal}]: {}",
+            body[termination],
+            body[removal]
+        );
+    }
+
+    /// `lib.rs` must not forbid, in a comment, the mechanism it wires up twenty lines lower.
+    ///
+    /// WHY THIS IS A TEST AND NOT A NOTE. This is the same defect class the phase's design mirror
+    /// already failed on once — a document describing a mechanism that does not exist — except
+    /// this instance sits in the SOURCE, directly above the call it contradicts, on the migration
+    /// path whose failure mode is data loss. A reader following this project's own commenting rule
+    /// («comments explain why, and are to be trusted») would conclude `data_adoption` is the
+    /// forbidden thing and delete it.
+    ///
+    /// IT LIVES IN `lifecycle.rs`, NOT IN `lib.rs`, AND THAT IS LOAD-BEARING. The banned sentences
+    /// have to be written out somewhere for the assertion to name them; written inside `lib.rs`
+    /// they would be part of the very text `include_str!` reads, so the test would fail on its own
+    /// wording forever — a rule that invalidates itself. This module already owns the compiled
+    /// `.nsh`↔Rust contracts, so a cross-file source contract is at home here.
+    ///
+    /// `include_str!` binds `lib.rs` at COMPILE time: editing that file alone cannot leave this
+    /// green.
+    #[test]
+    fn the_startup_comment_does_not_forbid_the_adoption_the_same_file_wires_up() {
+        const LIB_RS: &str = include_str!("lib.rs");
+
+        // THE PREMISE, READ OFF THE FILE RATHER THAN ASSUMED. The prohibition would be perfectly
+        // correct again if the adoption were removed, so this rule may only be asserted while the
+        // wiring is actually there. Losing the premise is a FAILURE — «re-derive it», never «pass
+        // quietly».
+        assert!(
+            LIB_RS.contains("data_adoption::run_first_launch_adoption()"),
+            "lib.rs no longer runs the first-launch adoption, so this contract has lost its \
+             subject and can no longer measure anything. Re-derive it against what the file now \
+             does; do not delete it and do not flip its strings to keep it green."
+        );
+
+        // Each fragment is one line of the superseded comment, quoted exactly.
+        const SUPERSEDED: &[&str] = &[
+            "THERE IS NO DATA MIGRATION HERE",
+            "to adopt FROM",
+            "Do not reintroduce an adoption pass",
+        ];
+        let surviving: Vec<&str> = SUPERSEDED
+            .iter()
+            .copied()
+            .filter(|needle| LIB_RS.contains(needle))
+            .collect();
+        assert!(
+            surviving.is_empty(),
+            "lib.rs still forbids the adoption pass it wires up. Phase 32 performed the root move \
+             the prohibition was conditional on and reintroduced the adoption it serves, so these \
+             fragments now describe a rule the file breaks itself:\n  {}",
+            surviving.join("\n  ")
+        );
     }
 
     #[test]
@@ -1576,6 +4505,205 @@ mod tests {
         };
         assert!(should_failover(reason, true, 1));
     }
+
+    // ── The logon task the app registers is the logon task the uninstaller removes ────────
+    //
+    // Phase 32-05 gave «Запуск вместе с Windows» a logon Scheduled Task registered with
+    // TASK_RUNLEVEL_HIGHEST. Nothing in the uninstaller removed it, because until that plan
+    // there was no task to remove — so uninstalling left a HIGHEST-PRIVILEGES logon
+    // registration pointing at an executable that had just been deleted. That is an orphaned
+    // elevated-run entry aimed at a path in a directory whose ACL the uninstall may leave
+    // writable, i.e. the mirror image of the elevation hazard this whole phase closes. Plan
+    // 32-05 handed the teardown to this plan by name; these two arms are what make the handoff
+    // machine-checked instead of remembered.
+
+    /// **The uninstaller deletes the task by the name the application registers.**
+    ///
+    /// A mismatch here is SILENT, and that is the whole reason this is compiled rather than
+    /// reviewed. A teardown naming a task that does not exist finds nothing and reports nothing
+    /// — which is indistinguishable, in every log and on every screen, from a teardown that had
+    /// nothing to do. The registration would simply survive, and the first person to notice
+    /// would be whoever eventually investigated why a deleted program still ran something at
+    /// logon.
+    ///
+    /// The expected string is COMPOSED from `task_scheduler::AUTOSTART_TASK_NAME`, never
+    /// retyped. A hand-typed literal would make this test agree with itself instead of with the
+    /// application — the same mechanism, and the same argument, as
+    /// `the_uninstall_hook_reads_the_pid_file_the_app_writes` above, whose subject is the pid
+    /// path. `include_str!` binds it at COMPILE time, so editing the `.nsh` alone cannot leave
+    /// it green.
+    #[cfg(windows)]
+    #[test]
+    fn the_uninstaller_removes_the_logon_task_the_app_registers() {
+        let body = hook_macro_statements(HOOK_NSH, "NSIS_HOOK_POSTUNINSTALL");
+
+        // ARM 1 — a teardown exists AT ALL. Without this, the arms below would be vacuously
+        // true (they assert about the lines they find, and they would find none), which is the
+        // failure mode every contract test in this file is written against.
+        let teardown: Vec<&String> = body
+            .iter()
+            .filter(|l| l.contains("schtasks") && l.contains("/Delete"))
+            .collect();
+        assert!(
+            !teardown.is_empty(),
+            "NSIS_HOOK_POSTUNINSTALL contains no scheduled-task teardown. Uninstalling then \
+             leaves highest-privileges logon tasks under `{}` registered against an executable \
+             the uninstaller has just deleted.",
+            crate::task_scheduler::AUTOSTART_TASK_FOLDER
+        );
+
+        let shown = || {
+            teardown
+                .iter()
+                .map(|l| l.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        };
+
+        // ARM 2 — it sweeps the FOLDER, so EVERY user's registration goes.
+        //
+        // The registration is per-user now (two people on one per-machine install must not
+        // overwrite each other's choice), so there is no single name for the teardown to
+        // spell. It deletes the folder's contents with one wildcard instead. Note that a
+        // wildcard reaches exactly one level, which is why
+        // `task_scheduler::every_registration_lives_where_the_uninstaller_sweeps` asserts the
+        // registration never nests below it — the two arms are one contract from two ends, and
+        // neither alone is enough.
+        let sweep = format!(
+            "/TN \"{}\\*\"",
+            crate::task_scheduler::AUTOSTART_TASK_FOLDER
+        );
+        assert!(
+            teardown.iter().any(|l| l.contains(&sweep)),
+            "the teardown does not sweep the per-user task folder. Expected a statement \
+             containing {sweep}, found:\n  {}",
+            shown()
+        );
+
+        // ARM 3 — and it still removes the ONE global task the pre-remediation builds wrote.
+        //
+        // Those builds registered a single machine-wide task in the scheduler's root. A machine
+        // that carries one has it OUTSIDE the folder swept above, so dropping this line would
+        // leave precisely the orphan this hook exists to prevent: a highest-privileges logon
+        // task pointing at a deleted executable, on exactly the machines that tested the
+        // feature before it was fixed.
+        let legacy = format!(
+            "/TN \"{}\"",
+            crate::task_scheduler::LEGACY_AUTOSTART_TASK_NAME
+        );
+        assert!(
+            teardown.iter().any(|l| l.contains(&legacy)),
+            "the teardown does not remove the legacy global task. Expected a statement \
+             containing {legacy}, found:\n  {}",
+            shown()
+        );
+    }
+
+    /// **No uninstall macro reads or branches on an external tool's output.**
+    ///
+    /// The project prohibition is on PARSING console output, and the reason is specific to this
+    /// platform: the console code page is not the process code page, Windows localizes tool
+    /// output, and a parser built against one machine's language silently mis-reads another's.
+    /// A DELETION needs none of that — it either happened or the task was already absent, and
+    /// «absent is a valid requested state» is settled practice in this codebase.
+    ///
+    /// So the rule is about the SHAPE of the call, not about which tool is called.
+    /// `nsExec::ExecToStack` is the one NSIS form that CAPTURES the output, and a `Pop` after an
+    /// exec is how a return code becomes a branch. Both are refused here. Written as its own arm
+    /// because the teardown above is the first statement in these macros that had any temptation
+    /// to check whether it worked.
+    ///
+    /// Its sibling `no_child_process_output_reaches_the_details_window` forbids the LOGGING form
+    /// as well, over the whole file rather than these two macros — that one is about what the
+    /// person watching the uninstall reads, not about what the script branches on.
+    #[test]
+    fn the_uninstall_macros_never_branch_on_a_tool_s_output() {
+        for macro_name in ["NSIS_HOOK_PREUNINSTALL", "NSIS_HOOK_POSTUNINSTALL"] {
+            let body = hook_macro_statements(HOOK_NSH, macro_name);
+            for (i, l) in body.iter().enumerate() {
+                assert!(
+                    !l.contains("nsExec::ExecToStack") && !l.contains("ExecToStack"),
+                    "{macro_name} captures a tool's output: {l}\n      Console output is \
+                     localized and code-page-dependent on this platform — nothing here may read \
+                     it. Use plain nsExec::Exec and ignore the result."
+                );
+                let follows_exec = i > 0
+                    && (body[i - 1].contains("nsExec::") || body[i - 1].starts_with("Exec"));
+                assert!(
+                    !(follows_exec && l.starts_with("Pop ")),
+                    "{macro_name} pops a value left by an external call: {l}\n      That is a \
+                     branch on a tool's result, which this project does not do on Windows."
+                );
+            }
+        }
+    }
+
+    /// **No child process's console output reaches the details window.** G-32-4, compiled.
+    ///
+    /// WHAT WAS OBSERVED, on 2026-09-07, during a real uninstall: between the localised
+    /// autostart-task line and «Removing temporary update files…» the progress list printed two
+    /// identical lines of unreadable characters. That was not our text. It was `schtasks.exe`
+    /// saying, in its own words, that the task it was told to delete does not exist — which on
+    /// that machine is TRUE and HARMLESS.
+    ///
+    /// THE MECHANISM, and it is not specific to `schtasks`. The logging variant of `nsExec::Exec`
+    /// copies the child process's console bytes straight into the details window. A console on
+    /// Russian Windows writes OEM code page 866; the details window renders ANSI code page 1251.
+    /// Same bytes, different alphabet. So EVERY such call has this defect on every non-English
+    /// Windows, whatever tool it runs — which is why this rule scans the whole file rather than
+    /// the two `schtasks` lines that were reported.
+    ///
+    /// WHAT REPLACED IT: plain `nsExec::Exec`, whose output goes nowhere, plus a line of OURS
+    /// through a `LangString`. We control our own strings; we do not control Microsoft's, and
+    /// translating a foreign tool's message or converting code pages inside NSIS would both be
+    /// attempts to.
+    #[test]
+    fn no_child_process_output_reaches_the_details_window() {
+        // THE LOGGING FORM, OVER THE RAW FILE — COMMENTS INCLUDED. It has no remaining use here
+        // and no rule needs to name it, so the honest state of this file is that the token is
+        // simply gone. A comment recommending it is how the next reader brings it back; this
+        // file's own history is the evidence, since the comment above the schtasks calls
+        // recommended it right up until its output was read off a real screen.
+        let logging_form: Vec<&str> = HOOK_NSH
+            .lines()
+            .filter(|l| l.contains("ExecToLog"))
+            .map(str::trim)
+            .collect();
+        assert!(
+            logging_form.is_empty(),
+            "installer-hooks.nsh still names `ExecToLog`, which pipes the child's console bytes \
+             into the details window — code page 866 rendered as 1251, i.e. the mojibake the \
+             owner reported (G-32-4). Use plain `nsExec::Exec` and print a LangString of ours \
+             for the outcome.\n  {}",
+            logging_form.join("\n  ")
+        );
+
+        // THE CAPTURING FORM, OVER STATEMENTS ONLY — and the asymmetry is deliberate rather than
+        // sloppy. `ExecToStack` still has a live prohibition that this file must be able to
+        // EXPLAIN, so a comment naming it is the documentation of a decision, not a temptation.
+        // Scanned over the whole file rather than over two macros, which is wider than
+        // `the_uninstall_macros_never_branch_on_a_tool_s_output` reaches.
+        let capturing_form: Vec<&str> = HOOK_NSH
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with(';') && l.contains("ExecToStack"))
+            .collect();
+        assert!(
+            capturing_form.is_empty(),
+            "installer-hooks.nsh captures a tool's output: console text on this platform is \
+             localized and code-page dependent, so nothing here may read it.\n  {}",
+            capturing_form.join("\n  ")
+        );
+
+        // The rule must be measuring something. A file with no external invocation at all would
+        // satisfy the arms above vacuously — and the hook does invoke tools, so a zero here would
+        // mean the scan lost its subject rather than that the file is clean.
+        assert!(
+            HOOK_NSH.contains("nsExec::Exec '"),
+            "CANNOT MEASURE: installer-hooks.nsh contains no `nsExec::Exec` call at all, so the \
+             absence of the logging form says nothing about how this file runs tools"
+        );
+    }
 }
 
 // ─── FIX-B (RC-1): false-tunnel-loss hardening ─────────────────────────────
@@ -1848,5 +4976,256 @@ mod probe_miss_tests {
         // holds for any over-threshold count, so a real drop can never be re-classified transient.
         assert!(!probe_miss_is_transient(MAX + 1, MAX, true));
         assert!(!probe_miss_is_transient(u32::MAX, MAX, true));
+    }
+}
+
+// ─── 32-FIX-15: the note the application leaves about WHERE its data is ──────────────────────
+//
+// RED FIRST, and the order matters. Every test in this module was written and seen fail before
+// `DATA_ROOT_RECORD_BASENAME`, `DataRootRecordOutcome` and `write_data_root_record` existed at
+// all — one test per line of the plan's behaviour block, so no failure branch of the writer got
+// its test written after the branch it was supposed to justify.
+#[cfg(test)]
+mod data_root_record_tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SANDBOX_SEQ: AtomicU32 = AtomicU32::new(0);
+
+    /// A fresh, empty directory under the OS temp dir, standing in for the folder the binaries
+    /// live in.
+    ///
+    /// Deliberately NOT reached through `ssh::user_data_dir()`, for the reason `legacy_sweep`'s
+    /// own sandbox states: the real answer names the folder holding the saved configs and
+    /// plaintext credential store, and a test that can see real data is a test that can eat it.
+    fn sandbox(tag: &str) -> PathBuf {
+        let n = SANDBOX_SEQ.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "tt-record-{}-{}-{}-{}",
+            std::process::id(),
+            tag,
+            n,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("sandbox");
+        p
+    }
+
+    /// A plausible production data root, spelled here rather than resolved, so the ordinary-case
+    /// tests do not depend on whatever profile the test host happens to have.
+    fn a_data_root() -> PathBuf {
+        PathBuf::from("C:\\Users\\somebody\\AppData\\Local\\TrustTunnel Client Pro")
+    }
+
+    #[test]
+    fn the_record_is_the_data_root_on_one_line() {
+        let exe_dir = sandbox("one-line");
+        let root = a_data_root();
+
+        assert_eq!(
+            write_data_root_record(&root, Some(&exe_dir)),
+            DataRootRecordOutcome::Written,
+        );
+
+        let body = std::fs::read_to_string(exe_dir.join(DATA_ROOT_RECORD_BASENAME))
+            .expect("the record must be in the executable's own directory");
+        assert_eq!(
+            body,
+            root.to_string_lossy(),
+            "the record's content must be the data root and nothing else - the uninstaller reads \
+             this byte for byte and hands the result to a path validator",
+        );
+        assert_eq!(body.lines().count(), 1, "the record is ONE line: {body}");
+    }
+
+    #[test]
+    fn no_executable_directory_writes_nothing_and_says_so() {
+        // 32-FIX-08's rule, one file over: a failure to resolve the executable means writing
+        // NOTHING rather than writing somewhere useless. The uninstaller reads this file at
+        // `$INSTDIR`; a copy anywhere else is unread litter written by an elevated process.
+        assert_eq!(
+            write_data_root_record(&a_data_root(), None),
+            DataRootRecordOutcome::NoExecutableDirectory,
+        );
+    }
+
+    #[test]
+    fn a_directory_that_is_not_absolute_is_refused_rather_than_resolved_against_the_cwd() {
+        // A relative destination is composed against the process WORKING directory, which is
+        // chosen by whoever launched the process - and the launcher that matters is the logon
+        // scheduled task, whose working directory is %WINDIR%\System32. Same argument
+        // `sidecar_pid_dir` makes for declining rather than substituting (G-32-2e).
+        let root = a_data_root();
+        for relative in [Path::new("."), Path::new(""), Path::new("subdir")] {
+            assert_eq!(
+                write_data_root_record(&root, Some(relative)),
+                DataRootRecordOutcome::NoExecutableDirectory,
+                "a relative executable directory ({relative:?}) must be refused",
+            );
+        }
+        assert!(
+            !Path::new(DATA_ROOT_RECORD_BASENAME).exists(),
+            "a record was written into the process working directory",
+        );
+    }
+
+    #[test]
+    fn a_data_root_that_is_not_absolute_writes_nothing() {
+        let exe_dir = sandbox("relative-root");
+        assert_eq!(
+            write_data_root_record(Path::new("TrustTunnel Client Pro"), Some(&exe_dir)),
+            DataRootRecordOutcome::NotAbsolute,
+        );
+        assert!(
+            !exe_dir.join(DATA_ROOT_RECORD_BASENAME).exists(),
+            "a relative data root must leave no record at all: the uninstaller's ladder would \
+             refuse it anyway, and a file that only ever produces a refusal is worse than no file",
+        );
+    }
+
+    #[test]
+    fn an_unwritable_destination_is_reported_and_the_caller_carries_on() {
+        // A directory occupying the record's own name is the cheapest real write failure, and it
+        // is the one `legacy_sweep`'s marker tests already use.
+        let exe_dir = sandbox("unwritable");
+        std::fs::create_dir_all(exe_dir.join(DATA_ROOT_RECORD_BASENAME))
+            .expect("a directory standing in the record's place");
+
+        match write_data_root_record(&a_data_root(), Some(&exe_dir)) {
+            DataRootRecordOutcome::Failed(reason) => {
+                assert!(
+                    !reason.contains('\\') && !reason.contains('/'),
+                    "the failure reason carried a path, and such a path names a profile folder: \
+                     {reason}",
+                );
+            }
+            other => panic!("an unwritable destination must be REPORTED, not swallowed: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn writing_twice_truncates_and_never_appends() {
+        let exe_dir = sandbox("twice");
+        let root = a_data_root();
+
+        assert_eq!(write_data_root_record(&root, Some(&exe_dir)), DataRootRecordOutcome::Written);
+        let first = std::fs::read_to_string(exe_dir.join(DATA_ROOT_RECORD_BASENAME)).expect("first");
+        assert_eq!(write_data_root_record(&root, Some(&exe_dir)), DataRootRecordOutcome::Written);
+        let second =
+            std::fs::read_to_string(exe_dir.join(DATA_ROOT_RECORD_BASENAME)).expect("second");
+        assert_eq!(first, second, "the same input twice must leave identical content");
+
+        // And the shrinking case, which is the one an append would survive: a SHORTER root after a
+        // longer one must leave no tail of the longer one behind. A record carrying two paths
+        // spliced together is a record the uninstaller's ladder refuses - silently costing the
+        // user the erasure they ticked a box for.
+        let shorter = PathBuf::from("C:\\tt\\TrustTunnel Client Pro");
+        assert_eq!(
+            write_data_root_record(&shorter, Some(&exe_dir)),
+            DataRootRecordOutcome::Written,
+        );
+        let third = std::fs::read_to_string(exe_dir.join(DATA_ROOT_RECORD_BASENAME)).expect("third");
+        assert_eq!(third, shorter.to_string_lossy());
+    }
+
+    #[test]
+    fn the_recorded_path_ends_with_the_product_data_folder() {
+        // Asserted against `ssh::PRODUCT_DATA_FOLDER` rather than a retyped literal, because this
+        // is the property the uninstaller's rung with teeth depends on: a record that does not end
+        // with the product folder is refused rather than obeyed. If the production rule ever stops
+        // composing the root that way, this goes red HERE - before the uninstaller starts refusing
+        // every machine in the field.
+        let (production_root, _origin) = crate::ssh::resolve_data_root(None)
+            .expect("a Windows test host always has an absolute local-app-data location");
+        assert!(
+            production_root.ends_with(crate::ssh::PRODUCT_DATA_FOLDER),
+            "the production data root no longer ends with the product folder name: {}",
+            production_root.display(),
+        );
+
+        let exe_dir = sandbox("product-folder");
+        assert_eq!(
+            write_data_root_record(&production_root, Some(&exe_dir)),
+            DataRootRecordOutcome::Written,
+        );
+        let body = std::fs::read_to_string(exe_dir.join(DATA_ROOT_RECORD_BASENAME)).expect("record");
+        assert!(
+            body.ends_with(crate::ssh::PRODUCT_DATA_FOLDER),
+            "the recorded path must end with '{}', which is what the uninstaller matches on: {body}",
+            crate::ssh::PRODUCT_DATA_FOLDER,
+        );
+    }
+
+    /// **The uninstaller reads the record the app writes.**
+    ///
+    /// The same two-ended pin the pid path and the survivor marker already carry, and for the same
+    /// recorded reason: the pid path's two ends drifted once (D-07), the kill became a silent
+    /// no-op, and nothing was watching for months. Here the stake is larger - the file this pins
+    /// is what a later plan hands to a recursive delete, so a drift does not merely lose a
+    /// function, it aims one.
+    ///
+    /// `include_str!` binds the hook at COMPILE time: editing the `.nsh` alone cannot leave this
+    /// green, because changing that file rebuilds this test binary.
+    #[test]
+    fn the_uninstall_hook_reads_the_data_root_record_the_app_writes() {
+        const HOOK_NSH: &str = include_str!("../nsis/installer-hooks.nsh");
+
+        // (1) The basename is COMPOSED from the Rust constant, never retyped here. A literal would
+        //     make this test agree with itself rather than with the application.
+        let want = format!("!define TT_DATA_ROOT_RECORD_BASENAME \"{DATA_ROOT_RECORD_BASENAME}\"");
+        assert!(
+            HOOK_NSH.contains(&want),
+            "the uninstall hook does not define the record basename this application writes. Rust \
+             writes '{DATA_ROOT_RECORD_BASENAME}'; the expected line is:\n  {want}",
+        );
+
+        // (2) ...and it is rooted at the INSTALL directory, which is where Rust puts it: the
+        //     executable's own folder. `$INSTDIR` is the one root the uninstaller resolves
+        //     correctly whichever administrator UAC elevated it to - a profile-relative root would
+        //     name the ELEVATING account's folder and find nothing.
+        assert!(
+            HOOK_NSH.contains(
+                "!define TT_DATA_ROOT_RECORD \"${TT_INSTALL_DIR}\\${TT_DATA_ROOT_RECORD_BASENAME}\""
+            ),
+            "the record is not composed on the install directory. The application writes it beside \
+             its own binaries; anywhere else and the uninstaller reads nothing.",
+        );
+
+        // (3) Rust's end of the agreement: the record's directory really is the executable's own
+        //     directory. Without this the first two assertions would keep passing while the writer
+        //     moved the file somewhere the hook cannot name.
+        let install = std::path::Path::new("C:\\Program Files\\TrustTunnel Client Pro");
+        assert_eq!(
+            crate::commands::vpn::sidecar_pid_dir(Some(install.join("trusttunnel.exe"))).as_deref(),
+            Some(install),
+            "the record follows the binaries, else $INSTDIR is the wrong spelling of its folder",
+        );
+    }
+
+    /// **The product folder the uninstaller matches on is the one Rust composes the root from.**
+    ///
+    /// The uninstaller's rung with teeth requires the recorded path to end with `${PRODUCTNAME}`.
+    /// That define comes from `tauri.conf.json`'s `productName` (emitted script :33), while the
+    /// root Rust composes ends with `ssh::PRODUCT_DATA_FOLDER`. Nothing kept those two strings in
+    /// step, and `ssh/mod.rs` says in prose that they must be - so this is that prose made
+    /// checkable. Drift them and the rung refuses every record on every machine, which presents to
+    /// a user as «the erase checkbox silently does nothing».
+    #[test]
+    fn the_product_folder_the_uninstaller_matches_is_the_one_rust_composes() {
+        const TAURI_CONF: &str = include_str!("../tauri.conf.json");
+
+        let want = format!("\"productName\": \"{}\"", crate::ssh::PRODUCT_DATA_FOLDER);
+        assert!(
+            TAURI_CONF.contains(&want),
+            "`tauri.conf.json`'s productName is not `ssh::PRODUCT_DATA_FOLDER`. The installer's \
+             ${{PRODUCTNAME}} is derived from productName and the uninstaller's ladder matches the \
+             recorded path against it, so a difference of one character makes every record fail \
+             that rung. Expected the file to contain:\n  {want}",
+        );
     }
 }

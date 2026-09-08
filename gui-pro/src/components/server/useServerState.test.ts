@@ -159,12 +159,18 @@ describe("useServerState", () => {
     expect(result.current.error).toBe("");
   });
 
-  it("a genuine PERSISTENT failure surfaces the error after the R-6 retries are exhausted", async () => {
+  // G-32-12 amended this test. It used to throw SSH_AUTH_FAILED and assert the probe
+  // burned all three attempts on it — i.e. it PINNED the defect: three authentication
+  // attempts per panel load against a server whose fail2ban this app installs. The
+  // budget-exhaustion path it was really about is unchanged and is now exercised with a
+  // genuinely persistent TRANSPORT failure; the auth case moved to the G-32-12 suite
+  // below, where it asserts exactly one attempt.
+  it("a genuine PERSISTENT transport failure surfaces the error after the R-6 retries are exhausted", async () => {
     let calls = 0;
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "check_server_installation") {
         calls += 1;
-        throw "SSH_AUTH_FAILED|10.0.0.1"; // fails on every attempt
+        throw "SSH_TIMEOUT|10.0.0.1"; // fails on every attempt
       }
       if (cmd === "server_get_available_versions") return [];
       return null;
@@ -203,6 +209,244 @@ describe("useServerState", () => {
     expect(result.current.error).toBeTruthy();
     expect(result.current.serverInfo).toBeNull();
   });
+
+  // ══════════════════════════════════════════════════
+  // G-32-12 — the panel's SSH session must survive the tunnel coming up
+  //
+  // Measured on build h2vn6t (UAT 2026-09-08): panel.load.start at 10:57:58.326,
+  // autoconnect.connect_invoked at 10:58:00.384 — auto-connect rewrites the routing
+  // table ~2 s INTO the panel's SSH session. The owner saw a connection error; the
+  // panel recovered by itself (dur=6830ms, installed=true) and left NO trace of the
+  // error anywhere. Owner's ruling: «SSH-сессия должна пережить подключение VPN».
+  //
+  // Two things are pinned here. First, the recovery keeps working — but now only for
+  // failures whose TRANSPORT broke. Second, a REFUSED credential stops dead on the
+  // first attempt: the R-6 loop used to retry everything-but-the-host-key, so a wrong
+  // password cost the server three authentication attempts on every panel load, and
+  // this app installs fail2ban on that very server.
+  // ══════════════════════════════════════════════════
+
+  /** Every `write_activity_log` payload the hook emitted, in call order. */
+  const activityLines = () =>
+    mockInvoke.mock.calls
+      .filter((c) => c[0] === "write_activity_log")
+      .map((c) => c[1] as { tag: string; message: string; details?: string | null });
+
+  it("recovers a probe whose transport was cut mid-handshake (SSH_AUTH_ERROR is a broken pipe, not a rejected password)", async () => {
+    // ssh/mod.rs emits SSH_AUTH_ERROR when the `authenticate_*` CALL ITSELF errors —
+    // the exchange was cut off, the server never refused. This is the route-flip
+    // signature, and translateSshError renders it as «Неверный SSH логин или пароль»,
+    // so classifying it as a refusal would show "wrong password" for a correct one.
+    let calls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        calls += 1;
+        if (calls === 1) throw "SSH_AUTH_ERROR|Disconnected";
+        return fakeServerInfo;
+      }
+      if (cmd === "server_get_config") return "config-data";
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 8000 });
+
+    expect(calls).toBe(2);
+    expect(result.current.serverInfo).toEqual(fakeServerInfo);
+    expect(result.current.error).toBe("");
+  }, 10000);
+
+  it("writes ONE panel.load.retry line per retry, so the recovered error is no longer invisible", async () => {
+    let calls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        calls += 1;
+        if (calls === 1) throw "SSH_CHANNEL_FAILED|Disconnected";
+        return fakeServerInfo;
+      }
+      if (cmd === "server_get_config") return "config-data";
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 8000 });
+
+    const retries = activityLines().filter((l) => l.message.startsWith("panel.load.retry"));
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({
+      tag: "STATE",
+      message: "panel.load.retry attempt=1/3 code=SSH_CHANNEL_FAILED",
+      details: "useServerState.loadServerInfo",
+    });
+  }, 10000);
+
+  it("probes ONCE and surfaces immediately when the password is REJECTED — never three authentication attempts", async () => {
+    // The whole point of G-32-12's dangerous half. SSH_PASSWORD_REJECTED means the
+    // server completed the exchange and said no; offering the same credential twice
+    // more is how fail2ban bans the user from their own server.
+    let calls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        calls += 1;
+        throw "SSH_PASSWORD_REJECTED";
+      }
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 8000 });
+
+    expect(calls).toBe(1);
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.serverInfo).toBeNull();
+
+    const refused = activityLines().filter((l) => l.message.startsWith("panel.load.refused"));
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({
+      tag: "ERROR",
+      message: "panel.load.refused class=refusal code=SSH_PASSWORD_REJECTED",
+      details: "useServerState.loadServerInfo",
+    });
+    // A refusal is not a retry.
+    expect(activityLines().filter((l) => l.message.startsWith("panel.load.retry"))).toHaveLength(0);
+  }, 10000);
+
+  it.each(["SSH_AUTH_FAILED", "SSH_KEY_REJECTED"])(
+    "probes ONCE on %s",
+    async (code) => {
+      let calls = 0;
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "check_server_installation") {
+          calls += 1;
+          throw code;
+        }
+        if (cmd === "server_get_available_versions") return [];
+        return null;
+      });
+
+      const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+      await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 8000 });
+
+      expect(calls).toBe(1);
+      expect(result.current.error).toBeTruthy();
+    },
+    10000,
+  );
+
+  it("D-29: no activity line the panel load writes may carry the SSH password", async () => {
+    // Spy on the log SINK itself, not on a formatted string: the guarantee has to hold
+    // for the retry line, the refusal line, the failed line and the raw-error line at
+    // once. baseProps.sshPassword is "pass123".
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        // A raw error that embeds the credential — the worst case a backend or a
+        // russh message could ever hand us.
+        throw `SSH_AUTH_ERROR|authentication with password ${baseProps.sshPassword} failed`;
+      }
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 12000 });
+
+    const lines = activityLines();
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(JSON.stringify(line)).not.toContain(baseProps.sshPassword);
+    }
+    // And nothing password-shaped reached the sink through any other argument either.
+    for (const call of mockInvoke.mock.calls.filter((c) => c[0] === "write_activity_log")) {
+      expect(JSON.stringify(call[1])).not.toContain(baseProps.sshPassword);
+    }
+  }, 15000);
+
+  // ── G-32-12, second half: the panel-data probes race the same flip ──
+  //
+  // check_server_installation is a DIRECT one-shot connect; server_get_config and
+  // server_get_cert_info ride the pooled connection, and they run right after the
+  // probe — inside the same window in which auto-connect rewrites the routing table.
+  // They sit in a Promise.allSettled whose rejections were dropped on the floor, so a
+  // flip landing on them left the Configuration tab and the certificate card empty
+  // with no error on screen and no line in activity.log.
+  //
+  // Their retry policy is STRICTER than the probe's: transport codes only, no
+  // retryUnknown. SSH_READ_CONFIG_FAILED is a deterministic server-side condition
+  // (server_config.rs returns it when the file could not be read) and retrying it
+  // would add seconds to every load of a server in that state, for nothing.
+
+  it("recovers a config read whose pooled transport was cut by the route flip", async () => {
+    let cfgCalls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") return fakeServerInfo;
+      if (cmd === "server_get_config") {
+        cfgCalls += 1;
+        if (cfgCalls === 1) throw "SSH_CHANNEL_FAILED|Disconnected";
+        return "config-data";
+      }
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+    await vi.waitFor(() => { expect(result.current.configRaw).toBe("config-data"); }, { timeout: 8000 });
+
+    expect(cfgCalls).toBe(2);
+    const retries = activityLines().filter((l) => l.message.startsWith("panel.data.retry"));
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({
+      tag: "STATE",
+      message: "panel.data.retry part=config attempt=1/2 code=SSH_CHANNEL_FAILED",
+      details: "useServerState.loadServerInfo",
+    });
+  }, 10000);
+
+  it("does NOT retry a deterministic server-side read failure, and records it instead of dropping it", async () => {
+    let cfgCalls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") return fakeServerInfo;
+      if (cmd === "server_get_config") {
+        cfgCalls += 1;
+        throw "SSH_READ_CONFIG_FAILED";
+      }
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 8000 });
+
+    expect(cfgCalls).toBe(1);
+    // The load as a whole still settles — a missing config must not blank the panel.
+    expect(result.current.serverInfo).toEqual(fakeServerInfo);
+    expect(result.current.certRaw).toEqual({ cn: "test" });
+
+    const failed = activityLines().filter((l) => l.message.startsWith("panel.data.failed"));
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({
+      tag: "ERROR",
+      message: "panel.data.failed part=config code=SSH_READ_CONFIG_FAILED",
+      details: "useServerState.loadServerInfo",
+    });
+    expect(activityLines().filter((l) => l.message.startsWith("panel.data.retry"))).toHaveLength(0);
+  }, 10000);
+
+  it("says nothing about panel data when both parts load cleanly", async () => {
+    setupInvokeForLoad();
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 8000 });
+
+    expect(activityLines().filter((l) => l.message.startsWith("panel.data."))).toHaveLength(0);
+  }, 10000);
 
   // ── loadServerInfo skips when no credentials ───────
 

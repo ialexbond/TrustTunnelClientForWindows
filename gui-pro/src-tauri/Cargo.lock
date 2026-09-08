@@ -6676,6 +6676,7 @@ dependencies = [
  "trusttunnel-settings",
  "url",
  "uuid",
+ "windows 0.61.3",
  "windows-sys 0.59.0",
  "winreg 0.55.0",
 ]

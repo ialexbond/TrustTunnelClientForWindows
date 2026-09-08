@@ -121,6 +121,7 @@
       "general_description": "Application startup behavior",
       "autostart": "Launch at system startup",
       "autostart_desc": "Start TrustTunnel when Windows starts",
+      "autostart_unknown": "The state could not be read. The app may still start at sign-in — check in Task Scheduler.",
       "start_minimized": "Start minimized",
       "start_minimized_desc": "Hide window on launch, show only tray icon",
       "appearance_title": "Appearance",
@@ -184,7 +185,8 @@
     "vpn_disconnected": "VPN disconnected",
     "connect_cancelled": "Connection cancelled",
     "auto_switched": "Switched automatically — now \"{{name}}\"",
-    "auto_switched_unnamed": "Switched automatically to another server"
+    "auto_switched_unnamed": "Switched automatically to another server",
+    "auto_connect_no_target": "Auto-connect has no server to connect to yet. Connect once manually and it will remember"
   },
   "errors": {
     "internet_lost_disconnecting": "Internet connection lost. Disconnecting VPN, waiting for network recovery...",
@@ -202,7 +204,7 @@
     "sidecar_exit": "The VPN core exited unexpectedly. Try connecting again.",
     "disconnect_failed": "Could not stop the VPN core — it may still be blocking traffic. Try disconnecting again or restart the application.",
     "routing_rules_unreadable": "The routing rules file could not be read, so the connection was cancelled. Open the Routing tab to restore your rules.",
-    "config_outside_data_dir": "This server's configuration file is outside the application folder, so the connection was cancelled — the server was never contacted. Add the server again so the app keeps the config in its own folder.",
+    "config_outside_data_dir": "This server's configuration file is outside the folder where the application keeps its data, so the connection was cancelled — the server was never contacted. Add the server again so the app stores the config in its own data folder.",
     "connection_failed": "Failed to connect to the server.",
     "config_parse_error": "Configuration parse error. Check your config file.",
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
@@ -1688,6 +1690,20 @@
         "cancelled_line_3": "Server continues running on v{{from}}.",
         "close": "Close"
       }
+    }
+  },
+  "migration": {
+    "offer": {
+      "heading": "A previous version was found",
+      "question": "Move your servers, passwords and settings to the new folder?",
+      "accept": "Move",
+      "decline": "Don't move"
+    },
+    "working": "Moving your data",
+    "failed": {
+      "heading": "The data could not be moved",
+      "body": "Your data is still in the previous folder — nothing was lost. Close the app and open it again to try once more.",
+      "continue": "Continue"
     }
   }
 }

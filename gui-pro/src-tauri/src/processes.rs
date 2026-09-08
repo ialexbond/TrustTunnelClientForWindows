@@ -499,8 +499,9 @@ pub async fn list_running_processes() -> Result<Vec<ProcessInfo>, String> {
 /// HBITMAP is a slow GDI drain (the default per-process quota is 10 000 objects) that eventually
 /// stops the UI drawing altogether.
 #[cfg(windows)]
-mod win_icon {
+pub(crate) mod win_icon {
     use core::ffi::c_void;
+    use core::marker::PhantomData;
     use std::ptr::{null, null_mut};
 
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -532,19 +533,36 @@ mod win_icon {
     /// Not a failure for our purposes: the shell call works either way.
     const RPC_E_CHANGED_MODE: i32 = -2_147_417_850;
 
-    /// The COM apartment for one blocking-worker call.
+    /// A COM apartment held for the duration of ONE call, initialized on the calling thread.
     ///
-    /// `SHGetFileInfoW` requires COM to be initialized ON THE CALLING THREAD. Apartments are
-    /// per-thread and tokio's blocking pool hands out fresh threads, so initializing once at
-    /// startup would work by accident on a reused thread and silently return zero icons on a new
-    /// one. `CoUninitialize` is called only when we actually initialized, because a
+    /// Apartments are per-thread, so every caller must own one for as long as it holds COM
+    /// objects. `CoUninitialize` is called only when we actually initialized, because a
     /// `RPC_E_CHANGED_MODE` result means someone else owns the apartment.
-    pub(super) struct ComApartment {
+    ///
+    /// The reason a caller needs this differs per caller and belongs at the call site, not here:
+    /// `SHGetFileInfoW` below needs it because tokio's blocking pool hands out fresh threads, so
+    /// initializing once at startup would work by accident on a reused thread and silently return
+    /// zero icons on a new one; `task_scheduler.rs` needs it for an entirely different reason,
+    /// written down there. Widened from `pub(super)` to `pub(crate)` in phase 32 so that module can
+    /// REUSE this guard instead of defining a second one — the distinction between a success code
+    /// that owns an apartment reference and the changed-mode code that does not is subtle, already
+    /// solved correctly once here, and a second copy is a second chance to get it wrong.
+    pub(crate) struct ComApartment {
         initialized: bool,
+        /// Makes the guard `!Send`, and that is the whole job of this field.
+        ///
+        /// `CoUninitialize` MUST run on the thread that ran `CoInitializeEx`. Without this the
+        /// guard is `Send`, so a caller could hold it across an `.await` and be resumed on a
+        /// different executor thread — which would uninitialise an apartment on a thread that
+        /// never had one and leak the one that did. Both call sites today are synchronous, so
+        /// nothing does this; widening the type to `pub(crate)` in phase 32 is what made the
+        /// mistake reachable from a new module, and a compiler error is a better guard than a
+        /// comment asking future readers to be careful.
+        _not_send: PhantomData<*const ()>,
     }
 
     impl ComApartment {
-        pub(super) fn init() -> Result<Self, String> {
+        pub(crate) fn init() -> Result<Self, String> {
             // SAFETY: a plain apartment init on the current thread with no reserved argument.
             let hr = unsafe { CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32) };
             if hr < 0 && hr != RPC_E_CHANGED_MODE {
@@ -554,6 +572,7 @@ mod win_icon {
             // matching CoUninitialize; RPC_E_CHANGED_MODE does not.
             Ok(ComApartment {
                 initialized: hr >= 0,
+                _not_send: PhantomData,
             })
         }
     }

@@ -120,10 +120,15 @@ describe("main.tsx", () => {
     expect(renderCallCount).toBe(1);
   });
 
-  it("renders App inside ErrorBoundary inside StrictMode", () => {
+  it("renders App inside ErrorBoundary inside StrictMode", async () => {
     expect(capturedRenderArg).toBeTruthy();
     render(capturedRenderArg as React.ReactElement);
-    expect(screen.getByTestId("mock-app")).toBeInTheDocument();
+    // AWAITED since 32-08: App is now wrapped in MigrationOfferGate, which asks Rust whether a
+    // previous version's data is waiting before it mounts anything. The mocked `invoke` resolves
+    // undefined → no offer → the gate mounts App on the next tick. `findByTestId` is therefore the
+    // assertion that App is reached, and a hang here would be the gate failing to release — which
+    // is exactly the regression worth catching, since it presents as a blank window.
+    expect(await screen.findByTestId("mock-app")).toBeInTheDocument();
   });
 
   // ─── Keyboard shortcut blocking ───

@@ -125,6 +125,68 @@ rand = "0.8"
 # OpenProcess / QueryFullProcessImageNameW живут в Win32_System_Threading, который уже включён.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_Storage_FileSystem"] }
+# Фаза 32 (D-10.2, src/task_scheduler.rs) — ЯВНОЕ, ЗАДОКУМЕНТИРОВАННОЕ ИСКЛЮЧЕНИЕ из правила
+# «не тянем windows crate» (комментарий выше, у tray.rs). Исключение держится на том же основании,
+# на котором стоит само правило — «нулевая новая загрузка»:
+#   • windows 0.61.3 УЖЕ в Cargo.lock транзитивно (через tauri 2.10.3), ровно эта версия. Прямое
+#     объявление ПОВЫШАЕТ существующий пакет, а не добавляет новый: ни нового вендора, ни новой
+#     загрузки, ни второй копии в сборке (0.62.2 в lock тоже есть — берём 0.61.3 именно ту, что
+#     разрешает дерево tauri).
+#   • Причина исходного правила (конфликт типа HWND с версией внутри Tauri) здесь не применима:
+#     Task Scheduler не оперирует HWND вовсе.
+#   • windows-sys 0.59 НЕ ПОДХОДИТ: в нём вообще нет Win32_System_TaskScheduler — ни одной строки
+#     про TaskScheduler в его манифесте. Обёртки COM-интерфейсов живут только в полном windows.
+#   • Стороннюю обёртку над планировщиком брать ЗАПРЕЩЕНО (deferred-items.md § item 5): она тянет
+#     третью мажорную версию того же crate, а поддержка нужных нам трёх свойств не проверена.
+# Features — ПЯТЬ штук. Четыре нужны по существу, пятая (Win32_Foundation) стоит здесь ради
+# документации; ниже сказано, почему её нельзя считать «обязательной», и почему пятую забыть
+# нельзя:
+#   Win32_System_TaskScheduler — ITaskService/ITaskFolder/IRegisteredTask и константы задач
+#   Win32_System_Com           — CoCreateInstance/CLSCTX_ALL (апартамент берём общий, из processes.rs)
+#   Win32_System_Variant       — RegisterTaskDefinition принимает &VARIANT (userid/password/sddl)
+#   Win32_System_Ole           — БЕЗ НЕЁ МОДУЛЬ НЕ СОБИРАЕТСЯ, и падает он неочевидно. Сам ТИП
+#                                VARIANT объявлен под cfg(all(Win32_System_Com, Win32_System_Ole))
+#                                (Variant/mod.rs:742), а МЕТОДЫ ITaskService::Connect
+#                                (TaskScheduler/mod.rs:5527) и ITaskFolder::RegisterTaskDefinition
+#                                (:4645) — под cfg(all(Win32_System_Ole, Win32_System_Variant)).
+#                                Отсюда ловушка: пока в модуле есть только `use`-блок, всё
+#                                зелёное (ТИПЫ резолвятся), а как только появляется вызов —
+#                                «no method named RegisterTaskDefinition found for struct
+#                                ITaskFolder». Проверено сборкой пробного крейта: с этими пятью
+#                                features он собирается вчистую и НЕ тянет ни одного нового
+#                                пакета.
+#   Win32_Foundation           — VARIANT_BOOL, который возвращает IRegisteredTask::Enabled, и
+#                                VARIANT_TRUE/VARIANT_FALSE. Формально ИЗБЫТОЧНА: в манифесте
+#                                windows-0.61.3 Win32_System_TaskScheduler = ["Win32_System"]
+#                                (:670), Win32_System = ["Win32"] (:582), Win32 =
+#                                ["Win32_Foundation"] (:397) — то есть она включается транзитивно
+#                                и её удаление не меняет разрешённый набор ни на байт. Оставлена
+#                                НАМЕРЕННО: модуль импортирует символы именно из этого модуля, и
+#                                строка документирует намерение.
+# Откуда взялся неверный список из четырёх (без Ole): он скопирован дословно из
+# 30.1-RESEARCH.md:354, где утверждалось «no other features required», и тот список НИКОГДА не
+# компилировался. Всё прочее, взятое из того же блока, наследует ту же непроверенность.
+#
+# Ремедиация 32-FIX-01 (CR-01 + CR-03) добавила ещё ЧЕТЫРЕ. Все четыре — тот же вендор, та же
+# версия, ноль новых загрузок; каждая нужна по существу, и ни одна не тянет HWND:
+#   Win32_Security               — GetAce/ACL/ACCESS_ALLOWED_ACE/PSID + OpenProcessToken-константы
+#                                  (TOKEN_QUERY), GetTokenInformation(TokenUser), LookupAccountSidW.
+#                                  Ими проверяется, что каталог цели НЕ доступен на запись
+#                                  непривилегированному принципалу, и берётся SID из ТОКЕНА процесса.
+#   Win32_Security_Authorization — GetNamedSecurityInfoW (DACL файла/каталога) и
+#                                  ConvertSidToStringSidW. Живут отдельно от Win32_Security и
+#                                  включают её транзитивно (манифест: Win32_Security_Authorization =
+#                                  ["Win32_Security"]), но объявлены обе — ровно по тому же
+#                                  принципу, что и Win32_Foundation выше: строка документирует, из
+#                                  какого модуля импортируются символы.
+#   Win32_System_SystemServices  — ACCESS_ALLOWED_ACE_TYPE (тип ACE). Единственная константа из
+#                                  этого модуля, и её НЕТ ни в Win32_Security, ни в Foundation.
+#   Win32_System_Threading       — GetCurrentProcess/OpenProcessToken. Взяты ЗДЕСЬ, а не из уже
+#                                  подключённого windows-sys 0.59: у двух крейтов свои типы HANDLE
+#                                  и PSID, и токен пришлось бы гонять между ними приведением
+#                                  сырых указателей. Одна feature дешевле, чем каст, который
+#                                  компилятор проверить не может.
+windows = { version = "0.61.3", features = ["Win32_System_TaskScheduler", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemServices", "Win32_System_Threading"] }
 
 [dev-dependencies]
 regex = "1"

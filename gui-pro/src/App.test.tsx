@@ -2073,7 +2073,47 @@ describe("App", () => {
     });
   });
 
-  it("does not auto-connect when tt_auto_connect is not set", async () => {
+  // G-32-9, at the integration level — the real-world scenario, end to end.
+  //
+  // The hook-level test proves `useAutoConnect` fires on an absent key. This proves the WHOLE App
+  // does, which is a different claim: the effect's dependency is `config.configPath`, App resolves
+  // that path during startup, and the one-shot latch is armed before the 1.5s timer that does the
+  // work (filed separately as G-32-10). A fix that only worked in the hook harness would move the
+  // owner's failure one step later instead of removing it, and he tests this by rebooting.
+  //
+  // Arranged exactly as a real machine is on the reboot AFTER a manual connect: `tt_config_path`
+  // written, `tt_auto_connect` never touched — which is precisely the state his leveldb showed.
+  it("auto-connects through the full App when tt_auto_connect was never written", async () => {
+    localStorage.setItem("tt_config_path", "/config.json");
+    localStorage.setItem("tt_log_level", "info");
+
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs")
+        return [{ id: "id-1", name: "Config 1", host: "h1.example.com", user: "u1", path: "/config.json", order: 0, last_used: true }];
+      if (cmd === "ping_config_endpoint") return { status: "no-data" };
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600);
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/config.json",
+      logLevel: "info",
+    });
+  });
+
+  // G-32-9: the arrangement is an EXPLICIT "false", not an absent key. Absent now means what the
+  // Settings screen shows for it (ON), so leaving the key out would arrange the opposite case.
+  it("does not auto-connect when tt_auto_connect is explicitly false", async () => {
+    localStorage.setItem("tt_auto_connect", "false");
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -2164,7 +2204,11 @@ describe("App", () => {
     // The engine is INERT unless masterOn (default OFF). With a connected tunnel and a healthy
     // candidate available, no switch (vpn_connect/vpn_disconnect for a switch) must fire.
     localStorage.setItem("tt_config_path", "/config.json");
-    // tt_auto_switch_enabled is unset → masterOn defaults false. tt_auto_connect unset → no startup connect.
+    // tt_auto_switch_enabled is unset → masterOn defaults false (its default IS off, so absent is
+    // the arrangement this test wants). tt_auto_connect is set to an explicit "false" instead:
+    // after G-32-9 its default is ON, so an absent key would fire a startup connect and put a
+    // second vpn_connect into the very call log this test inspects.
+    localStorage.setItem("tt_auto_connect", "false");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;

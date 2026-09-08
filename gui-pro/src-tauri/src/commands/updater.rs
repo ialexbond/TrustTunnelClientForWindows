@@ -105,14 +105,46 @@ fn make_run_dir_name() -> String {
 /// the directory is reliably reclaimed. A best-effort start-time sweep
 /// (`sweep_stale_update_dirs`) is the belt-and-suspenders for the rare case the
 /// delayed cleanup loses a race with the 30s loader window.
+///
+/// D-10.3 (the relaunch across the relocation): the batch is written BEFORE the
+/// installer runs, so `app_str` — composed from `current_exe()` in `self_update` — names
+/// the directory the app is about to LEAVE. On the single update that crosses phase
+/// 32-01's move out of `%LOCALAPPDATA%` and into Program Files, relaunching it starts an
+/// executable that no longer exists: the update succeeds and the app appears to crash,
+/// once per machine. The new destination cannot be interpolated into the batch (it is
+/// not known yet), so the batch discovers it ITSELF after the install, from
+/// `INSTALL_DIR_PRODUCT_KEY`, machine hive then user hive, and only adopts it when
+/// `{exe_name}` is actually inside it. Anything else — no value, an unreadable hive, a
+/// stale directory — falls back to `app_str`, i.e. to today's behaviour. A registry
+/// failure must degrade to the status quo, never to nothing.
+///
+/// The registry key the NSIS installer writes the final install directory into, as the
+/// key's unnamed (default) value: the Tauri template's `MANUPRODUCTKEY`, i.e.
+/// `Software\${{MANUFACTURER}}\${{PRODUCTNAME}}` (`installer.nsi:32-33`, `:57-58`,
+/// `:638-639`). Under `perMachine` the installer writes it to HKLM; every install made
+/// before phase 32 wrote it to HKCU.
+///
+/// Deliberately NOT `ssh::PRODUCT_DATA_FOLDER`, although the two spell the same product
+/// name today. Phase 32-01 split the install directory and the data root into two
+/// different nouns and pinned that split with a compiled test; routing the batch's
+/// install-directory lookup through the DATA folder's constant would quietly re-identify
+/// them, and the next person to move one would move both.
+///
+/// Preferred over `UNINSTKEY\InstallLocation`, which the template writes WRAPPED IN
+/// LITERAL QUOTE CHARACTERS (`installer.nsi:662`, confirmed on a real Windows install as
+/// finding F7), so a naive read of that value yields a path that does not exist.
+const INSTALL_DIR_PRODUCT_KEY: &str = r"Software\trusttunnel\TrustTunnel Client Pro";
+
 fn build_updater_bat(
     pid: u32,
     setup_str: &str,
     app_str: &str,
+    exe_name: &str,
     vbs_str: &str,
     loader_str: &str,
     run_dir_str: &str,
 ) -> String {
+    let product_key = INSTALL_DIR_PRODUCT_KEY;
     format!(
         r#"@echo off
 title TrustTunnel Updater
@@ -127,7 +159,14 @@ echo Installing update...
 "{setup_str}" /S
 echo Starting TrustTunnel...
 timeout /t 2 /nobreak >nul
-start "" "{app_str}"
+set "TT_EXE={app_str}"
+setlocal enabledelayedexpansion
+set "TT_DIR="
+for /f "delims=" %%L in ('reg query "HKLM\{product_key}" /ve 2^>nul ^| find "REG_SZ"') do set "TT_LINE=%%L" & set "TT_DIR=!TT_LINE:*REG_SZ    =!"
+if not defined TT_DIR for /f "delims=" %%L in ('reg query "HKCU\{product_key}" /ve 2^>nul ^| find "REG_SZ"') do set "TT_LINE=%%L" & set "TT_DIR=!TT_LINE:*REG_SZ    =!"
+endlocal & set "TT_DIR=%TT_DIR%"
+if defined TT_DIR if exist "%TT_DIR%\{exe_name}" set "TT_EXE=%TT_DIR%\{exe_name}"
+start "" "%TT_EXE%"
 echo Cleaning up...
 del "{vbs_str}" >nul 2>&1
 del "{loader_str}" >nul 2>&1
@@ -1291,7 +1330,8 @@ pub async fn self_update(
     // SEC-05/06: all artifacts in the per-run run_dir, not fixed names in %TEMP%.
     let bat_path = run_dir.join("trusttunnel_updater.bat");
     let pid = std::process::id();
-    let app_exe = app_dir.join(exe_path.file_name().unwrap_or_default());
+    let exe_name = exe_path.file_name().unwrap_or_default().to_os_string();
+    let app_exe = app_dir.join(&exe_name);
     let setup_str = setup_path.to_string_lossy();
     let app_str = app_exe.to_string_lossy();
     let vbs_path = run_dir.join("trusttunnel_updater.vbs");
@@ -1299,10 +1339,15 @@ pub async fn self_update(
     // be-1: build the .bat via the pure helper so the cleanup contract (no
     // self-blocking non-recursive rmdir; whole run_dir reclaimed by a detached
     // delayed `rmdir /S /Q`) is unit-tested in `self_update_cleanup_tests`.
+    //
+    // D-10.3: `app_str` is the PRE-install path and is now only the fallback. The
+    // basename goes in separately because the batch composes the real target from it
+    // and the install directory it reads back from the registry after installing.
     let bat_content = build_updater_bat(
         pid,
         &setup_str,
         &app_str,
+        &exe_name.to_string_lossy(),
         &vbs_path.to_string_lossy(),
         &run_dir.join("trusttunnel_loader.ps1").to_string_lossy(),
         &run_dir.to_string_lossy(),
@@ -1504,6 +1549,7 @@ mod self_update_cleanup_tests {
             4242,
             &format!(r"{run_dir}\trusttunnel_setup.exe"),
             r"C:\Program Files\TrustTunnel\app.exe",
+            "app.exe",
             &format!(r"{run_dir}\trusttunnel_updater.vbs"),
             &format!(r"{run_dir}\trusttunnel_loader.ps1"),
             run_dir,
@@ -1564,6 +1610,189 @@ mod self_update_cleanup_tests {
 
         // Cleanup the test scratch dir.
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // ── D-10.3: the one update that crosses the relocation ───────────────────────
+    //
+    // THE DEFECT: `build_updater_bat` composes the relaunch target from
+    // `current_exe()` captured BEFORE the installer runs (`self_update`, :1187/:1294).
+    // Phase 32-01 moved the install out of `%LOCALAPPDATA%\TrustTunnel Client Pro`
+    // and into Program Files, so the ONE update that crosses that move installs
+    // perfectly and then runs `start "" "<the old path>"` on an executable that no
+    // longer exists.
+    //
+    // THE SYMPTOM: «обновилось и не открылось» — the user reads it as a crash. It
+    // happens exactly once per machine, which is precisely why it has to be pinned by
+    // an assertion over the generated text rather than reasoned about: there is no
+    // second chance to notice it.
+    //
+    // THE CONSTRAINT that shapes the fix: the .bat is written BEFORE the installer
+    // runs, so the destination cannot be interpolated into it. The batch has to
+    // discover it at run time, from the registry value the installer itself writes
+    // (research F7), and must degrade to the captured path — today's behaviour —
+    // rather than to nothing when the registry cannot answer.
+    #[test]
+    fn updater_bat_learns_the_install_dir_from_the_registry_after_installing() {
+        let run_dir = r"C:\Temp\tt_update_abc123";
+        let setup = format!(r"{run_dir}\trusttunnel_setup.exe");
+        let captured = r"C:\Users\me\AppData\Local\TrustTunnel Client Pro\trusttunnel.exe";
+        let bat = build_updater_bat(
+            4242,
+            &setup,
+            captured,
+            "trusttunnel.exe",
+            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
+            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
+            run_dir,
+        );
+
+        // The old shape — relaunching the captured path unconditionally — must be GONE.
+        assert!(
+            !bat.contains(&format!("start \"\" \"{captured}\"")),
+            "the relaunch must not name the pre-install path unconditionally:\n{bat}"
+        );
+        // ...and replaced by a relaunch of the resolved target.
+        assert!(
+            bat.contains("start \"\" \"%TT_EXE%\""),
+            "the relaunch must go through the resolved target:\n{bat}"
+        );
+
+        // Machine hive FIRST (that is where the per-machine installer writes it now),
+        // user hive SECOND (a machine that has not yet crossed the relocation still
+        // has its value in HKCU — confirmed on a real Windows install, 32-01).
+        let hklm = bat
+            .find(&format!("HKLM\\{INSTALL_DIR_PRODUCT_KEY}"))
+            .unwrap_or_else(|| panic!("no machine-hive probe in the batch:\n{bat}"));
+        let hkcu = bat
+            .find(&format!("HKCU\\{INSTALL_DIR_PRODUCT_KEY}"))
+            .unwrap_or_else(|| panic!("no user-hive probe in the batch:\n{bat}"));
+        assert!(
+            hklm < hkcu,
+            "the machine hive must be probed before the user hive:\n{bat}"
+        );
+
+        // Both probes must come AFTER the silent install. Reading before it would
+        // answer with the directory the app is about to LEAVE — the bug, restored.
+        let installed_at = bat
+            .find(&format!("\"{setup}\" /S"))
+            .unwrap_or_else(|| panic!("no silent-install invocation in the batch:\n{bat}"));
+        assert!(
+            installed_at < hklm,
+            "the registry must be read AFTER the installer has run, not before:\n{bat}"
+        );
+
+        // The discovered directory is only used when the expected executable is really
+        // inside it (T-32-12: a registry value becomes a launch target).
+        assert!(
+            bat.contains(
+                "if defined TT_DIR if exist \"%TT_DIR%\\trusttunnel.exe\" \
+                 set \"TT_EXE=%TT_DIR%\\trusttunnel.exe\""
+            ),
+            "the resolved directory must be guarded by an existence check:\n{bat}"
+        );
+
+        // The captured path survives as the fallback, and is assigned BEFORE the guard
+        // so the guard can override it — never the other way round.
+        let fallback_at = bat
+            .find(&format!("set \"TT_EXE={captured}\""))
+            .unwrap_or_else(|| panic!("the captured path is not the fallback target:\n{bat}"));
+        let guard_at = bat
+            .find("if defined TT_DIR if exist")
+            .unwrap_or_else(|| panic!("no existence guard in the batch:\n{bat}"));
+        assert!(
+            fallback_at < guard_at,
+            "the captured path must be the DEFAULT that the guard overrides:\n{bat}"
+        );
+
+        // The detached recursive cleanup and the self-delete are untouched by all this.
+        assert!(
+            bat.trim_end().ends_with("(goto) 2>nul & del \"%~f0\""),
+            "the .bat must still self-delete last:\n{bat}"
+        );
+    }
+
+    // MEASURED, not assumed, on a real Russian Windows 11:
+    //
+    //     > reg query "HKLM\SOFTWARE\Classes\.txt" /ve
+    //         (по умолчанию)    REG_SZ    txtfilelegacy
+    //
+    // The default-value column is LOCALIZED, so it is THREE whitespace-separated
+    // tokens («(по», «умолчанию)»), not the one that `(Default)` would be. Research
+    // F7 proposed `for /f "tokens=2,*"`, which on this machine captures
+    // `A=умолчанию)` and `B=REG_SZ    txtfilelegacy` — the path lands in the wrong
+    // variable, prefixed with the type name.
+    //
+    // Why that is worse than an ordinary bug: the mis-parsed value fails the `if exist`
+    // guard, so the batch degrades silently to the captured path — i.e. to exactly the
+    // crash this whole fix exists to prevent — on precisely the machines this
+    // application is built for. It would look fixed and be broken.
+    //
+    // The parse must therefore key off `REG_SZ`, which is NOT localized, and take
+    // everything after it.
+    #[test]
+    fn updater_bat_registry_parse_survives_a_localized_default_value_name() {
+        let run_dir = r"C:\Temp\tt_update_abc123";
+        let bat = build_updater_bat(
+            4242,
+            &format!(r"{run_dir}\trusttunnel_setup.exe"),
+            r"C:\Users\me\AppData\Local\TrustTunnel Client Pro\trusttunnel.exe",
+            "trusttunnel.exe",
+            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
+            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
+            run_dir,
+        );
+
+        assert!(
+            !bat.contains("tokens=2,*"),
+            "a positional token parse breaks on a localized «(по умолчанию)» column:\n{bat}"
+        );
+        assert!(
+            bat.contains("for /f \"delims=\""),
+            "the value line must be captured whole, then split on REG_SZ:\n{bat}"
+        );
+        assert!(
+            bat.contains("set \"TT_DIR=!TT_LINE:*REG_SZ    =!\""),
+            "the path must be taken as everything after the untranslated REG_SZ column:\n{bat}"
+        );
+        // The substring split above needs delayed expansion, and its result has to
+        // survive the `endlocal` that ends the delayed-expansion window.
+        assert!(
+            bat.contains("setlocal enabledelayedexpansion"),
+            "the REG_SZ split needs delayed expansion to read the loop variable:\n{bat}"
+        );
+        assert!(
+            bat.contains("endlocal & set \"TT_DIR=%TT_DIR%\""),
+            "the resolved directory must survive the endlocal:\n{bat}"
+        );
+    }
+
+    // The .bat inherits its parent's environment. A `TT_DIR` that happened to already
+    // be defined there would satisfy `if not defined TT_DIR`, skip the second probe,
+    // and then be handed straight to the `if exist` guard — an outside-supplied launch
+    // target. Clearing it first costs one line and closes that off.
+    #[test]
+    fn updater_bat_clears_an_inherited_tt_dir_before_probing_the_registry() {
+        let run_dir = r"C:\Temp\tt_update_abc123";
+        let bat = build_updater_bat(
+            4242,
+            &format!(r"{run_dir}\trusttunnel_setup.exe"),
+            r"C:\Users\me\AppData\Local\TrustTunnel Client Pro\trusttunnel.exe",
+            "trusttunnel.exe",
+            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
+            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
+            run_dir,
+        );
+
+        let cleared_at = bat
+            .find("set \"TT_DIR=\"")
+            .unwrap_or_else(|| panic!("TT_DIR is never cleared before the probe:\n{bat}"));
+        let probed_at = bat
+            .find(&format!("HKLM\\{INSTALL_DIR_PRODUCT_KEY}"))
+            .unwrap_or_else(|| panic!("no machine-hive probe in the batch:\n{bat}"));
+        assert!(
+            cleared_at < probed_at,
+            "an inherited TT_DIR must be cleared before the registry is probed:\n{bat}"
+        );
     }
 }
 

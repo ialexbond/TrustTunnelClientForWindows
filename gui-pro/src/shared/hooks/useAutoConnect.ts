@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { normalizePath, samePath } from "../utils/samePath";
+import { classifyStoredAppSetting, readAppSettingBoolean } from "./useAppSettings";
 import { localizeVpnError } from "./vpnEventHelpers";
 import type { VpnConfig, VpnStatus } from "../types";
 import type { i18n as I18nType } from "i18next";
@@ -25,6 +26,16 @@ interface UseAutoConnectParams {
    * Optional — standalone tests omit it. Only called with a numeric ms on an `ok` probe (never fabricated).
    */
   seedConfigPing?: (path: string, ms: number) => void;
+  /**
+   * G-32-8: in-window announcement channel for the ONE auto-connect outcome the user cannot work
+   * out for themselves — auto-connect is on, and the manifest names no server to aim at. App wires
+   * it to the existing SnackBar push; no new surface, no new component.
+   *
+   * Optional, exactly like `seedConfigPing`: Storybook and the standalone tests omit it and the
+   * stand-down stays a clean no-op. The hook passes an ALREADY-LOCALIZED string (it holds the i18n
+   * instance; the SnackBar takes plain text), so nothing about the channel is language-aware.
+   */
+  notify?: (message: string) => void;
 }
 
 // T-22 B3 (boot guard): how long auto-connect-on-launch will WAIT for the local
@@ -66,9 +77,37 @@ type PingResult =
 // background per-config sweep; the launch path is latency-sensitive, so it uses a tighter bound.)
 const LAUNCH_PING_TIMEOUT_MS = 1500;
 
+// G-32-8: the launch auto-connect used to write NOTHING — not to activity.log, not to app.log,
+// not even to the console. It has five terminal outcomes (toggle off / cancelled / a live status
+// already owns the session / no last-used target / connect invoked) and from outside all of them
+// look identical: «не подключилось». The first complaint about this feature was undiagnosable for
+// exactly that reason, so every outcome now writes ONE line here.
+//
+// Fire-and-forget through the SAME `write_activity_log` command the rest of the app uses (see
+// useActivityLog / MigrationOfferGate) — a logging failure must never affect the connect, and the
+// promise is never awaited so the timing of the flow it reports is unchanged.
+//
+// D-29: only a config PATH is ever written. The manifest entry is a whole record and the app
+// stores SSH credentials next to it; `JSON.stringify(entry)` in a log line would ship the user's
+// password into a plain-text file the app itself offers to collect and hand over. Callers pass
+// pre-formatted `key=value` fragments and nothing else.
+const logAutoConnect = (
+  message: string,
+  tag: "STATE" | "ERROR" = "STATE",
+  details?: string,
+) => {
+  void invoke("write_activity_log", { tag, message, details: details ?? null }).catch(() => {
+    // Silent — the activity log is diagnostics, never a precondition for connecting.
+  });
+};
+
 /**
- * Fires a one-shot VPN auto-connect on startup when `tt_auto_connect=true`
- * is set in localStorage. Uses a 1.5s delay so the UI mounts before the connect.
+ * Fires a one-shot VPN auto-connect on startup when the «Автоподключение при запуске» setting is
+ * on. Uses a 1.5s delay so the UI mounts before the connect.
+ *
+ * G-32-9: «on» means what the Settings screen shows, which for an untouched install is the DEFAULT
+ * (`APP_SETTINGS_DEFAULTS.autoConnectOnLaunch` = true) — not the literal string "true". Read via
+ * `readAppSettingBoolean`, the single reader that owns key and default together.
  *
  * Phase 11 (P11-03 / D-05): the target is the MANIFEST's LAST-USED config (resolved
  * via `list_configs`), NOT the single app-level `config.configPath`. The multi-config
@@ -93,9 +132,44 @@ export function useAutoConnect({
   setStatus,
   setError,
   seedConfigPing,
+  notify,
   i18n,
 }: UseAutoConnectParams) {
+  // G-32-10: the one-shot latch. It is armed at the TOP OF THE TIMER CALLBACK — the moment the
+  // work actually begins — and deliberately NOT in the effect body.
+  //
+  // It used to be armed in the body, synchronously, before the 1.5s timer that does the work was
+  // even created, while the cleanup cleared that timer unconditionally. So any re-run of the effect
+  // inside the window (`config.configPath` is the dependency, and App legitimately writes it while
+  // it loads) ran the cleanup, killed the pending connect, re-entered, and returned on the latch.
+  // Nothing rescheduled: auto-connect was dead for the life of the webview. And it died BEFORE the
+  // timer callback, which is where every G-32-8 log line lives — so the diagnostics built to remove
+  // this exact blind spot could not see it either.
+  //
+  // Armed where it is now, the latch guards the WORK rather than the INTENT: a re-run before the
+  // timer fires simply reschedules (the previous timer is already cleared, so no timers stack), and
+  // a re-run at any point after it fires returns as before. The one-shot guarantee is unchanged and
+  // in fact stronger, because it is now tied to the only thing that can connect: at most one timer
+  // callback ever executes, therefore at most one network wait and at most one `vpn_connect` per
+  // webview lifetime.
   const autoConnectDone = useRef(false);
+
+  // G-32-10: how many times the effect has scheduled the pre-wait timer. 1 is the ordinary launch;
+  // anything above it means a re-run inside the 1.5s window pushed the connect back, which is the
+  // class that used to be fatal and silent. Kept in a ref so the line below can name the attempt.
+  const scheduleAttempt = useRef(0);
+
+  // G-32-10: set by the cleanup when it cancels a timer that had NOT yet fired. That is the only
+  // state that distinguishes «this run is a reschedule» from «this is the first run», and it is
+  // read on the way back in. On unmount the flag is set and simply never read again, which is
+  // correct: a torn-down webview has no auto-connect to report on.
+  const pendingTimerCancelled = useRef(false);
+
+  // G-32-8: the toggle-off stand-down is written ONCE per mount. The effect's dependency is
+  // `config.configPath`, which legitimately changes a couple of times while the app loads its
+  // config at startup, so an unlatched line would repeat and bury the entries that matter. The
+  // latch is purely about the log — the `return` it guards is untouched.
+  const toggleOffLogged = useRef(false);
 
   // AUDIT-2026-06-11 #15: live status mirror, updated EVERY render. The effect below
   // closes over `status` from its first run only (deps = [config.configPath]), so its
@@ -111,7 +185,39 @@ export function useAutoConnect({
 
   useEffect(() => {
     if (autoConnectDone.current) return;
-    if (localStorage.getItem("tt_auto_connect") !== "true") return;
+    // G-32-9: the effective value, read through the SAME key+default pair the Settings screen uses.
+    //
+    // This line used to be `localStorage.getItem("tt_auto_connect") !== "true"`, and that raw read
+    // was a second, private declaration of what an absent key means. It said OFF. The Settings
+    // screen said ON, from `APP_SETTINGS_DEFAULTS.autoConnectOnLaunch`, and nothing ever writes
+    // that default back to storage — so on an install where nobody had touched the switch, the
+    // screen promised auto-connect and this hook returned at its first gate, indefinitely.
+    //
+    // The screen is the promise, so the behaviour is what moved. Both readers now derive «absent»
+    // from one constant, and `appSettingsContract.test.ts` fails if any module reads these keys
+    // directly again.
+    const storedAutoConnect = classifyStoredAppSetting("autoConnectOnLaunch");
+    if (!readAppSettingBoolean("autoConnectOnLaunch")) {
+      // G-32-8: the single most likely answer to «autostart ran but nothing connected», and the
+      // one the user can fix themselves — once they can see it. Latched (see toggleOffLogged).
+      //
+      // The detail carries WHICH kind of «off» this was. Before G-32-9 the interesting split was
+      // `absent` vs `false` — «the screen and the behaviour disagree» vs «the user turned it off» —
+      // and that line is what made the report diagnosable. That split is now impossible to
+      // reach: `absent` resolves to the screen's default (ON) and never lands here. What remains is
+      // still worth separating, because they are still different bugs: `false` is a deliberate
+      // choice, `corrupt` is somebody else's write reading as off. A fixed vocabulary, never the
+      // raw stored string (D-29 discipline: log facts, not values).
+      if (!toggleOffLogged.current) {
+        toggleOffLogged.current = true;
+        logAutoConnect(
+          "autoconnect.skipped reason=toggle_off",
+          "STATE",
+          `stored=${storedAutoConnect}`,
+        );
+      }
+      return;
+    }
     // Phase 11: the OLD `if (!config.configPath) return` precondition is dropped — the
     // target is now the manifest's last-used config, not the single app-level config
     // path. Whether anything is auto-connected is decided AFTER the network wait, once
@@ -122,8 +228,9 @@ export function useAutoConnect({
     // ONLY correct status gate is the LIVE `statusRef.current` re-check just before the
     // optimistic "connecting" mark below (#15) — keeping the dead closure check invited a
     // future edit to trust the stale value and reintroduce the AUDIT #15 bug, so it is
-    // removed. The one-shot latch stays.
-    autoConnectDone.current = true;
+    // removed. The one-shot latch stays — but it is armed inside the timer callback below,
+    // not here (G-32-10; see the `autoConnectDone` declaration for why the difference is the
+    // whole defect).
 
     let cancelled = false;
 
@@ -136,14 +243,27 @@ export function useAutoConnect({
       // Probe the network once; only an explicit `false` means "not ready, keep
       // waiting". A missing/throwing probe (undefined) is treated as ready (proceed)
       // so a captive net — or a test that doesn't mock the probe — is never blocked.
+      //
+      // G-32-8: the probe's LAST verdict is recorded on the way past so the line written after the
+      // loop can say WHICH of the two exits happened — the network came up, or the budget ran out
+      // and we connected into a network that never reported ready. Those are different stories
+      // with the same visible outcome. `unavailable` (a throwing/missing probe) is kept distinct
+      // from a genuine `ready` so «we proceeded because we could not ask» never reads as «the
+      // network was up». The returned value — and therefore the loop — is unchanged.
+      let networkProbe: "ready" | "not_ready" | "unavailable" = "not_ready";
       const probeReady = async (): Promise<boolean> => {
         try {
-          return (await invoke<boolean>("network_ready")) !== false;
+          const ready = (await invoke<boolean>("network_ready")) !== false;
+          networkProbe = ready ? "ready" : "not_ready";
+          return ready;
         } catch {
           // Probe unavailable (e.g. older backend / test mock) → don't block; proceed.
+          networkProbe = "unavailable";
           return true;
         }
       };
+
+      const waitStartedAt = Date.now();
 
       // First check is immediate; subsequent checks are spaced by the poll interval.
       // Loop only while the probe explicitly reports the network is NOT ready and the
@@ -160,9 +280,21 @@ export function useAutoConnect({
         // functional updater leaves the status untouched if a live vpn-status event
         // already moved it (the backend remains the sole status owner — we never
         // synthesize a status it didn't have).
+        logAutoConnect("autoconnect.stood_down reason=cancelled stage=network_wait");
         setStatus((s) => (s === "connecting" ? "disconnected" : s));
         return;
       }
+
+      // G-32-8: which way the bounded wait ended. `network_timeout` means we are about to connect
+      // into a network that never reported ready — the captive-net behaviour is deliberate, but it
+      // is also the shape of a failed autostart at OS boot, and it must be readable afterwards.
+      logAutoConnect(
+        networkProbe === "not_ready"
+          ? "autoconnect.network_timeout"
+          : "autoconnect.network_ready",
+        "STATE",
+        `probe=${networkProbe} waited_ms=${Date.now() - waitStartedAt}`,
+      );
 
       // AUDIT-2026-06-11 #15: last-moment live-status re-check. During the bounded
       // network wait the mount snapshot / a live vpn-status event may have surfaced
@@ -172,7 +304,14 @@ export function useAutoConnect({
       // (our own optimistic mark from the timer below — React may or may not have
       // re-rendered it into the ref yet, both values mean "still our flow").
       const liveStatus = statusRef.current;
-      if (liveStatus !== "disconnected" && liveStatus !== "connecting") return;
+      if (liveStatus !== "disconnected" && liveStatus !== "connecting") {
+        // G-32-8: a CORRECT stand-down that was invisible. Something else already owns the
+        // session; the status value is the whole explanation, so it is written down.
+        logAutoConnect(
+          `autoconnect.stood_down reason=status_not_idle stage=pre_connect status=${liveStatus}`,
+        );
+        return;
+      }
 
       // Phase 11 (P11-03): resolve the LAST-USED config from the manifest and connect
       // to IT. The manifest is the source of truth; list_configs returns the entries
@@ -223,10 +362,38 @@ export function useAutoConnect({
         // Manifest unreadable → treat as "no target": stand down without an error.
         lastUsedPath = undefined;
       }
-      if (cancelled) return;
+      if (cancelled) {
+        logAutoConnect("autoconnect.stood_down reason=cancelled stage=resolve_target");
+        return;
+      }
       if (!lastUsedPath) {
         // No last-used config to connect to. Undo our own optimistic "connecting" mark
         // (functional updater leaves a backend-owned status untouched) and stop.
+        //
+        // G-32-8: this is the branch a fresh install after a full uninstall necessarily hits — the
+        // manifest went with the data folder, so nothing is marked last-used — and it was a
+        // completely silent no-op: no log line, no message, an unexplained disconnected screen.
+        logAutoConnect("autoconnect.stood_down reason=no_last_used");
+        // …and say it out loud, once, on the surface the app already uses for this kind of fact
+        // (the SnackBar — the same place «Переключено автоматически» appears). Quiet and factual:
+        // auto-connect had nothing to aim at, connect once by hand and it will remember.
+        //
+        // This is not a first-run nag — and G-32-9 is what makes that a REQUIREMENT rather than a
+        // happy accident.
+        //
+        // It used to be free: absent meant off, so a fresh install stood down at the toggle gate
+        // above and never reached this branch. Now absent means ON, and a fresh install after a
+        // full uninstall arrives here by the shortest possible route — its manifest went with the
+        // data folder, so nothing is marked last-used. Announcing unconditionally would greet a
+        // first-time user with a sentence about a feature they have never heard of.
+        //
+        // So the ANNOUNCEMENT keeps the old precondition explicitly: only when the user has
+        // actually written "true" by flipping the switch. The CONNECT above still follows the
+        // screen's default — the two are deliberately different thresholds, because acting on a
+        // shown-ON promise is what the user expects, while talking to them about it is not.
+        if (storedAutoConnect === "true") {
+          notify?.(i18n.t("messages.auto_connect_no_target"));
+        }
         setStatus((s) => (s === "connecting" ? "disconnected" : s));
         return;
       }
@@ -273,25 +440,71 @@ export function useAutoConnect({
           configPath: lastUsedPath,
           logLevel: config.logLevel,
         });
+        // G-32-8: the success line — WHICH config was chosen (the reconciliation above can pick
+        // the app-level active path over the manifest marker, and «it connected to the wrong
+        // server» is a real report) and that `vpn_connect` was actually invoked and returned.
+        // Only the path: no config content, no credentials (D-29).
+        logAutoConnect(`autoconnect.connect_invoked path=${lastUsedPath}`);
       } catch (e) {
         if (cancelled) return;
+        // G-32-8: the core refused. The same text already reaches the banner through setError, so
+        // writing it down exposes nothing new — but the banner is gone by the time anyone asks.
+        logAutoConnect("autoconnect.connect_failed", "ERROR", String(e).slice(0, 200));
         setError(localizeVpnError(e, i18n));
         setStatus("error");
       }
     };
 
+    // G-32-10: the class that used to end auto-connect silently now writes ONE line, through the
+    // same fire-and-forget helper every other outcome uses. Written HERE — on the way back in, once
+    // we know a cancelled-but-unfired timer is being replaced — rather than from the cleanup, which
+    // cannot tell a reschedule from an unmount.
+    //
+    // D-29: a fixed reason token and a counter. No path, nothing derived from stored values.
+    scheduleAttempt.current += 1;
+    if (pendingTimerCancelled.current) {
+      pendingTimerCancelled.current = false;
+      logAutoConnect(
+        "autoconnect.rescheduled reason=deps_changed stage=pre_wait",
+        "STATE",
+        `attempt=${scheduleAttempt.current}`,
+      );
+    }
+
     const timer = setTimeout(() => {
+      // G-32-10: arm the one-shot latch HERE, synchronously, as the first thing the work does.
+      // From this instant every re-run of the effect returns at the top and nothing reschedules,
+      // so exactly one timer callback — and therefore exactly one network wait and at most one
+      // `vpn_connect` — can ever run for this webview. It is armed before the live-status
+      // stand-down below on purpose: that stand-down is a terminal outcome of the launch attempt,
+      // and re-arming after it would turn auto-connect into something that retries later.
+      autoConnectDone.current = true;
+      pendingTimerCancelled.current = false;
+
       // AUDIT-2026-06-11 #15: re-check the LIVE status (not the stale closure) right
       // before the optimistic mark. By now (1.5s after mount) the snapshot has long
       // restored any live tunnel state — if the session is not plainly disconnected,
       // auto-connect must stand down instead of clobbering it.
-      if (statusRef.current !== "disconnected") return;
+      if (statusRef.current !== "disconnected") {
+        // G-32-8: the earliest stand-down, and the one that looks most like a broken autostart —
+        // the app launched, the toggle is on, and nothing happened. It is correct (a live session
+        // already exists) but nothing said so.
+        logAutoConnect(
+          `autoconnect.stood_down reason=status_not_idle stage=pre_wait status=${statusRef.current}`,
+        );
+        return;
+      }
       // Move to "connecting" up-front (unchanged UX), then run the gated connect.
       setStatus("connecting");
       void waitForNetworkThenConnect();
     }, 1500);
     return () => {
       cancelled = true;
+      // G-32-10: remember whether the timer we are about to clear had already fired. If it had
+      // not, the pending auto-connect is being dropped and the next run of the effect owes the
+      // user a reschedule and a log line. `autoConnectDone` is the exact witness: the callback
+      // arms it as its first statement, so «still false» means «never ran».
+      if (!autoConnectDone.current) pendingTimerCancelled.current = true;
       clearTimeout(timer);
     };
   // WR-05: `config.configPath` is now a genuine read inside the effect (the auto-connect
