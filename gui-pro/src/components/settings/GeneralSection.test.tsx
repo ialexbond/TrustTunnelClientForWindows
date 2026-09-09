@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import ru from "../../shared/i18n/locales/ru.json";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { GeneralSection } from "./GeneralSection";
 import { GEODATA_AUTO_UPDATE_CHANGED } from "../../shared/utils/geodataAutoUpdateSignal";
 
@@ -232,6 +233,330 @@ describe("GeneralSection", () => {
     expect(target).not.toBeDisabled();
     expect(screen.getByText(ru.settings.app.autostart_desc)).toBeInTheDocument();
     expect(screen.queryByText(ru.settings.app.autostart_unknown)).toBeNull();
+  });
+
+  // ─── G-32-14: a refusal the app can explain must not arrive as «try again» ───
+  //
+  // The owner installed into a root-level folder on 2026-09-09 and could not switch autostart back
+  // on. The backend refused for a good reason and said so in full; the screen said «Не удалось
+  // сохранить настройку. Попробуйте ещё раз» — advice that cannot work, because the folder's
+  // permissions are identical on every attempt. Rust now leads its refusal with a stable code and
+  // this row maps the code to a sentence of its own; the backend's words still never reach the UI.
+
+  it("turns the «folder anyone can write to» refusal into its own message, not «try again»", async () => {
+    const onSaveFailed = vi.fn();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return false;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      if (cmd === "set_autostart")
+        throw new Error(
+          "AUTOSTART_REFUSED_REPLACEABLE: the install folder is writable by an account that is not an administrator (its directory: S-1-5-11). Reinstall into Program Files."
+        );
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} onSaveFailed={onSaveFailed} />);
+    fireEvent.click(screen.getByRole("switch", { name: AUTOSTART }));
+
+    await waitFor(() =>
+      expect(onSaveFailed).toHaveBeenCalledWith("messages.settings_autostart_needs_program_files")
+    );
+    // The backend's own sentence stays in app.log where it belongs (T-28-20).
+    expect(screen.queryByText(/S-1-5-11|writable|administrator/)).toBeNull();
+  });
+
+  it("maps the «could not check the folder» refusal to its own message too", async () => {
+    const onSaveFailed = vi.fn();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return false;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      if (cmd === "set_autostart")
+        throw new Error("AUTOSTART_REFUSED_ACL_UNKNOWN: the folder could not be checked (CR-01)");
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} onSaveFailed={onSaveFailed} />);
+    fireEvent.click(screen.getByRole("switch", { name: AUTOSTART }));
+
+    await waitFor(() =>
+      expect(onSaveFailed).toHaveBeenCalledWith("messages.settings_autostart_acl_unknown")
+    );
+  });
+
+  it("falls back to the generic message for a refusal it has no sentence for", async () => {
+    // A failure nobody anticipated is still better shown as «could not save» than as a raw string
+    // from a scheduler API — the fallback is the safety net, not a bug.
+    const onSaveFailed = vi.fn();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return false;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      if (cmd === "set_autostart") throw new Error("0x80070005 access denied");
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} onSaveFailed={onSaveFailed} />);
+    fireEvent.click(screen.getByRole("switch", { name: AUTOSTART }));
+
+    await waitFor(() => expect(onSaveFailed).toHaveBeenCalledWith(undefined));
+  });
+
+  // ─── G-32-13: the row re-reads when the window comes back ───
+  //
+  // Owner bug, 2026-09-09, build `k9tzr4`: he disabled the logon task in Task Scheduler, returned
+  // to the app, and the switch still read ON. The read was never the problem — `get_autostart`
+  // reports the task's live state — but it happened exactly once per app LAUNCH, because this panel
+  // is never unmounted (App.tsx keeps every tab mounted and hides them with opacity/visibility), so
+  // `useEffect(…, [])` could not fire again. The answer on screen was hours old.
+  //
+  // These tests pin the CONTRACT, not the mechanism: after the user has been away — which is the
+  // only window in which an outside change can happen — the row shows what the operating system
+  // says now. `window.focus` and `visibilitychange` are how that is detected today.
+
+  it("re-reads the autostart state when the window regains focus, and redraws what the OS now says", async () => {
+    let taskEnabled = true;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return taskEnabled;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "true"));
+
+    // The user leaves for Task Scheduler and disables the task there. Nothing in the app is touched.
+    taskEnabled = false;
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "false"));
+  });
+
+  it("re-reads on the native window focus event too, not only the DOM one", async () => {
+    // Two triggers on purpose (2026-09-09): `window`'s DOM focus is the document's notion of focus
+    // and the webview can hold it while Windows does not consider the window active; `tauri://focus`
+    // is the OS-level answer. This test pins the second one by driving the listener the component
+    // registers through the mocked window bridge.
+    let taskEnabled = true;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return taskEnabled;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+    const listen = vi.mocked(getCurrentWindow()).listen;
+    listen.mockClear();
+
+    render(<GeneralSection {...defaultProps} />);
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "true"));
+
+    const call = listen.mock.calls.find(([event]) => event === "tauri://focus");
+    expect(call).toBeTruthy();
+    const handler = call![1] as () => void;
+
+    taskEnabled = false;
+    handler();
+
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "false"));
+  });
+
+  it("writes the moment the switch and the OS stop agreeing, with the trigger that caught it", async () => {
+    // The instrument itself is under test: when the switch and the Task Scheduler disagree on a real
+    // machine, the answer has to come from a file rather than from anybody's memory. It logs the
+    // DISAGREEMENT, not every read — see the companion test below.
+    let taskEnabled = true;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return taskEnabled;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: AUTOSTART })).toHaveAttribute("aria-checked", "true")
+    );
+
+    taskEnabled = false;
+    fireEvent.focus(window);
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("write_activity_log", {
+        tag: "STATE",
+        message: "settings.autostart.changed from=true to=false trigger=dom-focus",
+        details: "GeneralSection",
+      })
+    );
+  });
+
+  it("stays quiet in the log while nothing changes", async () => {
+    // A line per return-to-window would bury the user's own log under noise nobody reads, and this
+    // row is re-read on a timer while its tab is open.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return true;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: AUTOSTART })).toHaveAttribute("aria-checked", "true")
+    );
+
+    fireEvent.focus(window);
+    fireEvent.focus(window);
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_autostart"));
+
+    const logged = vi
+      .mocked(invoke)
+      .mock.calls.filter(([cmd]) => cmd === "write_activity_log");
+    expect(logged).toHaveLength(0);
+  });
+
+  it("re-reads while its tab is the visible one, without waiting for the window to be clicked", async () => {
+    // The recorded reading of the log, and the case every focus trigger misses: Settings and Task
+    // Scheduler side by side, both visible, neither clicked. Looking at a window is not focusing it.
+    vi.useFakeTimers();
+    try {
+      let taskEnabled = true;
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "get_autostart") return taskEnabled;
+        if (cmd === "get_start_minimized") return false;
+        if (cmd === "get_geodata_auto_update") return true;
+        return null;
+      });
+
+      render(<GeneralSection {...defaultProps} active />);
+      const target = screen.getByRole("switch", { name: AUTOSTART });
+      await vi.waitFor(() => expect(target).toHaveAttribute("aria-checked", "true"));
+
+      taskEnabled = false;
+      await vi.advanceTimersByTimeAsync(5000);
+
+      await vi.waitFor(() => expect(target).toHaveAttribute("aria-checked", "false"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not poll while its tab is hidden", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "get_autostart") return true;
+        if (cmd === "get_start_minimized") return false;
+        if (cmd === "get_geodata_auto_update") return true;
+        return null;
+      });
+
+      render(<GeneralSection {...defaultProps} active={false} />);
+      await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("get_autostart"));
+      const readsAfterMount = vi
+        .mocked(invoke)
+        .mock.calls.filter(([cmd]) => cmd === "get_autostart").length;
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      const readsLater = vi
+        .mocked(invoke)
+        .mock.calls.filter(([cmd]) => cmd === "get_autostart").length;
+      expect(readsLater).toBe(readsAfterMount);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-reads when the window becomes visible again", async () => {
+    let taskEnabled = true;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return taskEnabled;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "true"));
+
+    taskEnabled = false;
+    // The window was hidden (minimised to tray) and comes back. jsdom keeps `visibilityState` on
+    // the document object, so the value is stubbed for the length of the event.
+    const restore = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    fireEvent(document, new Event("visibilitychange"));
+
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "false"));
+
+    if (restore) Object.defineProperty(document, "visibilityState", restore);
+  });
+
+  it("does not read across a write in flight — the handle stays where the user moved it", async () => {
+    const write = deferred<null>();
+    let reads = 0;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") {
+        reads += 1;
+        // The stale answer a refresh would redraw if it were allowed to run mid-write.
+        return false;
+      }
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      if (cmd === "set_autostart") return write.promise;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_autostart"));
+    const readsBefore = reads;
+
+    fireEvent.click(target);
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "true"));
+
+    // Focus arrives while the write is still going — Windows raises it when the elevation prompt
+    // or any other window closes over the app.
+    fireEvent.focus(window);
+    expect(reads).toBe(readsBefore);
+    expect(target).toHaveAttribute("aria-checked", "true");
+
+    write.resolve(null);
+    await waitFor(() => expect(defaultProps.onSaved).toHaveBeenCalledTimes(1));
+  });
+
+  it("says «could not read» when the refresh itself cannot ask the scheduler", async () => {
+    let readable = true;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") {
+        if (!readable) throw new Error("ITaskService::Connect failed");
+        return true;
+      }
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: AUTOSTART })).toHaveAttribute("aria-checked", "true")
+    );
+    expect(screen.queryByText(ru.settings.app.autostart_unknown)).toBeNull();
+
+    // The Task Scheduler service is stopped while the user is away.
+    readable = false;
+    fireEvent.focus(window);
+
+    await waitFor(() =>
+      expect(screen.getByText(ru.settings.app.autostart_unknown)).toBeInTheDocument()
+    );
+    // Not silently drawn as OFF: an unknown state is a disabled control with words, exactly as on
+    // the mount path.
+    expect(screen.getByRole("switch", { name: AUTOSTART })).toBeDisabled();
   });
 
   // ─── Phase 23: geodata auto-update row (D-12/D-13) ───

@@ -1816,6 +1816,11 @@ function App() {
             // and the active file is the tiebreak that decides which twin represents the pair. Same
             // value the Connection tab uses, so the two lists cannot disagree about a server.
             activeConfigPath={config.configPath}
+            // G-32-13: the autostart row mirrors a logon scheduled task, i.e. an object that changes
+            // OUTSIDE this app. Every tab stays mounted here, so the row cannot tell on its own
+            // whether anybody is looking at it; this flag is how it learns, and it re-reads the task
+            // while the tab is the visible one instead of waiting for the window to be clicked.
+            active={activeTab === "settings"}
           />
         </div>
 

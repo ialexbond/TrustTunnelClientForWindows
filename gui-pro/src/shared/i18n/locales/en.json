@@ -178,6 +178,8 @@
     "config_required": "Please select a configuration file or set up a server first",
     "settings_saved": "Settings saved",
     "settings_save_failed": "Could not save the setting. Please try again.",
+    "settings_autostart_needs_program_files": "To turn autostart on, install the program into «Program Files».",
+    "settings_autostart_acl_unknown": "The program's folder could not be checked. Please try again.",
     "config_file_deleted": "Config deleted",
     "config_file_restored": "Config loaded",
     "specify_config_path": "Specify config path...",

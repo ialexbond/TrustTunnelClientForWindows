@@ -178,6 +178,8 @@
     "config_required": "Сначала укажите файл конфигурации или настройте сервер",
     "settings_saved": "Настройки сохранены",
     "settings_save_failed": "Не удалось сохранить настройку. Попробуйте ещё раз.",
+    "settings_autostart_needs_program_files": "Чтобы включать автозапуск, установите программу в «Program Files».",
+    "settings_autostart_acl_unknown": "Не удалось проверить папку программы. Попробуйте ещё раз.",
     "config_file_deleted": "Конфиг удалён",
     "config_file_restored": "Конфиг-файл загружен",
     "specify_config_path": "Укажите путь к конфигу...",

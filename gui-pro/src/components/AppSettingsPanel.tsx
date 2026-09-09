@@ -20,6 +20,9 @@ interface Props {
   /** Path of the config the tunnel runs through. Pure pass-through to AutoModeSettings, which needs
    *  it to collapse same-server twins the same way «Подключение» does. */
   activeConfigPath?: string;
+  /** Is this panel's tab the visible one? Pure pass-through to GeneralSection, whose autostart row
+   *  re-reads the scheduled task while the tab is on screen (G-32-13). */
+  active?: boolean;
 }
 
 export default function AppSettingsPanel({
@@ -30,6 +33,7 @@ export default function AppSettingsPanel({
   statusPanel,
   isSwitching = false,
   activeConfigPath,
+  active = true,
 }: Props) {
   const { t } = useTranslation();
   const pushSnack = useSnackBar();
@@ -48,19 +52,25 @@ export default function AppSettingsPanel({
    * polite confirmation), it is held for 5s rather than 3s so there is time to read it, and it
    * carries a close button so the user can put it away instead of waiting.
    *
-   * T-28-20: the callback takes NO argument. There is nothing for a caller to pass, so a backend
-   * error string cannot reach the screen even by accident — the sentence rendered is always the
-   * localized one.
+   * T-28-20, amended 2026-09-09: the callback takes an optional TRANSLATION KEY — never a message.
+   * A backend error string still cannot reach the screen, because a key is not text: it is looked
+   * up in this app's own locale file, and an unknown one would render nothing rather than leak
+   * anything. What changed is that a refusal the app can explain no longer arrives as the generic
+   * «could not save, try again» — the owner met exactly that on 2026-09-09, with advice that could
+   * not work. The caller decides WHICH sentence; the backend never writes one.
    */
-  const showSaveFailed = useCallback(() => {
-    pushSnack(t("messages.settings_save_failed"), "error");
-  }, [t, pushSnack]);
+  const showSaveFailed = useCallback(
+    (messageKey?: string) => {
+      pushSnack(t(messageKey ?? "messages.settings_save_failed"), "error");
+    },
+    [t, pushSnack]
+  );
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {statusPanel}
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-        <GeneralSection onSaved={showSaved} onSaveFailed={showSaveFailed} />
+        <GeneralSection onSaved={showSaved} onSaveFailed={showSaveFailed} active={active} />
         {/* 12-07: «Авто-режим» mounts right after «Основные», before «Внешний вид» (RESEARCH
             §Pattern 3). It groups all connection-automation prefs (auto-switch master + params +
             priority list, the MOVED startup auto-connect toggle, notifications). It owns its own
