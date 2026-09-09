@@ -541,6 +541,18 @@ fn non_admin_writers(path: &Path) -> Result<Vec<String>, String> {
 
 /// Refuse a highest-privileges registration whose target an unprivileged account can replace.
 ///
+/// BOTH refusals lead with a STABLE CODE — `AUTOSTART_REFUSED_REPLACEABLE:` /
+/// `AUTOSTART_REFUSED_ACL_UNKNOWN:` — and the code is the whole reason they are shaped this way.
+/// The owner installed the program into a root-level folder on 2026-09-09, could not turn autostart
+/// back on, and was told «Не удалось сохранить настройку. Попробуйте ещё раз» — advice that can
+/// never work, because a folder's permissions do not change between attempts. The sentences below
+/// already carry both cause and remedy, but they are English prose written for app.log, and the
+/// project rule (T-28-20) is that the backend's own words never reach the screen. A code carries
+/// the MEANING across that boundary while the words stay here: the frontend maps it to a localized
+/// sentence of its own (`AUTOSTART_FAILURE_I18N`), exactly as the VPN error codes are mapped in
+/// `vpnEventHelpers.ts`. Renaming a code silently breaks that mapping, so each side asserts the
+/// pair in a test.
+///
 /// BOTH the executable and its containing directory are inspected. The directory is not
 /// redundant: a principal holding `FILE_DELETE_CHILD` there can delete our file and write their
 /// own with a fresh, permissive DACL, never having held a right on the original at all.
@@ -556,7 +568,7 @@ fn refuse_if_the_target_is_replaceable(exe: &Path) -> Result<(), String> {
     for (what, path) in [("its directory", directory), ("the file itself", exe)] {
         let writers = non_admin_writers(path).map_err(|e| {
             format!(
-                "autostart refused: whether «{}» can be replaced by an unprivileged account could \
+                "AUTOSTART_REFUSED_ACL_UNKNOWN: whether «{}» can be replaced by an unprivileged account could \
                  not be determined, and a highest-privileges logon task may not be registered on \
                  an unanswered question (CR-01). {e}",
                 path.display()
@@ -564,7 +576,7 @@ fn refuse_if_the_target_is_replaceable(exe: &Path) -> Result<(), String> {
         })?;
         if !writers.is_empty() {
             return Err(format!(
-                "autostart refused: «{}» is writable by an account that is not an administrator \
+                "AUTOSTART_REFUSED_REPLACEABLE: «{}» is writable by an account that is not an administrator \
                  ({what}: {}). A logon task with highest privileges pointed at a file anyone can \
                  replace is a local-elevation path — the very one the per-machine relocation \
                  exists to close (D-10 item 2). Reinstall into «Program Files» to enable \
@@ -1202,8 +1214,12 @@ mod tests {
              administrator token at the next logon, with no prompt (CR-01, D-10 item 2)",
         );
         assert!(
-            err.contains("autostart refused"),
-            "the refusal must be ours and must say what was refused and why, got: {err}"
+            err.starts_with("AUTOSTART_REFUSED_REPLACEABLE:"),
+            "the refusal must be ours, and it must LEAD with the stable code the Settings screen              maps to a sentence a person can act on (AUTOSTART_FAILURE_I18N in              GeneralSection.tsx). Before 2026-09-09 this text began «autostart refused», the              frontend could not tell one refusal from another, and the owner — who had installed              into a root-level folder — was told «Не удалось сохранить настройку. Попробуйте ещё              раз», advice that cannot work. Renaming this code without renaming it there silently              restores that. Got: {err}"
+        );
+        assert!(
+            err.contains("Program Files"),
+            "the log line must still carry the remedy in full, for the support bundle: {err}"
         );
         assert!(
             !err.contains(E_ACCESSDENIED_HEX),

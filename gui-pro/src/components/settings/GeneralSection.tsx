@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Settings, Power, EyeOff, FileText, FolderOpen, RefreshCw } from "lucide-react";
 import { IconButton, RowToggle, SettingsCard, SettingsRow } from "../../shared/ui";
 import { emitGeodataAutoUpdateChanged } from "../../shared/utils/geodataAutoUpdateSignal";
+import { useActivityLog } from "../../shared/hooks/useActivityLog";
 
 // Phase 12 (12-07): the «Автоподключение при запуске» toggle MOVED out of «Основные» into
 // «Авто-режим» (AutoModeSettings). It reads/writes the SAME `tt_auto_connect` localStorage key
@@ -12,6 +14,14 @@ import { emitGeodataAutoUpdateChanged } from "../../shared/utils/geodataAutoUpda
 // state + its change callback) were removed together with it. GeneralSection now holds only the
 // app-startup-behavior toggles: autostart / start-minimized / logging.
 interface Props {
+  /**
+   * Is the Settings tab the one currently on screen? App.tsx keeps every tab MOUNTED and swaps them
+   * with position/opacity/visibility, so a mounted row cannot tell whether anybody is looking at it —
+   * and the autostart row needs to know, because it mirrors an object (a logon scheduled task) that
+   * changes outside this app. Defaults to `true` so a standalone render (tests, Storybook) behaves
+   * as it always did.
+   */
+  active?: boolean;
   onSaved?: () => void;
   /**
    * 28-06: the other half of `onSaved`. Every write in this section goes to the backend and can
@@ -20,7 +30,7 @@ interface Props {
    * panel renders a localized sentence and the backend's own words never reach the screen
    * (T-28-20).
    */
-  onSaveFailed?: () => void;
+  onSaveFailed?: (messageKey?: string) => void;
 }
 
 /**
@@ -31,6 +41,34 @@ interface Props {
  * file importing from it would put Storybook-only code on the release path.
  */
 type GeneralRowKey = "autostart" | "startMinimized" | "logging" | "geodata";
+
+/**
+ * Refusal code → the sentence the user actually reads.
+ *
+ * The owner, 2026-09-09, installed the program into a root-level folder, could not switch autostart
+ * back on, and got «Не удалось сохранить настройку. Попробуйте ещё раз» — advice that cannot work,
+ * because the folder's permissions are the same on every attempt. The backend knew exactly why and
+ * even carried the remedy; the reason died in a `catch {}` that never read the error, and in an
+ * `onSaveFailed` that had no argument to carry it.
+ *
+ * The fix keeps the project rule that backend prose never reaches the screen (T-28-20): Rust leads
+ * its refusal with a stable CODE, and the mapping from code to a localized sentence lives here.
+ * Same shape as `REASON_CODE_I18N` in `vpnEventHelpers.ts`, for the same reason.
+ *
+ * An unmapped failure falls back to the generic message — a refusal nobody anticipated is still
+ * better shown as «could not save» than as a raw English string from a scheduler API.
+ */
+const AUTOSTART_FAILURE_I18N: Record<string, string> = {
+  AUTOSTART_REFUSED_REPLACEABLE: "messages.settings_autostart_needs_program_files",
+  AUTOSTART_REFUSED_ACL_UNKNOWN: "messages.settings_autostart_acl_unknown",
+};
+
+/** The code a refusal leads with, if it is one this screen knows how to explain. */
+function autostartFailureKey(error: unknown): string | undefined {
+  const text = typeof error === "string" ? error : String((error as Error)?.message ?? error ?? "");
+  const code = text.split(":", 1)[0]?.trim();
+  return code ? AUTOSTART_FAILURE_I18N[code] : undefined;
+}
 
 /**
  * Put a switch back after a refused write, on the value the APP reports.
@@ -74,7 +112,7 @@ async function revertTo(
  * then the card stands on its defaults. A placeholder for a value that is already on its way is a
  * noisier way of showing the same card.
  */
-export function GeneralSection({ onSaved, onSaveFailed }: Props) {
+export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) {
   const { t } = useTranslation();
 
   // ─── Which writes are in flight ───
@@ -153,6 +191,153 @@ export function GeneralSection({ onSaved, onSaveFailed }: Props) {
       .catch(() => setAutostartUnreadable(true));
   }, []);
 
+  // A write in flight owns the handle. The refresh below must not read across it: the value the
+  // user just moved is applied BEFORE the write (see `handleAutostartChange`), so a re-read landing
+  // mid-write would redraw the pre-write state and look like the switch springing back. A ref, not
+  // `pendingRows` state, because the listener that consults it is created once and would otherwise
+  // close over the first render's empty set.
+  const autostartWritePending = useRef(false);
+
+  // ─── The row re-reads when the window comes back (G-32-13) ───
+  //
+  // The mount read above used to be the ONLY read this row ever did, and the panel it lives in is
+  // never unmounted: App.tsx keeps every tab mounted and switches them with `position` / `opacity`
+  // / `visibility`, so `useEffect(…, [])` fires once per app LAUNCH — not once per visit to the
+  // Settings tab. Owner bug, 2026-09-09, build `k9tzr4`: he disabled the logon task in Task
+  // Scheduler, came back to the app, and read a switch still saying ON. Nothing was wrong with the
+  // read itself — `get_autostart` reports the task's real state (present AND enabled), never a
+  // stored preference — the answer on screen was simply hours old.
+  //
+  // A control that mirrors an object OUTSIDE the app has to re-ask whenever the user has had the
+  // chance to change that object elsewhere, and the honest moment to do it is the one where they
+  // come back to this window. Hence focus + visibilitychange rather than a poll: no timer, no work
+  // while the window is away, and it fires exactly on the trip back from Task Scheduler.
+  //
+  // Deliberately NOT `seedIfUntouched`: that guard protects a row from a LATE MOUNT READ clobbering
+  // a value the user just chose. Here the operating system is the authority, and a value the user
+  // set has already been written into it — a refresh returns the same answer. The only case that
+  // must be skipped is a write still in flight, which is what the ref above is for.
+  //
+  // Scoped to this row on purpose. «Запускать в свёрнутом режиме» and the logging flag are files
+  // only this app writes, so they cannot drift behind its back the way a Task Scheduler entry can.
+  // ─── The instrument, added 2026-09-09 after the first fix did not hold on hardware ───
+  //
+  // Build v4t9qc shipped the refresh below and the owner tested it in the one order that separates
+  // the possible causes: with the app RUNNING he deleted the task (switch stayed ON — wrong), then
+  // deleted the whole folder (switch went OFF — right). Both cases reach `task_is_enabled` through
+  // the same `is_absent` branch, and a probe on this machine confirmed both a missing task inside an
+  // existing folder and a missing folder answer with the same 0x80070002 — so the backend cannot be
+  // what tells them apart. Something between the event and the answer differs, and no amount of
+  // reasoning from the source settled it. So the row now says out loud, into activity.log, WHICH
+  // trigger fired and WHAT the backend answered; the next run reads the file instead of memory.
+  // The line is one per return-to-window and carries no user data.
+  const { log: activityLog } = useActivityLog();
+
+  // What is on screen right now, readable from a callback created in an earlier render. Only the
+  // change-detection above uses it; nothing renders from it.
+  const autostartRef = useRef(autostart);
+  useEffect(() => {
+    autostartRef.current = autostart;
+  }, [autostart]);
+
+  // Has a re-read ever landed? The row mounts on its `false` default and the first answer moves it
+  // to whatever the task says — that is a SEED, not a disagreement, and logging it would put a line
+  // in every user's log on every launch. Only from the second read on does a differing answer mean
+  // the switch and the operating system have actually drifted apart.
+  const autostartSeeded = useRef(false);
+
+  const refresh = useCallback(
+    (trigger: string) => {
+      if (autostartWritePending.current) {
+        activityLog("STATE", `settings.autostart.read_skipped trigger=${trigger} reason=write_in_flight`, "GeneralSection");
+        return;
+      }
+      invoke<boolean>("get_autostart")
+        .then((value) => {
+          // Logged on CHANGE, not on every return to the window. The instrument earned its keep on
+          // 2026-09-09 — it is what turned «странно, не выключается» into four timed lines — but a
+          // line per focus would bury a user's own log under noise nobody reads. What is worth
+          // keeping forever is the moment the switch and the operating system STOPPED agreeing,
+          // which is exactly the read whose answer differs from what is on screen.
+          if (autostartSeeded.current && value !== autostartRef.current) {
+            activityLog(
+              "STATE",
+              `settings.autostart.changed from=${autostartRef.current} to=${value} trigger=${trigger}`,
+              "GeneralSection"
+            );
+          }
+          autostartSeeded.current = true;
+          setAutostartUnreadable(false);
+          setAutostart(value);
+        })
+        .catch(() => {
+          activityLog("STATE", `settings.autostart.read_failed trigger=${trigger}`, "GeneralSection");
+          setAutostartUnreadable(true);
+        });
+    },
+    [activityLog]
+  );
+
+  useEffect(() => {
+    const onDomFocus = () => refresh("dom-focus");
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh("visibility");
+    };
+    window.addEventListener("focus", onDomFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // THE SECOND TRIGGER, and the reason there are two. `window`'s DOM focus event is what App.tsx
+    // has used since IN-25 to refresh the Connection list, so it is not a suspect on its own — but
+    // it is the DOCUMENT's notion of focus, and the webview can hold that while the native window
+    // is not the one Windows considers active. `tauri://focus` is the OS-level answer, the same
+    // event the tray menu already listens to (tray-menu.tsx). If the two disagree, the log above
+    // says which one arrived. The late-resolving-listener guard is lifted from that same file: an
+    // unlisten that resolves after teardown must fire at once or the handler outlives the effect.
+    let cancelled = false;
+    let resolvedUnlisten: (() => void) | null = null;
+    void getCurrentWindow()
+      .listen("tauri://focus", () => refresh("tauri-focus"))
+      .then((fn) => {
+        if (cancelled) fn();
+        else resolvedUnlisten = fn;
+      })
+      .catch(() => {
+        // No window bridge (tests, or a webview without the API) — the DOM listeners still stand.
+      });
+
+    return () => {
+      window.removeEventListener("focus", onDomFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      cancelled = true;
+      resolvedUnlisten?.();
+    };
+  }, [refresh]);
+
+  // ─── While this tab is the one on screen, keep the row honest without waiting for a click ───
+  //
+  // The recorded reading of the 2026-09-09 log, and it is right: «прост обновляется когда окно в
+  // фокусе находится». Every trigger above needs the window to be ACTIVATED. Put the Settings tab
+  // and Task Scheduler side by side — which is exactly what somebody comparing the two does — and
+  // the switch can sit there stale while both windows are visible, because merely LOOKING at a
+  // window is not focusing it. That is not a testing artefact: this switch is the only surface a
+  // user has for autostart (the entry is invisible in Windows' own startup lists, D32-18), so it
+  // showing yesterday's answer while the truth is on screen next to it is the defect, not the demo.
+  //
+  // So: re-read the moment the tab becomes the visible one, then keep a slow poll going for as long
+  // as it stays visible. Bounded on purpose — it runs ONLY while this tab is shown AND the window is
+  // not hidden, so a minimised app and every other tab cost nothing. Five seconds is chosen to be
+  // faster than a person can switch windows and read, and slow enough that the COM round-trip is
+  // invisible. The write-in-flight guard inside `refresh` still holds.
+  useEffect(() => {
+    if (!active) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    refresh("tab-active");
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh("tab-poll");
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [active, refresh]);
+
   const handleAutostartChange = async (value: boolean) => {
     // 28-07: the value is applied BEFORE the write, not after it. While the write runs the handle
     // must stay where the user moved it with an indicator turning inside it — a handle that only
@@ -160,14 +345,18 @@ export function GeneralSection({ onSaved, onSaveFailed }: Props) {
     const reported = autostart;
     touchedRows.current.add("autostart");
     markPending("autostart", true);
+    // Same mark, second reader: `markPending` drives the spinner, this ref stops the focus refresh
+    // from reading across the write (see the refresh effect above).
+    autostartWritePending.current = true;
     setAutostart(value);
     try {
       await invoke("set_autostart", { enabled: value });
       onSaved?.();
-    } catch {
+    } catch (e) {
       // The re-read is the same command as the mount read and carries the same third answer, so it
       // updates the same flag. Without this a refused write followed by an unreadable re-read would
       // put the switch back on the last value the app happened to report and present it as fact.
+      const failureKey = autostartFailureKey(e);
       await revertTo(setAutostart, reported, async () => {
         try {
           const value = await invoke<boolean>("get_autostart");
@@ -178,9 +367,10 @@ export function GeneralSection({ onSaved, onSaveFailed }: Props) {
           throw e;
         }
       });
-      onSaveFailed?.();
+      onSaveFailed?.(failureKey);
     } finally {
       markPending("autostart", false);
+      autostartWritePending.current = false;
     }
   };
 
