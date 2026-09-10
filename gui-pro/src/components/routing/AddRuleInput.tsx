@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { IconButton } from "../../shared/ui/IconButton";
+import { placeFocus } from "../../shared/hooks/usePointerPresence";
 import { GeoAutocomplete } from "./GeoAutocomplete";
 import type { RouteAction, GeoDataIndex, GeoDataStatus, IplistGroup } from "./useRoutingState";
 
@@ -197,7 +198,9 @@ export function AddRuleInput({
       setShowAutocomplete(false);
       setDismissedForInput(false);
       setErrorMsg("");
-      inputRef.current?.focus();
+      // G-32-20: the field takes focus back so the next rule can be typed. Placed by the form, not
+      // navigated to by the user — his press was on «Добавить» or on an autocomplete row.
+      placeFocus(inputRef.current);
     },
     [input, action, onAdd, t, groupIds, onEnsureGroupCache]
   );
@@ -214,7 +217,8 @@ export function AddRuleInput({
     setShowAutocomplete(false);
     setDismissedForInput(false);
     setErrorMsg("");
-    inputRef.current?.focus();
+    // G-32-20: placed by the form after its own clear button was pressed.
+    placeFocus(inputRef.current);
   }, []);
 
   // Reopen autocomplete when user types more after dismissing

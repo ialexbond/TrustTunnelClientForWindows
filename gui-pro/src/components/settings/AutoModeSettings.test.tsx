@@ -79,6 +79,11 @@ describe("AutoModeSettings — the failover promise", () => {
     await screen.findByText("Авто-режим");
 
     const hint = screen.getByRole("button", { name: `Подробнее: ${FAILOVER_LABEL}` });
+    // The Tab keydown is not decoration. A bare `focus` event is what a window returning from the
+    // tray fires at the element it had focused, and `Tooltip` refuses to open a tip for a focus no
+    // input in this document could have caused (G-32-16 round three). Pressing Tab is what makes
+    // this a keyboard user rather than a window coming back.
+    fireEvent.keyDown(document.body, { key: "Tab" });
     fireEvent.focus(hint);
     expect(await screen.findByText(/скорость и пинг не измеряются/i)).toBeInTheDocument();
     expect(screen.getByText(/само не возвращается/i)).toBeInTheDocument();

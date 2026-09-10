@@ -242,6 +242,7 @@ export function ServerTabs({
     if (nextIndex !== null) {
       e.preventDefault();
       // Manual activation: move focus only, do NOT call setActiveTab.
+      // user-navigation: an arrow key in a tab strip is the user walking the tabs himself.
       document.getElementById(`tab-${tabs[nextIndex].id}`)?.focus();
     }
   };

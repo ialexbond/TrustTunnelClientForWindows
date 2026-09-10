@@ -1,6 +1,7 @@
 import React, { forwardRef, useRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { placeFocus } from "../hooks/usePointerPresence";
 import { Tooltip } from "./Tooltip";
 import { FieldError } from "./FieldError";
 
@@ -66,7 +67,9 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
         } as React.ChangeEvent<HTMLInputElement>;
         rest.onChange(event);
       }
-      internalRef.current?.focus();
+      // G-32-20: the field takes focus back because the field was cleared, not because the user
+      // navigated into it — his press was on the clear button.
+      placeFocus(internalRef.current);
     };
 
     const actionCount = actions?.length ?? 0;

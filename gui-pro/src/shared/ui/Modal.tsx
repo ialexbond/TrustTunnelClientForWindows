@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
+import { placeFocus } from "../hooks/usePointerPresence";
 
 type ModalSize = "sm" | "md" | "lg";
 
@@ -183,7 +184,11 @@ export function Modal({
     const first = box?.querySelector<HTMLElement>(FOCUSABLE);
     // Fall back to the content box itself (tabIndex=-1) when there are no
     // focusable children, so focus still enters the dialog.
-    (first ?? box)?.focus();
+    //
+    // G-32-20: through `placeFocus`, because the dialog is placing this focus — the user asked for
+    // a dialog, not for this particular control. Without it, a first focusable that carries a
+    // tooltip pops its tip the instant the dialog opens.
+    placeFocus(first ?? box);
   }, [mounted]);
 
   useEffect(() => {
@@ -191,7 +196,13 @@ export function Modal({
     // Modal asked to close → return focus to the trigger immediately (don't
     // wait for the 200ms exit animation). No-op on the initial closed render
     // because restoreFocusRef is still null until a real open captured it.
-    restoreFocusRef.current?.focus();
+    //
+    // G-32-20 — THE reported defect. The focus restore itself is correct and unchanged; what was
+    // wrong is that `Tooltip` could not tell this focus from a user arriving at the control. It can
+    // now, because `placeFocus` says so while the event is being dispatched. The case:
+    // hover «Показать конфиг», click it, close the dialog with the mouse, and the tip was painted
+    // on a row the pointer had left. Twenty-one modals reach him through this one line.
+    placeFocus(restoreFocusRef.current);
   }, [isVisible]);
 
   // Tab focus-trap — wrap last→first and first→last so keyboard focus can never
@@ -207,15 +218,17 @@ export function Modal({
     const firstEl = focusables[0];
     const lastEl = focusables[focusables.length - 1];
     const active = document.activeElement;
+    // user-navigation: the user pressed Tab. The trap only changes WHERE that Tab lands, so this is
+    // the user moving focus and a tooltip on the destination is exactly what a keyboard user wants.
     if (e.shiftKey) {
       if (active === firstEl) {
         e.preventDefault();
-        lastEl.focus();
+        lastEl.focus(); // user-navigation: his Shift+Tab, only wrapped
       }
     } else {
       if (active === lastEl) {
         e.preventDefault();
-        firstEl.focus();
+        firstEl.focus(); // user-navigation: his Tab, only wrapped
       }
     }
   }, []);

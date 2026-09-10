@@ -285,6 +285,235 @@ describe("GeneralSection", () => {
     );
   });
 
+  // ─── G-32-15: a stopped «Планировщик задач» must be NAMED, not met with «try again» ───
+  //
+  // Measured 2026-09-09: the Task Scheduler service stopped, rebooted, and pressing this
+  // switch six times in 33 seconds against «Не удалось сохранить настройку. Попробуйте ещё раз».
+  // Pressing a switch again cannot start a stopped service, so the advice was unfollowable by
+  // construction. Rust now asks the Service Control Manager and leads its refusal with a code.
+
+  it("names the stopped Task Scheduler service instead of saying «try again»", async () => {
+    const onSaveFailed = vi.fn();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return false;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      if (cmd === "set_autostart")
+        throw new Error(
+          "AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE: the Windows Task Scheduler service is not running. RegisterTaskDefinition: The system cannot find the path specified. (0x80070003)"
+        );
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} onSaveFailed={onSaveFailed} />);
+    fireEvent.click(screen.getByRole("switch", { name: AUTOSTART }));
+
+    await waitFor(() =>
+      expect(onSaveFailed).toHaveBeenCalledWith(
+        "messages.settings_autostart_scheduler_unavailable"
+      )
+    );
+    // T-28-20: the backend's own prose — and the HRESULT — stay in app.log.
+    expect(screen.queryByText(/RegisterTaskDefinition|0x80070003/)).toBeNull();
+  });
+
+  it("calls the service by the name Windows itself shows in the services list", () => {
+    // The owner reads «Планировщик задач» in services.msc. A sentence naming «Планировщик заданий»
+    // sends him looking for something that is not in the list — the sort of near-miss that makes a
+    // remedy unfollowable while looking perfectly helpful.
+    expect(ru.messages.settings_autostart_scheduler_unavailable).toContain("Планировщик задач");
+    expect(ru.messages.settings_autostart_scheduler_unavailable).not.toContain(
+      "Планировщик заданий"
+    );
+    // The same slip lives in the row's own «could not read» sentence, which is the OTHER surface
+    // this defect shows on — the dim row the read path produces.
+    expect(ru.settings.app.autostart_unknown).not.toContain("Планировщик заданий");
+  });
+
+  it("records a failed MOUNT read in the activity log, not only a failed refresh", async () => {
+    // The instrument gap G-32-15 turned up. `refresh` has logged `settings.autostart.read_failed`
+    // since G-32-13; the mount read swallowed its failure with a bare `.catch`, so the very first
+    // read of a session — the one that runs before any window focus — left no trace at all. The
+    // owner's activity.log for 17:08–17:09 is silent for exactly that reason.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") throw new Error("ITaskService::Connect failed");
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "write_activity_log",
+        expect.objectContaining({
+          message: expect.stringContaining("settings.autostart.read_failed trigger=mount"),
+        })
+      )
+    );
+  });
+
+  // ─── G-32-18: the READ path knows the reason too, and must say it ───
+  //
+  // Measured 2026-09-10, build `x4nb7d`, with the service really stopped. `app.log` carried
+  // «AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE: the Windows Task Scheduler service («Schedule») is not
+  // running…» while `activity.log` carried a bare `settings.autostart.read_failed trigger=tab-poll`
+  // every five seconds — and the ROW showed the generic «Не удалось прочитать состояние». The
+  // classification existed, crossed the Rust boundary, and died in a `.catch` that took no argument.
+  //
+  // These assert on what RENDERS, not on an internal flag: the defect was invisible to every flag —
+  // `autostartUnreadable` was perfectly correct the whole time — and visible only on screen.
+
+  /** What `task_is_enabled` really rejects with once `explain_scheduler_failure` has classified it. */
+  const SCHEDULER_DOWN =
+    "AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE: the Windows Task Scheduler service («Schedule») is " +
+    "not running, so no logon task can be registered, read or removed until it is started. " +
+    "ITaskFolder::GetFolder: The system cannot find the path specified. (0x80070003)";
+
+  it("names the stopped Task Scheduler service on the ROW, not only in the save message", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      // A bare string, not an `Error`: that is what a Tauri command declared `Result<_, String>`
+      // actually rejects with, and the row has to read the code out of that shape.
+      if (cmd === "get_autostart") return Promise.reject(SCHEDULER_DOWN);
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    // `active={false}` ISOLATES THE MOUNT READ, and it is here because a mutation said so: with the
+    // default `active`, the tab-active refresh fires immediately after mount and its own failure
+    // sets the same key — so a mount handler that dropped the reason (which is exactly the defect
+    // this round repaired) was covered up within the same tick and this assertion still passed. A
+    // test that cannot see the defect it was written for is a test that would have shipped it. The
+    // refresh path is not left untested by this: it has its own case, immediately below.
+    render(<GeneralSection {...defaultProps} active={false} />);
+
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(target).toBeDisabled());
+    // The sentence is read out of the shipped bundle, never retyped here.
+    await waitFor(() =>
+      expect(
+        screen.getByText(ru.settings.app.autostart_scheduler_unavailable)
+      ).toBeInTheDocument()
+    );
+    // The generic sentence is what the owner actually read, and it must be gone when the program
+    // knows better.
+    expect(screen.queryByText(ru.settings.app.autostart_unknown)).toBeNull();
+    expect(screen.queryByText(ru.settings.app.autostart_desc)).toBeNull();
+    // T-28-20: only the CODE crosses the boundary. The backend's prose, the interface name and the
+    // HRESULT stay in app.log.
+    expect(screen.queryByText(/AUTOSTART_REFUSED|GetFolder|0x80070003|Schedule/)).toBeNull();
+  });
+
+  it("names the service when the scheduler stops while the user is sitting on the tab", async () => {
+    // The other half of the same contract, on the path a real log shows firing every five
+    // seconds: the first read succeeds, the service stops, and the refresh must carry the reason
+    // through exactly as the mount read does.
+    let readable = true;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") {
+        if (!readable) return Promise.reject(SCHEDULER_DOWN);
+        return true;
+      }
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    const target = screen.getByRole("switch", { name: AUTOSTART });
+    await waitFor(() => expect(target).toHaveAttribute("aria-checked", "true"));
+
+    readable = false;
+    fireEvent.focus(window);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(ru.settings.app.autostart_scheduler_unavailable)
+      ).toBeInTheDocument()
+    );
+    expect(target).toBeDisabled();
+  });
+
+  it("puts the code in the read_failed log line, so the next diagnosis is one grep", async () => {
+    // `settings.autostart.read_failed trigger=tab-poll` on its own is what two minutes of the
+    // owner's activity.log says, twenty-four times, about a cause the program had already named in
+    // the other file. The line now carries the code, so the two files can be read as one.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return Promise.reject(SCHEDULER_DOWN);
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "write_activity_log",
+        expect.objectContaining({
+          message:
+            "settings.autostart.read_failed trigger=mount code=AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE",
+        })
+      )
+    );
+  });
+
+  it("logs code=UNCODED rather than a slice of the backend's own sentence", async () => {
+    // The `sshErrorCode` vocabulary, for the same reason it exists there: the field is whitelisted
+    // by SHAPE, so nothing a backend happens to put in front of the first colon can ride into the
+    // user's log inside a field labelled `code=`.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart")
+        return Promise.reject(new Error("ITaskService::Connect failed: 0x800706ba"));
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "write_activity_log",
+        expect.objectContaining({
+          message: "settings.autostart.read_failed trigger=mount code=UNCODED",
+        })
+      )
+    );
+  });
+
+  it("keeps the generic sentence for a read that failed for a reason nobody classified", async () => {
+    // The control for the two above, and it is not decoration: a mapping that answered «the
+    // scheduler is stopped» to every failed read would send people to a service that was running
+    // all along — the «левая ошибка» the owner asked to be protected from in G-32-15.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart")
+        return Promise.reject(new Error("ITaskService::Connect failed"));
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+
+    await waitFor(() =>
+      expect(screen.getByText(ru.settings.app.autostart_unknown)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(ru.settings.app.autostart_scheduler_unavailable)).toBeNull();
+  });
+
+  it("calls the service by its services.msc name on the ROW's sentence as well", () => {
+    // The same near-miss guarded for the save message: «Планировщик заданий» is not in the list the
+    // owner opens, so a remedy naming it is unfollowable while looking perfectly helpful.
+    expect(ru.settings.app.autostart_scheduler_unavailable).toContain("Планировщик задач");
+    expect(ru.settings.app.autostart_scheduler_unavailable).not.toContain("Планировщик заданий");
+    // And it must not end in advice the row cannot take: the switch is disabled while unreadable,
+    // so there is nothing here to «попробовать снова».
+    expect(ru.settings.app.autostart_scheduler_unavailable).not.toContain("попробуйте снова");
+  });
+
   it("falls back to the generic message for a refusal it has no sentence for", async () => {
     // A failure nobody anticipated is still better shown as «could not save» than as a raw string
     // from a scheduler API — the fallback is the safety net, not a bug.

@@ -257,6 +257,7 @@ export function CIDRPicker({
           e.preventDefault();
           const prev = octetRefs[(index - 1) as 0 | 1 | 2]?.current;
           if (prev) {
+            // user-navigation: the user is holding Backspace across the octets — their own key, their own step.
             prev.focus();
             // Cursor в конец значения — следующий Backspace удалит
             // последний символ, не выделит всё поле.

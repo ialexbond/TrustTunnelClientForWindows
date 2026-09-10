@@ -186,7 +186,7 @@ windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_
 #                                  и PSID, и токен пришлось бы гонять между ними приведением
 #                                  сырых указателей. Одна feature дешевле, чем каст, который
 #                                  компилятор проверить не может.
-windows = { version = "0.61.3", features = ["Win32_System_TaskScheduler", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemServices", "Win32_System_Threading"] }
+windows = { version = "0.61.3", features = ["Win32_System_TaskScheduler", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_Services"] }
 
 [dev-dependencies]
 regex = "1"

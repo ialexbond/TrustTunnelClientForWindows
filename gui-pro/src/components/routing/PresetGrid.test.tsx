@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import i18n from "../../shared/i18n";
 // Wave 0 RED (Plan 22-01): the production PresetGrid does not exist yet — this import fails to
 // resolve, so every case here is RED. The assertions FREEZE the component's props contract that
@@ -151,5 +151,30 @@ describe("PresetGrid (Wave 0 RED — contract for Plan 22-04)", () => {
     expect(tile).toBeDisabled();
     fireEvent.click(tile);
     expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  // ── (f) pointer presence (G-32-16) ─────────────────────────────────────────
+  // Same class as the stuck tooltip. A tile's hover tint is set on `onMouseEnter` and cleared on
+  // `onMouseLeave` only; hiding the window to the tray moves no pointer, so the tint is still on
+  // when the window comes back over a webview the pointer has never been in. The «Маршрутизация»
+  // tab persists across a hide, so the tile is there to be found still lit.
+  it("does not keep a tile's hover tint through a window hide and re-show", () => {
+    renderGrid();
+    const tile = screen.getByRole("button", { name: /YouTube/i });
+
+    fireEvent.mouseEnter(tile);
+    const lit = tile.getAttribute("style");
+    expect(lit).not.toContain("var(--color-border)");
+
+    // Tray click hides the window; the tray icon brings it back. No pointer event either way.
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(tile.getAttribute("style")).toContain("var(--color-border)");
+
+    // And a genuine re-entry still lights it.
+    fireEvent.mouseEnter(tile);
+    expect(tile.getAttribute("style")).toBe(lit);
   });
 });

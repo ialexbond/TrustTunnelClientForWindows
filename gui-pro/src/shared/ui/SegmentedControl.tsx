@@ -80,6 +80,7 @@ export function SegmentedControl({
     select(options[next].value);
     // Roving tabindex is only half a pattern without this line: the newly selected option becomes
     // the single tab stop, so DOM focus MUST follow it (review CR-01).
+    // user-navigation: `move` is only ever reached from an arrow key — the user's own step.
     buttonRefs.current[next]?.focus();
   };
 

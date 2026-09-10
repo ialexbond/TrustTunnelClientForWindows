@@ -77,6 +77,7 @@ export function TabsInline({
       e.preventDefault();
       // Manual activation per WAI-ARIA Tabs Pattern: focus moves only,
       // do NOT call setActiveTab. Activation requires Enter/Space/click.
+      // user-navigation: an arrow key in a tab strip is the user walking the tabs himself.
       document
         .getElementById(`tab-${prefix}-${tabs[nextIndex].id}`)
         ?.focus();

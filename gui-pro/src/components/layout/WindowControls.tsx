@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { usePointerContextLoss } from "../../shared/hooks/usePointerPresence";
 
 // Graceful degradation: vitest не имеет Tauri runtime → getCurrentWindow()
 // throws на module load, ломая WindowControls+TitleBar unit tests. Оборачиваем
@@ -35,20 +36,25 @@ export function WindowControls() {
   const handleMinimize = useCallback(() => appWindow?.minimize(), []);
   const handleClose = useCallback(() => appWindow?.close(), []);
 
-  // Сбрасываем hover-state когда окно теряет фокус (например, tray-click
-  // спрятал окно через `window.hide()`). React компонент не unmount'ится
-  // при hide, поэтому `onMouseLeave` никогда не стреляет — кнопка остаётся
-  // визуально подсвеченной до следующего mouseEnter. Слушаем Tauri blur,
-  // resetим state → при следующем show-е кнопка в нейтральном состоянии.
-  useEffect(() => {
-    if (!appWindow) return;
-    const unlisten = appWindow.listen("tauri://blur", () => {
-      setHovered(null);
-    });
-    return () => {
-      void unlisten.then((fn) => fn());
-    };
-  }, []);
+  // Hiding the window to the tray moves no pointer, so `onMouseLeave` never fires and the button
+  // stays lit — the highlight comes back with the window, over a webview the pointer has never
+  // been in. This is the paired symptom of the stuck tooltip (G-32-16) and the owner reported both
+  // together: «это не единственное место».
+  //
+  // The `tauri://blur` subscription that used to live here is gone. It covered the leaving edge
+  // only, and it bound nothing at all under vitest (`appWindow` is null there), so the stuck
+  // highlight was untestable and therefore untested. Its replacement, which expired the highlight on
+  // a list of DOM events, shipped as build t3ykm8 and did not hold either — none of those events
+  // arrives on this machine's close-to-tray path. `usePointerContextLoss` now leans on the gap
+  // between two painted frames instead; see usePointerPresence.
+  //
+  // The second argument says «I currently have a button lit». It is load-bearing twice over: the
+  // frame clock does not run at all unless someone is holding something on screen, and it is how an
+  // expiry knows whether it took anything down and is therefore worth a line in the activity log.
+  usePointerContextLoss(
+    useCallback(() => setHovered(null), []),
+    hovered !== null,
+  );
 
   return (
     <div className="flex items-center h-full" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>

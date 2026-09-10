@@ -6,6 +6,7 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { usePointerContextLoss } from "./shared/hooks/usePointerPresence";
 import "./shared/styles/tokens.css";
 import "./index.css";
 
@@ -239,6 +240,16 @@ function TrayMenu() {
 
 function TrayMenuButton({ item }: { item: MenuItem }) {
   const [hover, setHover] = useState(false);
+
+  // G-32-16: this popup hides itself on blur (see the auto-hide effect above) and is re-shown
+  // WITHOUT unmounting, so a highlight set by `onMouseEnter` comes back with it — the menu reopens
+  // with an item already lit under a pointer that is somewhere else entirely. Expire the highlight
+  // on any document-level loss of the pointer, the same rule the main window's tooltips use.
+  usePointerContextLoss(
+    useCallback(() => setHover(false), []),
+    hover,
+  );
+
   const bg = hover
     ? item.variant === "danger"
       ? "var(--color-status-error-bg)"

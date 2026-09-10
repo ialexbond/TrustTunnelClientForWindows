@@ -127,6 +127,7 @@ export function TabNavigation({
     if (nextIdx !== null) {
       // Manual activation: move focus, DO NOT call onTabChange.
       // User must press Enter/Space/click to activate the focused tab.
+      // user-navigation: an arrow key in a tab strip is the user walking the tabs himself.
       tabEls[nextIdx].focus();
     }
   };
