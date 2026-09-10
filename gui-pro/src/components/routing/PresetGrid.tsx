@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- the PRESET_TILES backing map + tile types are co-located with the grid by design (single data-driven source of truth for the tile set, adjusted at the render-review checkpoint per D-01a). */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Globe,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { PanelHeader } from "../../shared/ui/PanelHeader";
+import { usePointerContextLoss } from "../../shared/hooks/usePointerPresence";
 import type { RoutingRules, RouteAction, RuleEntryType } from "./useRoutingState";
 
 // ═══════════════════════════════════════════════════════
@@ -156,6 +157,15 @@ interface TileButtonProps {
 function PresetTileButton({ tile, added, disabledHint, onAdd }: TileButtonProps) {
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
+
+  // G-32-16: a hide to the tray moves no pointer, so `onMouseLeave` never fires and the tint is
+  // still on when the window comes back over a webview the pointer has never been in. This tab
+  // persists across a hide, so the tile is there to be found still lit. Expire the hover whenever
+  // the document stops being able to vouch for the pointer — see usePointerPresence.
+  usePointerContextLoss(
+    useCallback(() => setHover(false), []),
+    hover,
+  );
 
   const Icon = tile.icon;
   const tint = targetTint[tile.target];

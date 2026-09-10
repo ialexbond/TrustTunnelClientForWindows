@@ -43,7 +43,8 @@ interface Props {
 type GeneralRowKey = "autostart" | "startMinimized" | "logging" | "geodata";
 
 /**
- * Refusal code → the sentence the user actually reads.
+ * Refusal code → the sentences the user actually reads. TWO sentences per code, because there are
+ * two surfaces and they are not interchangeable.
  *
  * The owner, 2026-09-09, installed the program into a root-level folder, could not switch autostart
  * back on, and got «Не удалось сохранить настройку. Попробуйте ещё раз» — advice that cannot work,
@@ -55,19 +56,83 @@ type GeneralRowKey = "autostart" | "startMinimized" | "logging" | "geodata";
  * its refusal with a stable CODE, and the mapping from code to a localized sentence lives here.
  * Same shape as `REASON_CODE_I18N` in `vpnEventHelpers.ts`, for the same reason.
  *
+ * G-32-18 added the `read` column rather than a second table. The read path had the identical
+ * defect — `task_is_enabled` has ended in `.map_err(explain_scheduler_failure)` since 32-FIX-25, so
+ * the code crossed the boundary all along and a `.catch(() => …)` that took no argument dropped it
+ * — and a code that lived in two tables would be a code that goes stale in one of them. One row per
+ * code, one place to change it.
+ *
+ *   `save` — the tab's failure slot, after a write the backend refused;
+ *   `read` — the ROW's own description, while the state cannot be read at all. Optional: a code with
+ *            no `read` sentence falls back to the generic «не удалось прочитать».
+ *
+ * The two are worded differently on purpose for the scheduler, and the difference is not cosmetic:
+ * the save sentence ends «Запустите службу и попробуйте снова», and there is nothing to try again
+ * from a row whose switch is `disabled` precisely because the state is unreadable. Advice a surface
+ * cannot take is the defect G-32-14 and G-32-15 were both about.
+ *
  * An unmapped failure falls back to the generic message — a refusal nobody anticipated is still
  * better shown as «could not save» than as a raw English string from a scheduler API.
  */
-const AUTOSTART_FAILURE_I18N: Record<string, string> = {
-  AUTOSTART_REFUSED_REPLACEABLE: "messages.settings_autostart_needs_program_files",
-  AUTOSTART_REFUSED_ACL_UNKNOWN: "messages.settings_autostart_acl_unknown",
+const AUTOSTART_FAILURE_I18N: Record<string, { save: string; read?: string }> = {
+  AUTOSTART_REFUSED_REPLACEABLE: { save: "messages.settings_autostart_needs_program_files" },
+  AUTOSTART_REFUSED_ACL_UNKNOWN: { save: "messages.settings_autostart_acl_unknown" },
+  // G-32-15. The owner stopped the Windows «Планировщик задач» service, rebooted, and pressed this
+  // switch six times in 33 seconds against «Попробуйте ещё раз» — the one remedy that could not
+  // work, because pressing a switch again does not start a stopped service. Rust now asks the
+  // Service Control Manager (not an HRESULT, which on a healthy machine also means «no such
+  // folder») and leads its refusal with this code.
+  //
+  // G-32-18: and the same service stopped is ALSO why the row cannot read the state, which is the
+  // form he met on 2026-09-10 — twenty-four bare `read_failed` lines against a generic sentence,
+  // while app.log named the cause in full.
+  AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE: {
+    save: "messages.settings_autostart_scheduler_unavailable",
+    read: "settings.app.autostart_scheduler_unavailable",
+  },
 };
 
-/** The code a refusal leads with, if it is one this screen knows how to explain. */
-function autostartFailureKey(error: unknown): string | undefined {
+/**
+ * The shape of a code, and the reason the log line is safe.
+ *
+ * Whitelisted by SHAPE rather than by «whatever precedes the first colon», exactly as `sshErrorCode`
+ * is: the output of [`autostartFailureCode`] is written into the user's activity log, and a field
+ * labelled `code=` must not be able to carry a slice of a backend sentence into it. Capitals,
+ * digits and underscores only — no prose can satisfy it.
+ */
+const AUTOSTART_CODE = /^AUTOSTART_[A-Z0-9][A-Z0-9_]{0,60}$/;
+
+/**
+ * The machine code a refusal leads with, or `"UNCODED"`.
+ *
+ * `UNCODED` is the vocabulary the SSH work already uses, and it is a useful thing to read in a log:
+ * «something failed and it was not one of ours». A well-formed code this screen has no sentence for
+ * still logs itself — the log is a diagnosis aid, and a code the UI has not learned yet is exactly
+ * what the next diagnosis needs to see.
+ */
+function autostartFailureCode(error: unknown): string {
   const text = typeof error === "string" ? error : String((error as Error)?.message ?? error ?? "");
-  const code = text.split(":", 1)[0]?.trim();
-  return code ? AUTOSTART_FAILURE_I18N[code] : undefined;
+  const head = text.split(":", 1)[0]?.trim() ?? "";
+  return AUTOSTART_CODE.test(head) ? head : "UNCODED";
+}
+
+/** The sentence a refused WRITE gets, if this screen knows how to explain the code. */
+function autostartSaveFailureKey(error: unknown): string | undefined {
+  return AUTOSTART_FAILURE_I18N[autostartFailureCode(error)]?.save;
+}
+
+/**
+ * The sentence a failed READ puts in the row's description — always one, never `undefined`.
+ *
+ * The row has to say SOMETHING when it cannot read the state (that is the G-32-13 contract), so the
+ * generic sentence is the floor rather than an absence. Only a code with its own `read` entry
+ * replaces it, which keeps the G-32-15 guarantee pointing the same way: a failure nobody classified
+ * is never blamed on a service that may well be running.
+ */
+function autostartReadFailureKey(error: unknown): string {
+  return (
+    AUTOSTART_FAILURE_I18N[autostartFailureCode(error)]?.read ?? "settings.app.autostart_unknown"
+  );
 }
 
 /**
@@ -180,15 +245,66 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
   // control is disabled: reading and writing go through the same three COM acquisitions, so a read
   // that could not be made is a write that cannot be made either, and a switch that can be moved
   // implies the app knows where it stands now. The remedy is in the sentence.
-  const [autostartUnreadable, setAutostartUnreadable] = useState(false);
+  //
+  // G-32-18: a KEY, not a boolean, and `null` is the readable state. The flag was correct and
+  // useless — it had room for «it failed» and nowhere to put «why», so the classification Rust had
+  // already computed (`AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE`, from the Service Control Manager)
+  // was thrown away by a `.catch` that took no argument, and the owner read a generic «не удалось
+  // прочитать состояние» about a stopped service the program had named in app.log seconds earlier.
+  // One piece of state rather than a flag beside a reason: two fields that must move together are a
+  // drift waiting to happen, and this row cannot say «unreadable» without also saying which
+  // sentence.
+  const [autostartUnreadableKey, setAutostartUnreadableKey] = useState<string | null>(null);
+
+  // Declared HERE rather than beside the refresh instrument it was introduced for, because the
+  // mount read below needs it too — see the `read_failed trigger=mount` line. The explanation of
+  // what the instrument is for still lives with the refresh effect further down.
+  const { log: activityLog } = useActivityLog();
+
+  /**
+   * One failed read, handled once — the log line and the row's sentence from the SAME rejection.
+   *
+   * G-32-18. There are three places a read can fail (mount, refresh, and the re-read after a
+   * refused write) and before this they each did their own thing with the failure: two logged
+   * without a reason, one logged nothing, all three set the same reasonless flag. Folding them into
+   * one function is what makes «the log line and the screen always agree» a property of the code
+   * rather than of three copies staying in step. The trigger is the only thing that differs, so the
+   * trigger is the only parameter besides the rejection itself.
+   */
+  const readFailed = useCallback(
+    (trigger: string, error: unknown) => {
+      activityLog(
+        "STATE",
+        `settings.autostart.read_failed trigger=${trigger} code=${autostartFailureCode(error)}`,
+        "GeneralSection"
+      );
+      setAutostartUnreadableKey(autostartReadFailureKey(error));
+    },
+    [activityLog]
+  );
 
   useEffect(() => {
     invoke<boolean>("get_autostart")
       .then((value) => {
-        setAutostartUnreadable(false);
+        setAutostartUnreadableKey(null);
         seedIfUntouched("autostart", setAutostart)(value);
       })
-      .catch(() => setAutostartUnreadable(true));
+      .catch((e) => {
+        // G-32-15, the instrument gap. `refresh` has logged a failed read since G-32-13; THIS
+        // read — the first of every session, the one that runs before any window focus — swallowed
+        // its failure in a bare `.catch` and left no trace at all. That is why the
+        // activity.log is silent for 17:08–17:09 while app.log carries six failures: nothing was
+        // ever written for the mount read, so the file could not say whether the row had gone dim
+        // or was showing a confident OFF. It can now.
+        //
+        // G-32-18: and it takes the rejection now. It used to be `.catch(() => …)` — the parameter
+        // list is the whole defect: the reason arrived, was never bound to a name, and the row said
+        // «не удалось прочитать» about a cause it was holding.
+        readFailed("mount", e);
+      });
+    // `activityLog` is a stable `useCallback` with no dependencies, so this stays a once-per-launch
+    // mount read rather than becoming a re-running effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // A write in flight owns the handle. The refresh below must not read across it: the value the
@@ -231,7 +347,9 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
   // reasoning from the source settled it. So the row now says out loud, into activity.log, WHICH
   // trigger fired and WHAT the backend answered; the next run reads the file instead of memory.
   // The line is one per return-to-window and carries no user data.
-  const { log: activityLog } = useActivityLog();
+  //
+  // The hook itself is called further up, next to the mount read, because G-32-15 showed that read
+  // needs the same instrument: it was the one path that could fail in complete silence.
 
   // What is on screen right now, readable from a callback created in an earlier render. Only the
   // change-detection above uses it; nothing renders from it.
@@ -267,15 +385,12 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
             );
           }
           autostartSeeded.current = true;
-          setAutostartUnreadable(false);
+          setAutostartUnreadableKey(null);
           setAutostart(value);
         })
-        .catch(() => {
-          activityLog("STATE", `settings.autostart.read_failed trigger=${trigger}`, "GeneralSection");
-          setAutostartUnreadable(true);
-        });
+        .catch((e) => readFailed(trigger, e));
     },
-    [activityLog]
+    [activityLog, readFailed]
   );
 
   useEffect(() => {
@@ -356,14 +471,17 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
       // The re-read is the same command as the mount read and carries the same third answer, so it
       // updates the same flag. Without this a refused write followed by an unreadable re-read would
       // put the switch back on the last value the app happened to report and present it as fact.
-      const failureKey = autostartFailureKey(e);
+      const failureKey = autostartSaveFailureKey(e);
       await revertTo(setAutostart, reported, async () => {
         try {
           const value = await invoke<boolean>("get_autostart");
-          setAutostartUnreadable(false);
+          setAutostartUnreadableKey(null);
           return value;
         } catch (e) {
-          setAutostartUnreadable(true);
+          // G-32-18: the re-read's own failure names its own reason too. It is not logged as a
+          // `read_failed` line: this read is part of a write the user just made and the write is
+          // already accounted for in app.log, so a second line here would double-count one action.
+          setAutostartUnreadableKey(autostartReadFailureKey(e));
           throw e;
         }
       });
@@ -508,9 +626,14 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
           // The row's own description slot carries the bad news — no new device, no badge, no
           // second card. It replaces the ordinary line rather than joining it: a row stating both
           // what the setting does and that it cannot be read would be claiming two things at once.
+          // G-32-18: the sentence comes from the KEY the failed read carried, so the row says the
+          // most specific thing the program actually knows — «the Task Scheduler service is
+          // stopped» when that is what Rust determined from the Service Control Manager, and the
+          // generic «could not read» otherwise. Not a second device and not a second row: the same
+          // slot, better words.
           description={
-            autostartUnreadable
-              ? t("settings.app.autostart_unknown")
+            autostartUnreadableKey
+              ? t(autostartUnreadableKey)
               : t("settings.app.autostart_desc")
           }
           control={
@@ -519,7 +642,7 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
               onChange={handleAutostartChange}
               // `disabled`, not `busy`: nothing is in flight here, the setting is unavailable —
               // which is the distinction those two props exist to keep apart.
-              disabled={autostartUnreadable}
+              disabled={autostartUnreadableKey !== null}
               busy={pendingRows.has("autostart")}
               aria-label={autostartLabel}
             />

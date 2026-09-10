@@ -1,6 +1,7 @@
 import React, { useState, useRef, forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { Eye, EyeOff, Lock, X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { placeFocus } from "../hooks/usePointerPresence";
 import { Tooltip } from "./Tooltip";
 import { FieldError } from "./FieldError";
 
@@ -70,7 +71,8 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
         } as React.ChangeEvent<HTMLInputElement>;
         rest.onChange(event);
       }
-      internalRef.current?.focus();
+      // G-32-20: placed by the field after its own clear button was pressed — see ActionInput.
+      placeFocus(internalRef.current);
     };
 
     const handleVisibilityClick = () => {

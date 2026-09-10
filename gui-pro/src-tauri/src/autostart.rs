@@ -46,8 +46,8 @@ use crate::app_settings;
 use crate::logging::log_app;
 #[cfg(windows)]
 use crate::task_scheduler::{
-    autostart_task_name, delete_task, register_logon_task, remove_legacy_root_task, task_exists,
-    task_is_enabled,
+    autostart_task_name, delete_task, explain_scheduler_failure, register_logon_task,
+    remove_legacy_root_task, task_exists, task_is_enabled,
 };
 
 /// The two registry keys the abandoned mechanism wrote into.
@@ -239,6 +239,12 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
                 msg
             })?;
             let limit = register_logon_task(&autostart_task_name()?, &exe).map_err(|msg| {
+                // G-32-15: before it is logged or shown, a raw scheduler failure is given its
+                // stable code IF the Service Control Manager confirms the Task Scheduler service
+                // is down. The owner met this exact path six times in 33 seconds and was told
+                // «Попробуйте ещё раз» — the one remedy that could not work. The classification
+                // happens here, on the failure, and never on the success path.
+                let msg = explain_scheduler_failure(msg);
                 log_app("warn", &format!("[autostart] enable failed: {msg}"));
                 msg
             })?;
@@ -252,6 +258,10 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
             // the value while the switch still showed ON. Only a task verifiably still present
             // after a failed delete reaches here as an error.
             delete_task(&autostart_task_name()?).map_err(|msg| {
+                // The same classification as the enable arm. Switching autostart OFF against a
+                // stopped scheduler fails for exactly the same reason and deserves exactly the
+                // same sentence — the defect is the message, and it is symmetric.
+                let msg = explain_scheduler_failure(msg);
                 log_app("warn", &format!("[autostart] disable failed: {msg}"));
                 msg
             })?;
@@ -305,9 +315,17 @@ pub fn reconcile_autostart_on_startup() {
                         "info",
                         &format!("[autostart] the logon task was missing while the stored choice is ON — re-registered (installer wipe recovery, ExecutionTimeLimit={limit})"),
                     ),
+                    // Classified for the LOG, which is the only surface this path has — the
+                    // reconcile runs at startup with nobody looking. The app.log carried
+                    // this exact line at 17:08:54 with a bare `0x80070003`, and reading it took a
+                    // person who already knew what that HRESULT meant on a machine whose scheduler
+                    // was off. Now the line says so itself.
                     Err(e) => log_app(
                         "warn",
-                        &format!("[autostart] failed to re-register the missing logon task: {e}"),
+                        &format!(
+                            "[autostart] failed to re-register the missing logon task: {}",
+                            explain_scheduler_failure(e)
+                        ),
                     ),
                 }
             }

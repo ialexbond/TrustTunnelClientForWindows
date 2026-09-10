@@ -9,8 +9,16 @@ import {
   type ReactNode,
   type ReactElement,
   type KeyboardEvent as ReactKeyboardEvent,
+  type FocusEvent as ReactFocusEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  canObservePointer,
+  isFocusBeingPlaced,
+  isFocusUserInitiated,
+  usePointerPresence,
+  type PresenceSignal,
+} from "../hooks/usePointerPresence";
 
 type TooltipPosition = "top" | "bottom" | "left" | "right";
 
@@ -30,9 +38,31 @@ interface TooltipProps {
 }
 
 export function Tooltip({ text, children, position = "bottom", maxWidth = 224, delay = 400, className, disabled = false }: TooltipProps) {
-  const [show, setShow] = useState(false);
+  // Two INDEPENDENT claims on visibility, deliberately not one `show` flag (G-32-16). Collapsing
+  // them into one boolean is what forced the first fix to choose between dropping a legitimate
+  // keyboard tip and keeping an orphaned hover tip.
+  //
+  // The claims differ in WHAT expires them, not in whether they can (round three). The keyboard
+  // claim outlives the pointer's own `hover-recheck` — «the cursor is no longer on this element»
+  // says nothing about the focus — and nothing else. Every other signal is about the window itself
+  // going away or coming back, and a tip raised by a Tab before that no longer belongs on screen;
+  // native Windows agrees, an alt-tab there keeps the focus ring and drops the tip. Round two had
+  // this claim expire for NOTHING, on the reasoning that a window regaining focus restores the
+  // focused element and the tip belongs with it. The real log refuted the premise, and the report
+  // refuted the result — «теперь оно вообще не пропадает».
+  const [hoverShow, setHoverShow] = useState(false);
+  const [focusShow, setFocusShow] = useState(false);
+  const show = hoverShow || focusShow;
+
   const triggerRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
 
   // CC-7: a generated id ties the tooltip content (role="tooltip") to the
   // focusable child via aria-describedby, so screen readers announce the tip
@@ -45,57 +75,124 @@ export function Tooltip({ text, children, position = "bottom", maxWidth = 224, d
   // still does. A click also dismisses any hover-shown tip (the action was taken).
   const pointerFocusRef = useRef(false);
 
+  // G-32-16: the tip is on screen only while the pointer is ATTESTED to be on the trigger, and the
+  // attestation expires the moment the document loses the ability to see the pointer. The FIRST
+  // version of this hook took that from `blur` / `focus` / `visibilitychange`; it shipped as build
+  // t3ykm8 and the tooltip still hung on a real machine, which proved his close-to-tray path emits none of
+  // them here. The rule now rests on the gap between two painted frames, which no window manager
+  // has to cooperate to produce — see usePointerPresence.
+  //
+  // `triggerRef` is handed over so the loop can also ask the DOM directly whether the pointer is
+  // still on this wrapper. That is a cross-check, not the mechanism: it calibrates itself on the
+  // first frame and stays silent wherever `:hover` cannot answer. jsdom does answer it for an
+  // element that received a dispatched mouseEnter (measured), so the rule is live in this file's
+  // tests rather than switched off in them — the failure mode of the fix this one replaces.
+  //
+  // The expiry callback takes DOWN what is showing and deliberately does NOT also cancel a pending
+  // reveal timer. Cancelling here as well would make the precondition below unreachable — a guard
+  // that can never fail, which is the shape of check this phase keeps finding. Leaving the timer to
+  // run and be refused by the precondition is what makes that precondition the mechanism rather
+  // than a second copy of it, and it holds for any future path that drops presence without coming
+  // through here. A refused timer touches no state, so nothing leaks.
+  const { presentRef, enter, leave } = usePointerPresence(
+    useCallback((signal: PresenceSignal) => {
+      setHoverShow(false);
+      // Defence in depth, and deliberately NOT the mechanism. On the path these signals
+      // arrive BEFORE the returning focus does, so on their own they would take the tip down a
+      // moment before the focus put it back up — which is exactly what round one shipped. What
+      // decides the case is the refusal in `handleFocus`; this is what makes sure that a claim
+      // raised while the window was away cannot outlive the window's next departure either.
+      if (signal !== "hover-recheck") setFocusShow(false);
+    }, []),
+    triggerRef,
+  );
+
   const handleEnter = () => {
     if (disabled) return;
-    timerRef.current = setTimeout(() => setShow(true), delay);
+    enter();
+    clearTimer();
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      // Showing is a PRECONDITION, not a reaction: when the delay elapses, re-verify that the
+      // pointer is still attested and that the document can still see it. Without this a timer
+      // armed a moment before a hide would paint a tip into a window nobody is looking at, ready
+      // to greet the user on the next show.
+      if (!presentRef.current || !canObservePointer()) return;
+      setHoverShow(true);
+    }, delay);
   };
 
   const handleLeave = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    setShow(false);
+    leave();
+    clearTimer();
+    setHoverShow(false);
   };
 
   const handlePointerDown = () => {
     pointerFocusRef.current = true;
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    setShow(false);
+    clearTimer();
+    // The action was taken — drop the tip but keep the attestation, since the pointer really is
+    // still on the trigger. Nothing re-arms the timer, so it stays down until a genuine re-entry,
+    // which is the behaviour this component has always had on click.
+    setHoverShow(false);
   };
 
   // CC-7: keyboard parity with hover. Focus events bubble through the wrapper, so
   // onFocus/onBlur on the wrapper fire when the interactive child gains or loses focus.
   // Show immediately on KEYBOARD focus (no hover delay), but NOT when the focus came
   // from a pointer press (that path is covered by hover) — see handlePointerDown.
-  const handleFocus = () => {
+  const handleFocus = (e: ReactFocusEvent<HTMLDivElement>) => {
     if (disabled) return;
+    // G-32-20, round four — asked FIRST, before the pointer-press bookkeeping.
+    //
+    // A dialog returns focus to the control that opened it when it closes; that is correct
+    // accessibility behaviour and it stays. But closing a dialog is itself something the user did a
+    // moment earlier — he clicked its close button — so the restored focus passes the «did the user
+    // do anything recently» test below and the tip was painted with the pointer nowhere near. The
+    // owner met this on «Показать конфиг» and asked, fairly, why this keeps being fixed one place at
+    // a time.
+    //
+    // There is no proxy needed for this class: the app is the thing moving the focus, and it says so
+    // (`placeFocus`).
+    //
+    // It sits above `pointerFocusRef` for readability, NOT for a reason that can be tested — the
+    // browser focuses a pressed control synchronously with the `mousedown` that arms that ref, so
+    // nothing of ours can run in between and no reachable sequence tells the two orders apart. Said
+    // plainly because this file has twice carried a rationale nothing could falsify.
+    if (isFocusBeingPlaced(e.target)) return;
     if (pointerFocusRef.current) {
       pointerFocusRef.current = false;
       return;
     }
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    setShow(true);
+    // G-32-16, round three — a focus event is not by itself a user action.
+    //
+    // The sequence: he presses «Закрыть» with the MOUSE, the window hides to the tray, he
+    // clicks the tray icon, the window returns and Windows restores focus to the last focused
+    // element — that same button. The DOM re-fires `focus` on it with no keypress and no pointer
+    // movement anywhere, `pointerFocusRef` was consumed by the press's own focus long before, and so
+    // this arrived looking exactly like a keyboard Tab. Round one raised the tip a moment after
+    // correctly dismissing it; round two raised a keyboard claim that was by design immune to every
+    // expiry rule, which is why he reported it as worse — «теперь оно вообще не пропадает».
+    //
+    // The question that separates a Tab from a window coming back is not WHEN the focus arrived but
+    // whether the user did anything that could have caused it, and it is asked here, at show time.
+    // A check made when the window LEFT would have to be delivered an event this machine has already
+    // been measured not to send — the mistake both previous rounds made.
+    if (!isFocusUserInitiated()) return;
+    clearTimer();
+    setFocusShow(true);
   };
 
   const handleBlur = () => {
     pointerFocusRef.current = false;
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    setShow(false);
+    clearTimer();
+    setFocusShow(false);
   };
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape" && show) {
-      setShow(false);
+      setHoverShow(false);
+      setFocusShow(false);
     }
   };
 
@@ -103,56 +200,15 @@ export function Tooltip({ text, children, position = "bottom", maxWidth = 224, d
   // on an unmounted component. Symptom without this: user hovers trigger →
   // parent unmounts during the 400ms delay (e.g. VPN event rerender swaps the
   // titlebar button) → setTimeout fires → setState warning.
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, []);
+  useEffect(() => clearTimer, [clearTimer]);
 
-  // Hide tooltip при blur окна (tray-click скрывает window через hide()).
-  // Без этого фикса: пользователь hover над кнопкой → tooltip показан →
-  // tray-click скрывает окно → при show tooltip остаётся "висеть" поверх
-  // контента (потому что mouseLeave не стреляет когда окно просто hide).
-  // Парный symptom к WindowControls hover-state stuck.
-  //
-  // **Graceful degradation в test environment:** vitest не имеет
-  // @tauri-apps/api/window runtime metadata → `getCurrentWindow()` throws
-  // "Cannot read properties of undefined (reading 'metadata')". Оборачиваем
-  // в try/catch чтобы tooltip работал в unit-тестах без Tauri context.
-  // Test scope жертвует blur-reset но компонент рендерится корректно.
-  useEffect(() => {
-    let unlistenFn: (() => void) | null = null;
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        const win = getCurrentWindow();
-        const unlisten = await win.listen("tauri://blur", () => {
-          if (timerRef.current) {
-            clearTimeout(timerRef.current);
-            timerRef.current = null;
-          }
-          setShow(false);
-        });
-        if (cancelled) {
-          unlisten();
-        } else {
-          unlistenFn = unlisten;
-        }
-      } catch {
-        // Tauri API недоступен (vitest / Storybook / SSR) — silent no-op.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (unlistenFn) unlistenFn();
-    };
-  }, []);
+  // The per-instance `tauri://blur` subscription that used to sit here is GONE (G-32-16). It hid
+  // the tip on the way out and did nothing on the way back, which is where the user actually sees
+  // the defect; it registered one IPC listener per mounted Tooltip; and it wrapped itself in a
+  // try/catch that made it a silent no-op under vitest, so no test in the suite could ever have
+  // failed because of the bug it was written to fix. Its job — and the return path it never
+  // covered — now belongs to usePointerPresence, which subscribes to the same Tauri events once
+  // for the whole app on top of the DOM signals that work everywhere, tests included.
 
   const positionTip = useCallback(
     (tip: HTMLDivElement | null) => {

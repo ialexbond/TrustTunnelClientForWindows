@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -1154,6 +1155,9 @@ fn monitor_conflict_emit_warranted(conflicts: &[String], status: VpnStatus) -> b
 pub(crate) fn emit_adapter_conflict_if_any(app: &tauri::AppHandle) {
     let conflicts = detect_conflicting_adapters();
     if !conflict_emit_warranted(&conflicts) {
+        // G-32-17: no foreign adapter right now — re-arm the log dedup so the same
+        // adapter reappearing later is written again instead of being swallowed.
+        forget_logged_conflict_set();
         return;
     }
     emit_conflict_events(app, &conflicts);
@@ -1176,6 +1180,14 @@ pub(crate) fn emit_adapter_conflict_if_any_monitored(app: &tauri::AppHandle) {
         .map(|state| *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner()))
         .unwrap_or(VpnStatus::Disconnected);
     if !monitor_conflict_emit_warranted(&conflicts, status) {
+        // G-32-17: re-arm the log dedup ONLY when the skip is "no conflict present". A
+        // skip caused by the status gate (conflict present, session no longer Connected)
+        // logged nothing, so touching the memory there would be wrong in both directions:
+        // clearing it would let the flood back in on the next wake, and recording the set
+        // would swallow the line the next Connected scan owes us.
+        if !conflict_emit_warranted(&conflicts) {
+            forget_logged_conflict_set();
+        }
         return;
     }
     emit_conflict_events(app, &conflicts);
@@ -1184,19 +1196,100 @@ pub(crate) fn emit_adapter_conflict_if_any_monitored(app: &tauri::AppHandle) {
 /// 16-10: the shared emit body factored out of the connect-thread and monitor helpers so
 /// the `vpn-log` (warn) + `vpn-adapter-conflict` { adapters, message } event shape stays
 /// single-sourced. Callers decide WHETHER to emit; this decides only HOW.
+///
+/// G-32-17: the three LOG channels (stderr, app.log, the `vpn-log` panel stream) are
+/// deduplicated by `conflict_log_warranted_now`; the `vpn-adapter-conflict` event is NOT
+/// and must never be — see the emit below for why.
 fn emit_conflict_events(app: &tauri::AppHandle, conflicts: &[String]) {
     let names = conflicts.join(", ");
     let warn_msg = format!("Warning: detected active VPN adapters from other software: {names}. This may cause connection issues. Consider disabling them before connecting.");
-    eprintln!("[vpn] {warn_msg}");
-    crate::logging::log_app("WARN", &warn_msg);
-    app.emit("vpn-log", VpnLogPayload {
-        message: warn_msg.clone(),
-        level: "warn".into(),
-    }).ok();
+    // G-32-17: one line per NEW conflict set, not one per monitor wake. All three log
+    // channels share the single decision so the on-disk log, stderr and the in-app panel
+    // can never disagree about what was reported.
+    if conflict_log_warranted_now(conflicts) {
+        eprintln!("[vpn] {warn_msg}");
+        crate::logging::log_app("WARN", &warn_msg);
+        app.emit("vpn-log", VpnLogPayload {
+            message: warn_msg.clone(),
+            level: "warn".into(),
+        }).ok();
+    }
+    // G-32-17: UNCONDITIONAL, and deliberately outside the dedup above. This is not a log
+    // line — it is the UI's only source of truth for "is a foreign adapter present RIGHT
+    // NOW" (useAdapterConflictListener → the yellow second-VPN banner in «Подключение»).
+    // Deduplicating it would trade a noisy log for a stale banner: the FE would keep
+    // showing (or stop showing) a warning that no longer matches the machine, which is a
+    // worse defect than the flood this fix removes. Do NOT move this inside the `if`.
     app.emit("vpn-adapter-conflict", AdapterConflictPayload {
         adapters: conflicts.to_vec(),
         message: warn_msg,
     }).ok();
+}
+
+/// G-32-17: process-wide memory of the foreign-adapter SET last WRITTEN to the log
+/// channels. `None` means "nothing logged yet", either because the process just started or
+/// because a later scan came back empty (see `conflict_log_warranted`).
+static LOGGED_CONFLICT_SET: Mutex<Option<BTreeSet<String>>> = Mutex::new(None);
+
+/// G-32-17: does THIS conflict scan deserve a fresh line in the log channels?
+///
+/// The measured defect: `emit_conflict_events` wrote the identical «detected active VPN
+/// adapters from other software: Radmin VPN» line 274 times inside 3h13m of one day's
+/// app.log — one per honored adapter-change wake of the connectivity monitor (298 such
+/// wakes in the same window, see `.planning/phases/32-…/32-G-32-17-ADAPTER-LOG-FLOOD.md`).
+/// Line 274 carries no information the first one did not; the cost is a log no human can
+/// read and a 500-entry in-app panel buffer whose real diagnostics get evicted by the
+/// repeats.
+///
+/// The rule: write once per process, and again whenever the SET of names changes.
+/// * Compared as a `BTreeSet` — never as the formatted message, never as a count.
+///   `detect_conflicting_adapters` returns a `Vec` built from `GetAdaptersAddresses`
+///   enumeration order, which is not contractual, so ["Radmin VPN", "WireGuard"] and
+///   ["WireGuard", "Radmin VPN"] are the same news and must not re-log. A count would go
+///   the other way and call {Radmin VPN} → {WireGuard} unchanged, which is exactly wrong.
+/// * An EMPTY scan clears the memory: the conflict is gone, so the same adapter coming
+///   back later is news again. Without this re-arm the dedup latches for the life of the
+///   process — the easy wrong version of this fix, where nothing is ever reported again.
+///
+/// Records ONLY what it green-lights, so a caller that decides not to emit (the monitor's
+/// `Connected` gate) must not call this: recording a set that was never written would
+/// swallow the next genuine line.
+///
+/// The memory is passed in rather than read from the static so the whole rule is
+/// unit-testable without process-wide state or test-ordering dependencies.
+fn conflict_log_warranted(seen: &mut Option<BTreeSet<String>>, conflicts: &[String]) -> bool {
+    if conflicts.is_empty() {
+        // Nothing to write, AND the conflict is gone: drop the memory so the same adapter
+        // reappearing later is news again. This clear is what stops the dedup from being a
+        // permanent latch.
+        *seen = None;
+        return false;
+    }
+    // Collected into a BTreeSet, so enumeration order and repeated names both collapse:
+    // only the membership of the set can make this a fresh line.
+    let current: BTreeSet<String> = conflicts.iter().cloned().collect();
+    if seen.as_ref() == Some(&current) {
+        return false;
+    }
+    *seen = Some(current);
+    true
+}
+
+/// G-32-17: `conflict_log_warranted` against the process-wide memory. Poisoning is
+/// recovered the same way every other lock in this module does it — a panicking logger
+/// must never take the conflict banner down with it.
+fn conflict_log_warranted_now(conflicts: &[String]) -> bool {
+    let mut seen = LOGGED_CONFLICT_SET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    conflict_log_warranted(&mut seen, conflicts)
+}
+
+/// G-32-17: the conflict went away — re-arm the log so the SAME adapter reappearing later
+/// is written again. Expressed as the empty-scan case of `conflict_log_warranted` so the
+/// re-arm rule lives in exactly one place (and is covered by the same unit contract).
+fn forget_logged_conflict_set() {
+    conflict_log_warranted_now(&[]);
 }
 
 /// Kill the sidecar stored in AppState, if any.
@@ -3505,6 +3598,143 @@ mod tests {
             !monitor_conflict_emit_warranted(&foreign, VpnStatus::Connecting),
             "present + Connecting => no banner",
         );
+    }
+
+    // ── G-32-17: the adapter-conflict LOG is written once per set, not once per wake ──
+    //
+    // Measured defect this pins: one day's app.log carried the identical «detected active
+    // VPN adapters from other software: Radmin VPN» line 274 times in 3h13m, one per
+    // honored adapter-change wake of the connectivity monitor.
+    //
+    // Both directions matter and both are asserted below. A dedup that logs the same set
+    // twice has not fixed anything; a dedup that latches and never lets a CHANGED set
+    // through has replaced a noisy log with a silent one, which is worse — the flood at
+    // least contained the truth.
+    mod conflict_log_dedup_tests {
+        use super::*;
+
+        /// Convenience: owned names, because the production signature takes `&[String]`.
+        fn names(v: &[&str]) -> Vec<String> {
+            v.iter().map(|s| s.to_string()).collect()
+        }
+
+        #[test]
+        fn the_same_conflict_set_is_written_once_per_process() {
+            let mut seen = None;
+            let radmin = names(&["Radmin VPN"]);
+            assert!(
+                conflict_log_warranted(&mut seen, &radmin),
+                "first sighting of a foreign adapter must be written",
+            );
+            // The measured flood: the monitor re-scans on every honored adapter-change
+            // wake and found the SAME single adapter each time. Every one of these must be
+            // silent — this is the assertion that goes RED on the shipped always-log body.
+            for wake in 2..=274 {
+                assert!(
+                    !conflict_log_warranted(&mut seen, &radmin),
+                    "wake {wake} found the same set => must NOT write a second line",
+                );
+            }
+        }
+
+        #[test]
+        fn reordering_the_same_names_is_not_a_change() {
+            // detect_conflicting_adapters returns a Vec in GetAdaptersAddresses
+            // enumeration order, which is not contractual: the same two adapters can come
+            // back in either order between scans. Compared as a set, so this is one line.
+            let mut seen = None;
+            assert!(conflict_log_warranted(&mut seen, &names(&["Radmin VPN", "WireGuard Tunnel"])));
+            assert!(
+                !conflict_log_warranted(&mut seen, &names(&["WireGuard Tunnel", "Radmin VPN"])),
+                "same two names in the other order => same set => no second line",
+            );
+        }
+
+        #[test]
+        fn duplicate_names_within_one_scan_do_not_read_as_a_change() {
+            // Defence in depth against a future enumeration that reports one adapter twice
+            // (e.g. an adapter holding both a v4 and a v6 default route): the set collapses
+            // the repeat, so it is still the same news.
+            let mut seen = None;
+            assert!(conflict_log_warranted(&mut seen, &names(&["Radmin VPN"])));
+            assert!(
+                !conflict_log_warranted(&mut seen, &names(&["Radmin VPN", "Radmin VPN"])),
+                "a repeated name is still the same SET => no second line",
+            );
+        }
+
+        #[test]
+        fn an_adapter_appearing_is_written_again() {
+            // The swallow direction. A second VPN starting mid-session is news even though
+            // a line about the first one is already in the log.
+            let mut seen = None;
+            assert!(conflict_log_warranted(&mut seen, &names(&["Radmin VPN"])));
+            assert!(
+                conflict_log_warranted(&mut seen, &names(&["Radmin VPN", "WireGuard Tunnel"])),
+                "a NEW adapter joining the set must be written",
+            );
+        }
+
+        #[test]
+        fn an_adapter_disappearing_is_written_again() {
+            // The other half of the swallow direction: the set shrinking is also news, and
+            // the shorter set must not be mistaken for "nothing changed".
+            let mut seen = None;
+            assert!(conflict_log_warranted(&mut seen, &names(&["Radmin VPN", "WireGuard Tunnel"])));
+            assert!(
+                conflict_log_warranted(&mut seen, &names(&["WireGuard Tunnel"])),
+                "an adapter leaving the set must be written",
+            );
+        }
+
+        #[test]
+        fn a_different_set_of_the_same_size_is_written_again() {
+            // Proves the comparison is over NAMES and not over a count. A count-based
+            // dedup — the tempting cheap version — calls this pair unchanged, which would
+            // hide the user swapping one VPN for another.
+            let mut seen = None;
+            assert!(conflict_log_warranted(&mut seen, &names(&["Radmin VPN"])));
+            assert!(
+                conflict_log_warranted(&mut seen, &names(&["WireGuard Tunnel"])),
+                "one adapter replaced by a different one is a change, not a repeat",
+            );
+        }
+
+        #[test]
+        fn the_conflict_going_away_re_arms_the_log() {
+            // The latch guard. After an empty scan the memory is cleared, so the SAME
+            // adapter coming back is written again. Without this the dedup would be
+            // permanent for the life of the process: the user disables Radmin VPN, later
+            // something re-enables it, and app.log would never say so.
+            let mut seen = None;
+            let radmin = names(&["Radmin VPN"]);
+            assert!(conflict_log_warranted(&mut seen, &radmin));
+            assert!(
+                !conflict_log_warranted(&mut seen, &[]),
+                "an empty scan has nothing to write",
+            );
+            assert!(
+                seen.is_none(),
+                "an empty scan must CLEAR the memory, not leave the old set latched",
+            );
+            assert!(
+                conflict_log_warranted(&mut seen, &radmin),
+                "the same adapter coming back after it went away must be written again",
+            );
+        }
+
+        #[test]
+        fn repeated_empty_scans_stay_silent() {
+            // The monitor keeps waking on a machine with no second VPN at all. Clearing an
+            // already-clear memory must not invent a line.
+            let mut seen = None;
+            for wake in 1..=10 {
+                assert!(
+                    !conflict_log_warranted(&mut seen, &[]),
+                    "wake {wake}: no conflict present => nothing to write",
+                );
+            }
+        }
     }
 
     #[test]

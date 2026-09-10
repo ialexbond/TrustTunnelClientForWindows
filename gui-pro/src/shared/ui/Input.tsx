@@ -1,6 +1,7 @@
 import React, { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { placeFocus } from "../hooks/usePointerPresence";
 import { FieldError } from "./FieldError";
 import { CharCounter } from "./CharCounter";
 
@@ -60,7 +61,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         const event = { target: { value: "" } } as React.ChangeEvent<HTMLInputElement>;
         onChange(event);
       }
-      inputRef.current?.focus();
+      // G-32-20: placed by the field after its own clear button was pressed — see ActionInput.
+      placeFocus(inputRef.current);
     };
 
     return (

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, type ReactNode } from "react"
 import { createPortal } from "react-dom";
 import { MoreHorizontal, Loader2 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { placeFocus } from "../hooks/usePointerPresence";
 import { IconButton } from "./IconButton";
 
 export interface OverflowMenuItem {
@@ -48,7 +49,9 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setOpen(false);
-        triggerRef.current?.focus();
+        // G-32-20: the menu is HANDING focus back, not the user navigating to the trigger — he
+        // pressed Escape to dismiss something. Same class as a dialog's focus restore.
+        placeFocus(triggerRef.current);
       }
     };
     document.addEventListener("keydown", handler);
@@ -142,8 +145,10 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
     if (!open) return;
     const firstEnabled = itemRefs.current.find((el) => el && !el.disabled);
     if (firstEnabled) {
-      // Use rAF to ensure portal has rendered
-      requestAnimationFrame(() => firstEnabled.focus());
+      // Use rAF to ensure portal has rendered.
+      // G-32-20: placed by the menu. The user asked for the menu, not for this particular item —
+      // and he may well have asked for it with the mouse.
+      requestAnimationFrame(() => placeFocus(firstEnabled));
     }
   }, [open]);
 
@@ -168,20 +173,22 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
     const enabledItems = itemRefs.current.filter((el) => el && !el.disabled);
     const currentEnabledIndex = enabledItems.indexOf(itemRefs.current[index]);
 
+    // user-navigation: arrow / Home / End inside an open menu is the user walking the list. The
+    // focus being moved is the user's own, so anything the destination shows on focus is wanted.
     if (e.key === "ArrowDown") {
       e.preventDefault();
       const next = enabledItems[currentEnabledIndex + 1];
-      if (next) next.focus();
+      if (next) next.focus(); // user-navigation: his ArrowDown
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       const prev = enabledItems[currentEnabledIndex - 1];
-      if (prev) prev.focus();
+      if (prev) prev.focus(); // user-navigation: his ArrowUp
     } else if (e.key === "Home") {
       e.preventDefault();
-      enabledItems[0]?.focus();
+      enabledItems[0]?.focus(); // user-navigation: his Home
     } else if (e.key === "End") {
       e.preventDefault();
-      enabledItems[enabledItems.length - 1]?.focus();
+      enabledItems[enabledItems.length - 1]?.focus(); // user-navigation: his End
     }
   };
 

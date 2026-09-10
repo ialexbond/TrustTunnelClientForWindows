@@ -336,6 +336,8 @@ export function AutoModeSettings({
     const id = pendingFocusId.current;
     if (!id) return;
     pendingFocusId.current = null;
+    // user-navigation: `pendingFocusId` is only ever set by a keyboard move, so focus is following
+    // the row the user just moved. Chasing it is the point — losing focus mid-reorder is the defect.
     rowRefs.current.get(id)?.focus();
   }, [order]);
 

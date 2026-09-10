@@ -40,6 +40,10 @@ use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE, PSID, TOKEN_USER,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+use windows::Win32::System::Services::{
+    CloseServiceHandle, OpenSCManagerW, OpenServiceW, QueryServiceStatus, SC_MANAGER_CONNECT,
+    SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START_PENDING, SERVICE_STATUS,
+};
 use windows::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::System::TaskScheduler::{
@@ -738,6 +742,187 @@ fn is_absent(e: &windows::core::Error) -> bool {
     matches!(e.code().0, HRESULT_FILE_NOT_FOUND | HRESULT_PATH_NOT_FOUND)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// G-32-15 — ask WINDOWS whether the scheduler is there, instead of guessing from an HRESULT
+//
+// Measured 2026-09-09: with the «Планировщик задач» service stopped through the registry,
+// rebooted, opened Настройки and pressed «Запускать вместе с системой» six times in 33 seconds.
+// Every press produced «Не удалось сохранить настройку. Попробуйте ещё раз» — advice that cannot
+// possibly work, because pressing a switch again does not start a stopped service. He asked for
+// the obvious thing, and for the guarantee that comes with it: «Возможно ли определить, что именно
+// планировщик недоступен, чтобы не было такого, что какая-то левая ошибка отвечает нам, что
+// планировщик не активен?»
+//
+// So the answer is taken from the SERVICE CONTROL MANAGER, which is the authority, and the two
+// HRESULTs that machine and the RPC layer produce are demoted to a fallback used only when the SCM
+// itself cannot be reached. Guessing from an HRESULT alone would have been the «левая ошибка»
+// he named: `0x80070003` is ALSO what a genuinely missing task folder answers on a perfectly
+// healthy machine, so a rule keyed on it would tell a whole class of users to go and start a
+// service that was running all along.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/// The Task Scheduler's Windows service, by its SERVICE KEY name.
+///
+/// Windows shows this service as «Планировщик задач» in the Russian services list and as «Task
+/// Scheduler» in the English one. Neither display name is usable here — a display name is
+/// localized, and this lookup must work identically on every install — so the key name is what
+/// `OpenServiceW` is given. It is the same three syllables on every Windows since NT.
+const SCHEDULER_SERVICE_KEY: &str = "Schedule";
+
+/// The stable code a scheduler-unavailable refusal leads with.
+///
+/// Third of its family, after `AUTOSTART_REFUSED_REPLACEABLE` and `AUTOSTART_REFUSED_ACL_UNKNOWN`,
+/// and it exists for the same reason: the sentence below is English prose written for app.log, and
+/// the project rule (T-28-20) is that the backend's own words never reach the screen. The CODE
+/// carries the meaning across that boundary; `AUTOSTART_FAILURE_I18N` in `GeneralSection.tsx` maps
+/// it to a Russian sentence naming the service. Renaming it here without renaming it there
+/// silently returns the owner to «Попробуйте ещё раз», so both sides assert the pair in a test.
+const AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE: &str = "AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE";
+
+/// What the Service Control Manager says about the Task Scheduler service.
+///
+/// Three states rather than a bool, and `Unknown` is the one that earns the type: an SCM that
+/// could not be opened is not evidence that the service is down, and reporting it as such would
+/// manufacture the very mis-attribution the owner asked to be protected from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SchedulerService {
+    /// The SCM reports it RUNNING. A failure now is about something else.
+    Running,
+    /// The SCM reports it stopped, stopping, paused, or otherwise unable to serve.
+    NotRunning,
+    /// The SCM could not be asked, or the service is mid-start and has not settled.
+    Unknown,
+}
+
+/// Ask the SCM for the Task Scheduler service's current state.
+///
+/// Read-only and unprivileged: `SC_MANAGER_CONNECT` + `SERVICE_QUERY_STATUS` is the least this can
+/// ask for, and an ordinary account holds both — so this never becomes a check that only works
+/// when elevated, which would be a check that silently stops working for the people who need it.
+///
+/// **`SERVICE_START_PENDING` is `Unknown`, not `NotRunning`.** A service coming up cannot answer a
+/// COM call yet, but it is also not something the user should be told to go and start; by the time
+/// they read the sentence it may well be serving. Every other non-running state — stopped, pausing,
+/// stopping — is a definite `NotRunning`, because none of them can take a registration.
+fn query_scheduler_service() -> SchedulerService {
+    // SAFETY: every handle opened below is closed on every path out, including the early returns.
+    // `QueryServiceStatus` writes into a stack `SERVICE_STATUS` this frame owns.
+    unsafe {
+        let Ok(manager) = OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) else {
+            return SchedulerService::Unknown;
+        };
+
+        let name: Vec<u16> = SCHEDULER_SERVICE_KEY
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let answer = match OpenServiceW(manager, PCWSTR(name.as_ptr()), SERVICE_QUERY_STATUS) {
+            Ok(service) => {
+                let mut status = SERVICE_STATUS::default();
+                let answer = match QueryServiceStatus(service, &mut status) {
+                    Ok(()) if status.dwCurrentState == SERVICE_RUNNING => SchedulerService::Running,
+                    Ok(()) if status.dwCurrentState == SERVICE_START_PENDING => {
+                        SchedulerService::Unknown
+                    }
+                    Ok(()) => SchedulerService::NotRunning,
+                    Err(_) => SchedulerService::Unknown,
+                };
+                let _ = CloseServiceHandle(service);
+                answer
+            }
+            Err(_) => SchedulerService::Unknown,
+        };
+
+        let _ = CloseServiceHandle(manager);
+        answer
+    }
+}
+
+/// Is an «absent» HRESULT an ANSWER, or a failure to ask dressed as one?
+///
+/// **This is the G-32-15 read-path repair, and it is a defect of the G-32-13 family.**
+/// [`is_absent`] maps `0x80070003` to «there is no such folder» — a legitimate, confident answer
+/// that makes [`task_is_enabled`] return `Ok(false)` and the Settings row draw a plain, operable
+/// OFF. On a real Windows install that same HRESULT came from the SERVICE BEING STOPPED, so the row
+/// stated a setting was off about a registration it had never reached. His logon task was in fact
+/// registered and enabled the whole time — the state after he restarted the service proves it.
+///
+/// An absence is only an answer if something was there to give it. When the SCM says the service
+/// is down, the error propagates instead, `get_autostart` returns `Err`, and the row goes dim and
+/// says so — which is what UAT test 7 has always contracted for.
+///
+/// `Unknown` deliberately keeps the old behaviour: without a definite «the service is down» there
+/// is no ground to overturn a plain answer, and turning every unverifiable absence into «unknown»
+/// would put a dim, disabled row in front of every user who has simply never used autostart.
+pub(crate) fn absence_is_an_answer(service: SchedulerService) -> bool {
+    !matches!(service, SchedulerService::NotRunning)
+}
+
+/// The two HRESULTs that mean «the scheduler was not reachable», as the SECONDARY signal.
+///
+/// Consulted only when the SCM could not be asked at all. `0x80070003` is what a real Windows install
+/// actually returned; `0x800706ba` (RPC_S_SERVER_UNAVAILABLE) is the other form the same condition
+/// takes when the COM layer notices first. They are matched inside a string [`com_err`] formatted,
+/// so a test pins the two together — a change to that formatting would otherwise disarm this
+/// silently.
+fn mentions_an_unreachable_scheduler(msg: &str) -> bool {
+    const UNREACHABLE_HRESULTS: [&str; 2] = ["0x80070003", "0x800706ba"];
+    let lower = msg.to_ascii_lowercase();
+    UNREACHABLE_HRESULTS.iter().any(|code| lower.contains(code))
+}
+
+/// Give a scheduler failure its stable code when — and only when — the service is really down.
+///
+/// Pure, and split from [`query_scheduler_service`] on purpose: the service's state cannot be
+/// faked in a unit test (stopping the machine's real scheduler to run a test suite is not
+/// something a test suite may do), so the DECISION is separated from the QUERY and the decision is
+/// what the tests assert. A rule that could only be exercised on a machine with the scheduler
+/// stopped is a rule that is never exercised.
+///
+/// A message that already leads with a code passes through untouched. The ACL gate refuses BEFORE
+/// the scheduler is touched, so its verdict cannot be about the service — and a machine that has
+/// both a replaceable target and a stopped scheduler must still be told the thing it can act on.
+fn classify_scheduler_failure(msg: String, service: SchedulerService) -> String {
+    if msg.starts_with("AUTOSTART_REFUSED_") {
+        return msg;
+    }
+
+    let unavailable = match service {
+        SchedulerService::NotRunning => true,
+        SchedulerService::Unknown => mentions_an_unreachable_scheduler(&msg),
+        // The guarantee, in one arm: with the service CONFIRMED running, nothing is
+        // blamed on it. A wrong explanation is worse than a generic one, because a person acts on
+        // it — he would go and look at a service that was working all along.
+        SchedulerService::Running => false,
+    };
+
+    if !unavailable {
+        return msg;
+    }
+
+    // The original failure survives INSIDE the classified message. The code adds a meaning; it
+    // does not replace the evidence a support bundle needs.
+    format!(
+        "{AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE}: the Windows Task Scheduler service \
+         («{SCHEDULER_SERVICE_KEY}») is not running, so no logon task can be registered, read or \
+         removed until it is started. {msg}"
+    )
+}
+
+/// [`classify_scheduler_failure`] with the SCM asked for the caller.
+///
+/// **Called only AFTER a failure, never before one**, and that is a deliberate decision rather
+/// than an accident of where it sits. Three reasons. On the success path the answer is already
+/// known by construction — the scheduler answered, so it is running — and paying for it would put
+/// a synchronous system call on the Settings tab's five-second refresh for a question nobody
+/// asked. Asking first would also be a check-then-act: the state could change between the query
+/// and the operation, and the query that matters is the one about the failure that actually
+/// happened. And on a healthy machine it then costs exactly nothing, because it never runs.
+pub(crate) fn explain_scheduler_failure(msg: String) -> String {
+    classify_scheduler_failure(msg, query_scheduler_service())
+}
+
 /// Is the task's enabled bit set? A task that does not exist is not enabled.
 ///
 /// **This is THE conjunction** and the reason the mechanism changed at all:
@@ -767,18 +952,29 @@ pub(crate) fn task_is_enabled(task_name: &str) -> Result<bool, String> {
     with_scheduler("IRegisteredTask::Enabled", |_service, root| unsafe {
         // `None` is «there is no such task», reached from either lookup: no folder means no task
         // in it. Only a NON-absence error propagates, and it propagates as an error.
+        //
+        // G-32-15: and an «absent» HRESULT only counts as an absence if the service was there to
+        // give it — see [`absence_is_an_answer`]. The SCM is asked ONLY on this branch, which is
+        // precisely the branch about to make a confident claim it may not be entitled to. It costs
+        // nothing on the common path, where the folder is found and the answer never arises.
         let folder = match autostart_folder(root, false) {
             Ok(folder) => folder,
-            Err(e) if is_absent(&e) => return Ok(None),
+            Err(e) if is_absent(&e) && absence_is_an_answer(query_scheduler_service()) => {
+                return Ok(None)
+            }
             Err(e) => return Err(e),
         };
         match folder.GetTask(&BSTR::from(task_name)) {
             Ok(task) => Ok(Some(task.Enabled()?.as_bool())),
-            Err(e) if is_absent(&e) => Ok(None),
+            Err(e) if is_absent(&e) && absence_is_an_answer(query_scheduler_service()) => Ok(None),
             Err(e) => Err(e),
         }
     })
     .map(|state| matches!(state, Some(true)))
+    // The error keeps its stable code so the Settings row can name the cause in its own words
+    // rather than only going dim with a generic sentence. Same mechanism as the write path; no
+    // second one was invented for the read.
+    .map_err(explain_scheduler_failure)
 }
 
 /// Delete the task. Removing a task that is already absent is a SUCCESS — absent IS the
@@ -1454,6 +1650,185 @@ mod tests {
         assert!(
             tail.len() >= 8 && tail.chars().take(8).all(|c| c.is_ascii_hexdigit()),
             "the failure must carry a full eight-digit hexadecimal HRESULT, got: {err}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    // G-32-15 — a stopped «Планировщик задач» service must be NAMED, and must not read as OFF
+    //
+    // Measured 2026-09-09: the Task Scheduler service stopped, rebooted, and pressing the
+    // autostart switch six times in 33 seconds against «Не удалось сохранить настройку. Попробуйте
+    // ещё раз» — advice that cannot work, because pressing a switch again does not start a stopped
+    // service. His app.log carries `0x80070003` (ERROR_PATH_NOT_FOUND) for every attempt.
+    //
+    // The decisions below are PURE FUNCTIONS OF A SERVICE STATE, and that is the whole point of
+    // their shape: the state itself comes from the SCM at run time and cannot be faked in a test
+    // (stopping the machine's real scheduler to run a unit test is not a thing a test suite may
+    // do), so the DECISION is separated from the QUERY and only the decision is asserted here. A
+    // test that could only run on a machine with the scheduler stopped is a test that never runs.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+
+    /// A raw scheduler failure, in exactly the shape [`com_err`] produces.
+    const RAW_PATH_NOT_FOUND: &str =
+        "RegisterTaskDefinition: The system cannot find the path specified. (0x80070003)";
+
+    #[test]
+    fn an_absent_hresult_is_not_an_answer_while_the_scheduler_service_is_stopped() {
+        // THE G-32-13-FAMILY DEFECT, and the half UAT test 7 was actually about. `is_absent`
+        // treats 0x80070003 as «there is no such folder» — a legitimate, confident answer that
+        // makes `task_is_enabled` return `Ok(false)` and the row draw a plain OFF. On the
+        // machine that same HRESULT came from the service being STOPPED, so the row claimed a
+        // setting was off while a registered logon task may well have been sitting there. An
+        // absence is only an ANSWER if something was there to give it.
+        assert!(
+            !absence_is_an_answer(SchedulerService::NotRunning),
+            "with the scheduler service stopped, an «absent» HRESULT is a failure to ASK and must \
+             propagate as an error so the row goes dim — never as a confident OFF"
+        );
+    }
+
+    #[test]
+    fn an_absent_hresult_stays_a_plain_answer_on_a_healthy_machine() {
+        // The control, and it guards a contract older than this fix: a task nobody ever registered
+        // must read as a plain `Ok(false)`, NOT as «unknown». Turning every absence into an error
+        // would put every user who has never touched autostart in front of a dim, disabled row.
+        for state in [SchedulerService::Running, SchedulerService::Unknown] {
+            assert!(
+                absence_is_an_answer(state),
+                "an absence must remain a plain answer when the service is {state:?} — a machine \
+                 whose scheduler is running and simply has no such task is the ordinary case"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_while_the_service_is_stopped_leads_with_the_scheduler_code() {
+        let classified =
+            classify_scheduler_failure(RAW_PATH_NOT_FOUND.to_string(), SchedulerService::NotRunning);
+
+        assert!(
+            classified.starts_with("AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE:"),
+            "the refusal must LEAD with the stable code the Settings screen maps to its own \
+             sentence (AUTOSTART_FAILURE_I18N in GeneralSection.tsx). Renaming this code without \
+             renaming it there silently returns the owner to «Попробуйте ещё раз». Got: {classified}"
+        );
+        assert!(
+            classified.contains("0x80070003"),
+            "the original failure must survive INSIDE the classified message, for the support \
+             bundle — the code adds a meaning, it does not replace the evidence: {classified}"
+        );
+    }
+
+    #[test]
+    fn a_failure_while_the_service_is_running_is_never_blamed_on_the_scheduler() {
+        // The owner asked for exactly this guarantee, verbatim: «чтобы не было такого, что какая-то
+        // левая ошибка отвечает нам, что планировщик не активен». A wrong explanation is worse than
+        // a generic one, because a person acts on it — he would go and look at a service that was
+        // running all along.
+        let classified =
+            classify_scheduler_failure(RAW_PATH_NOT_FOUND.to_string(), SchedulerService::Running);
+
+        assert_eq!(
+            classified, RAW_PATH_NOT_FOUND,
+            "with the service confirmed RUNNING, an unrelated failure must pass through untouched \
+             and fall back to the generic sentence — never be attributed to the scheduler"
+        );
+    }
+
+    #[test]
+    fn the_hresult_is_only_a_secondary_signal_used_when_the_service_cannot_be_asked() {
+        // Secondary, and deliberately so: the authoritative answer is the SCM's. These two
+        // HRESULTs are consulted ONLY when the SCM itself could not be reached, which is the one
+        // situation where there is nothing better to go on.
+        let unavailable = classify_scheduler_failure(
+            "ITaskService::Connect: The RPC server is unavailable. (0x800706ba)".to_string(),
+            SchedulerService::Unknown,
+        );
+        assert!(
+            unavailable.starts_with("AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE:"),
+            "an RPC-server-unavailable with no SCM answer available is the scheduler being \
+             unreachable: {unavailable}"
+        );
+
+        let unrelated = classify_scheduler_failure(
+            "ITaskFolder::GetTask: Access is denied. (0x80070005)".to_string(),
+            SchedulerService::Unknown,
+        );
+        assert_eq!(
+            unrelated, "ITaskFolder::GetTask: Access is denied. (0x80070005)",
+            "an access-denied is not the scheduler being absent, and must not be dressed up as one"
+        );
+    }
+
+    #[test]
+    fn a_refusal_that_already_carries_a_code_is_never_reclassified() {
+        // The ACL gate refuses BEFORE the scheduler is touched, so its verdict cannot be about the
+        // service — and a machine that has both a replaceable target and a stopped scheduler must
+        // still be told the thing it can act on first.
+        let acl = "AUTOSTART_REFUSED_REPLACEABLE: «C:\\app\\trusttunnel.exe» is writable …";
+        assert_eq!(
+            classify_scheduler_failure(acl.to_string(), SchedulerService::NotRunning),
+            acl,
+            "a refusal that already leads with a code must pass through untouched — re-coding it \
+             would replace a remedy the user can act on with one they cannot"
+        );
+    }
+
+    #[test]
+    fn the_secondary_signal_matches_the_shape_com_err_actually_writes() {
+        // The two halves are tied together on purpose. The secondary signal looks for the HRESULT
+        // inside a string this module formatted, so a change to `com_err`'s hex formatting would
+        // silently disarm it. This test fails if the two ever drift apart.
+        let formatted = com_err(
+            "ITaskService::Connect",
+            windows::core::Error::from_hresult(windows::core::HRESULT(HRESULT_PATH_NOT_FOUND)),
+        );
+        assert!(
+            formatted.contains("0x80070003"),
+            "com_err must render the HRESULT in the lowercase eight-digit form the secondary \
+             signal greps for, got: {formatted}"
+        );
+        assert!(
+            classify_scheduler_failure(formatted.clone(), SchedulerService::Unknown)
+                .starts_with("AUTOSTART_REFUSED_SCHEDULER_UNAVAILABLE:"),
+            "a string com_err actually produced must be recognised by the secondary signal: \
+             {formatted}"
+        );
+    }
+
+    /// What the SCM says on THIS machine, said out loud.
+    ///
+    /// Not an assertion that the service is running — a developer machine may legitimately have it
+    /// stopped, and a test that failed for that would be testing the machine. What IS asserted is
+    /// that the query REACHES the SCM and returns a definite answer rather than `Unknown`: an
+    /// authoritative check that can never answer is the same as no check at all, and this phase has
+    /// already caught seven checks that could never fail.
+    #[test]
+    fn the_scheduler_service_can_actually_be_asked_on_this_machine() {
+        let state = query_scheduler_service();
+
+        // What the query COSTS, said out loud, because the decision to run it on the read path was
+        // argued on this number rather than on a feeling. It sits on the Settings tab's five-second
+        // refresh — but only on the branch that is about to claim a confident OFF — so «is it cheap
+        // next to the COM round-trip that just failed?» is a question with an answer, and this is it.
+        const RUNS: u32 = 100;
+        let started = std::time::Instant::now();
+        for _ in 0..RUNS {
+            let _ = query_scheduler_service();
+        }
+        let each = started.elapsed() / RUNS;
+
+        say_out_loud(&format!(
+            "MEASURED task_scheduler::the_scheduler_service_can_actually_be_asked_on_this_machine \
+             — the SCM reports the «Schedule» service as {state:?}; {RUNS} queries averaged \
+             {each:?} each"
+        ));
+        assert_ne!(
+            state,
+            SchedulerService::Unknown,
+            "the SCM must be reachable for a read-only status query from an ordinary account — an \
+             authoritative check that always answers «Unknown» would silently degrade to the \
+             HRESULT guess it exists to replace"
         );
     }
 }
