@@ -7,8 +7,9 @@
 Два издания в одном репозитории: **Pro** — подключение, маршрутизация и полное управление своим
 сервером, **Light** — то же самое без управления сервером.
 
-**Light сейчас скачать нельзя — её установщик не выкладывался.** Пользуйтесь Pro: она умеет всё то
-же самое, просто с лишним разделом, в который можно не заходить.
+**Light сейчас скачать негде.** Она выходила вместе с Pro вплоть до версии `2.7.0`, но файлы старых
+выпусков удалены, а в третьей версии Light не переделывали. Пользуйтесь Pro: она умеет всё то же
+самое, просто с лишним разделом, в который можно не заходить.
 
 [Скачать последнюю версию](https://github.com/ialexbond/TrustTunnelClientForWindows/releases/latest)
 
@@ -72,8 +73,8 @@ OpenAI, инструменту Microsoft APM, установщику MakeMKV, м
 ## Скачать и установить
 
 Установщик выложен на [странице выпусков](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
-Сейчас там есть только **Pro 3.0.0**: у старых выпусков файлы удалены, а Light не выкладывалась
-вовсе. Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по ней видно, что файл
+Сейчас там есть только **Pro 3.0.0**: файлы всех прежних выпусков, включая установщики Light,
+удалены. Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по ней видно, что файл
 скачался целиком:
 
 ```powershell
@@ -130,8 +131,8 @@ VPN-серверу лежит в его `.toml`-конфиге открытым 
 
 | | Pro | Light |
 |---|---|---|
-| Можно скачать | да | **нет**, установщика не существует |
-| Версия | `3.0.0` | `2.7.0` |
+| Можно скачать | да | **нет**, файлы прежних выпусков удалены |
+| Последняя версия | `3.0.0` | `2.7.0` |
 | Подключение к VPN | да | да |
 | Маршрутизация (что идёт через VPN, что напрямую) | да | да |
 | Управление своим сервером по SSH | да | нет |
@@ -141,9 +142,10 @@ VPN-серверу лежит в его `.toml`-конфиге открытым 
 Light — это Pro без раздела управления сервером. Если у вас уже есть конфиг от чужого сервера и
 настраивать ничего не надо, хватило бы и её.
 
-Но скачать Light негде: установщик для неё не собирался и не выкладывался, а редизайн третьей версии
-её не затронул. Ставьте Pro — подключение и маршрутизация там те же, а «Панель управления» просто
-останется неиспользованной вкладкой. Когда за Light возьмутся, здесь появится ссылка.
+Но скачать Light негде. Свой установщик у неё был в каждом выпуске начиная с `2.0.0` и до `2.7.0`,
+а портативная сборка появлялась ещё раньше; файлы всех этих выпусков удалены. Редизайн третьей
+версии Light не затронул, поэтому версии `3.x` у неё нет. Ставьте Pro: подключение и маршрутизация
+там те же, а «Панель управления» просто останется неиспользованной вкладкой.
 
 ## Что умеет Pro
 
@@ -245,8 +247,10 @@ Science), распространяемые библиотеки Visual C++ от 
 A desktop VPN client for Windows speaking the **TrustTunnel** protocol: a window with buttons and
 settings instead of a command line. The upstream project has no Windows GUI, so this one was written
 here. Two editions: **Pro** (connection, routing and full server management over SSH) and **Light**
-(the same without server management). **Light cannot be downloaded right now** — no installer for it
-has ever been published. Use Pro; it does everything Light does, with one extra tab you can ignore.
+(the same without server management). **Light cannot be downloaded right now**: it shipped alongside
+Pro up to version `2.7.0`, but the files of every past release have been removed, and the third
+version's redesign never covered Light. Use Pro; it does everything Light does, with one extra tab
+you can ignore.
 
 Grab it from [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
 x64 Windows only. It installs per-machine, so installing and uninstalling need administrator rights,
