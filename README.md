@@ -5,7 +5,10 @@
 здесь.
 
 Два издания в одном репозитории: **Pro** — подключение, маршрутизация и полное управление своим
-сервером, **Light** — то же самое без управления сервером. Скачать сейчас можно только Pro.
+сервером, **Light** — то же самое без управления сервером.
+
+**Light сейчас скачать нельзя — её установщик не выкладывался.** Пользуйтесь Pro: она умеет всё то
+же самое, просто с лишним разделом, в который можно не заходить.
 
 [Скачать последнюю версию](https://github.com/ialexbond/TrustTunnelClientForWindows/releases/latest)
 
@@ -32,9 +35,33 @@ Windows не может подтвердить, кто её выпустил, и
 
 ### Почему антивирусы срабатывают
 
-Любой VPN делает то, по чему обычно и опознают вредоносную программу: просит права администратора,
-ставит сетевой драйвер, перенаправляет весь трафик и подменяет DNS. Здесь всё это тоже есть, без
-этого туннель не работает.
+Оба раза помечали один и тот же файл: `trusttunnel.exe`, нашу графическую оболочку. VPN-ядро лежит
+в той же папке, подписи у него тоже нет, и его Защитник не тронул ни разу. Претензия у антивируса
+именно к оболочке, которую мы собрали вокруг ядра.
+
+Классификатор смотрит на форму файла, а не на то, чем программа занимается. У нашего совпало сразу
+несколько примет: подписи нет; сборка Rust идёт со `strip` и `LTO`, так что символов почти не
+осталось; внутрь 18 МБ упакован сжатый веб-интерфейс, и для автоматики это выглядит как упаковщик;
+программа требует прав администратора и запускает дочерний процесс, который ставит сетевой драйвер.
+Вдобавок у каждой сборки свой хэш, то есть репутации нет вовсе.
+
+Тот же вердикт регулярно прилетает программам, которые к VPN отношения не имеют: Codex CLI от
+OpenAI, инструменту Microsoft APM, установщику MakeMKV, множеству проектов на Rust. Общее у них
+одно: неподписанный сжатый бинарник, который антивирус видит впервые.
+
+Подпись убрала бы самый весомый пункт этого списка.
+
+### Если интернет пропал совсем
+
+Аварийное отключение интернета (killswitch) принадлежит процессу-ядру, а не приложению: пока ядро
+живо, оно держит сетевые фильтры. При обычном закрытии приложение сперва просит ядро завершиться
+само и ждёт полторы секунды, чтобы то успело снять свои фильтры и маршруты, и только потом убивает
+процесс жёстко.
+
+Если ядро упало или его пришлось добить жёстко, фильтры могут остаться висеть. Выглядит это так:
+приложения закрыто, а интернета нет вообще, ни в браузере, ни где-либо ещё. Лечится снятием процесса
+`trusttunnel_client.exe` в Диспетчере задач или перезагрузкой. Чтобы ядро само снимало фильтры при
+жёстком убийстве, нужна доработка в C++-ядре; она отложена.
 
 ### Автор один, тестировщиков нет
 
@@ -78,13 +105,33 @@ VPN-серверу лежит в его `.toml`-конфиге открытым 
 можно, только если поставить в деинсталляторе отдельную галочку «Удалить всё». Обновление тоже
 сохраняет данные.
 
+### Куда программа ходит сама
+
+Помимо вашего VPN-сервера приложение обращается к нескольким чужим адресам. Вот весь список.
+
+| Куда | Зачем | Когда |
+|---|---|---|
+| `api.github.com` | проверка обновлений самой программы | при запуске и раз в сутки |
+| `api.github.com` | проверка выпусков исходного проекта TrustTunnel | при проверке обновлений сервера |
+| `ipwho.is` | флажок страны на карточке сервера. **Туда уходит адрес вашего сервера** | при показе карточки |
+| `speed.cloudflare.com` | замер скорости в «Панели управления»: качает 5 МБ, отправляет 2 МБ | только когда вы нажали кнопку |
+| `1.1.1.1`, `1.0.0.1`, `8.8.8.8`, `8.8.4.4`, `common.dot.dns.yandex.net` | проверка, есть ли вообще связь, и жив ли туннель | пока идёт подключение и во время работы |
+| `fonts.googleapis.com` | шрифт интерфейса | при каждом запуске окна |
+
+Последняя строка — известный недочёт: шрифт стоило положить внутрь сборки, а не забирать со стороны
+при каждом старте. Записан в план работ.
+
+Замер скорости идёт **с вашего компьютера**, а не с сервера. При поднятом туннеле он пойдёт через
+туннель.
+
 ---
 
 ## Чем издания отличаются
 
 | | Pro | Light |
 |---|---|---|
-| Версия | `3.0.0` | `2.7.0`, установщик не выкладывался |
+| Можно скачать | да | **нет**, установщика не существует |
+| Версия | `3.0.0` | `2.7.0` |
 | Подключение к VPN | да | да |
 | Маршрутизация (что идёт через VPN, что напрямую) | да | да |
 | Управление своим сервером по SSH | да | нет |
@@ -92,7 +139,11 @@ VPN-серверу лежит в его `.toml`-конфиге открытым 
 | Внешний вид | переделан целиком в третьей версии | прежний, редизайн ещё не начинался |
 
 Light — это Pro без раздела управления сервером. Если у вас уже есть конфиг от чужого сервера и
-настраивать ничего не надо, его бы хватило, но собранного установщика Light пока нет.
+настраивать ничего не надо, хватило бы и её.
+
+Но скачать Light негде: установщик для неё не собирался и не выкладывался, а редизайн третьей версии
+её не затронул. Ставьте Pro — подключение и маршрутизация там те же, а «Панель управления» просто
+останется неиспользованной вкладкой. Когда за Light возьмутся, здесь появится ссылка.
 
 ## Что умеет Pro
 
@@ -194,7 +245,8 @@ Science), распространяемые библиотеки Visual C++ от 
 A desktop VPN client for Windows speaking the **TrustTunnel** protocol: a window with buttons and
 settings instead of a command line. The upstream project has no Windows GUI, so this one was written
 here. Two editions: **Pro** (connection, routing and full server management over SSH) and **Light**
-(the same without server management). Only Pro has a published installer.
+(the same without server management). **Light cannot be downloaded right now** — no installer for it
+has ever been published. Use Pro; it does everything Light does, with one extra tab you can ignore.
 
 Grab it from [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
 x64 Windows only. It installs per-machine, so installing and uninstalling need administrator rights,
@@ -206,6 +258,16 @@ Defender has twice flagged them as malware, both times a false positive. The `.s
 the installer tells you the download is complete; it cannot tell you who built it, since it sits on
 the same page under the same account. The Russian section above explains how to restore a
 quarantined file. Read it before installing.
+
+Besides your own VPN server, the application talks to `api.github.com` (its own update check, at
+launch and once a day), `ipwho.is` (a country flag, which means your server's address goes there),
+`speed.cloudflare.com` (the speed test, only when you press the button), a set of public resolvers
+(1.1.1.1, 8.8.8.8 and a Yandex DoH host) to tell whether the link is alive, and
+`fonts.googleapis.com` for the interface font at every start. The Russian section above has the
+table, including which of those is a known mistake.
+
+If the core process is killed hard or crashes, its firewall filters can outlive it and leave the
+machine with no internet at all. Killing `trusttunnel_client.exe` or rebooting clears it.
 
 This is a fork of [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
 The C++ VPN core comes from upstream and ships as a separate sidecar process, version `1.1.5`; the
