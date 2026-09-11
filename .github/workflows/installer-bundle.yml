@@ -64,6 +64,11 @@ on:
       # NEW template, which is the single likeliest way the ordering defect returns.
       - "gui-pro/package.json"
       - "gui-pro/package-lock.json"
+      # Not an ordering input — a BUILD input. This job does a full release build before it can
+      # bundle anything, and `gui-pro/src-tauri/Cargo.toml:70` reaches this crate by path. Remove
+      # it and cargo fails to resolve the graph, so the job reports a packaging failure for a
+      # reason that has nothing to do with packaging. That happened on `master` on 2026-09-11.
+      - "trusttunnel/settings/**"
       - ".github/workflows/installer-bundle.yml"
   pull_request:
     types: [opened, reopened, synchronize]
@@ -73,6 +78,11 @@ on:
       - "scripts/nsis-text-gate.cjs"
       - "gui-pro/package.json"
       - "gui-pro/package-lock.json"
+      # Not an ordering input — a BUILD input. This job does a full release build before it can
+      # bundle anything, and `gui-pro/src-tauri/Cargo.toml:70` reaches this crate by path. Remove
+      # it and cargo fails to resolve the graph, so the job reports a packaging failure for a
+      # reason that has nothing to do with packaging. That happened on `master` on 2026-09-11.
+      - "trusttunnel/settings/**"
       - ".github/workflows/installer-bundle.yml"
   workflow_dispatch:
 
