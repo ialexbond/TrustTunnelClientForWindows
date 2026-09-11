@@ -3,6 +3,7 @@ name = "trusttunnel"
 version = "3.0.0"
 description = "TrustTunnel VPN Client"
 authors = ["Alex Bond"]
+license = "Apache-2.0"
 edition = "2021"
 
 [lib]
