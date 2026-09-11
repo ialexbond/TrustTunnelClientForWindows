@@ -49,6 +49,13 @@ on:
       - "gui-pro/src-tauri/Cargo.lock"
       - "gui-pro/src-tauri/build.rs"
       - "gui-pro/src-tauri/tauri.conf.json"
+      # `Cargo.toml:70` depends on this crate BY PATH, so its absence is not a
+      # missing feature — cargo cannot resolve the dependency graph at all and
+      # the build dies before compiling a line. `master` was trimmed without it
+      # on 2026-09-11 and stayed broken unnoticed, because the trim touched no
+      # path listed here and every push after it changed only Markdown. The
+      # first push that did touch `gui-pro/` turned this gate red immediately.
+      - "trusttunnel/settings/**"
       - ".github/workflows/tauri-rust.yml"
   pull_request:
     types: [opened, reopened, synchronize]
@@ -58,6 +65,13 @@ on:
       - "gui-pro/src-tauri/Cargo.lock"
       - "gui-pro/src-tauri/build.rs"
       - "gui-pro/src-tauri/tauri.conf.json"
+      # `Cargo.toml:70` depends on this crate BY PATH, so its absence is not a
+      # missing feature — cargo cannot resolve the dependency graph at all and
+      # the build dies before compiling a line. `master` was trimmed without it
+      # on 2026-09-11 and stayed broken unnoticed, because the trim touched no
+      # path listed here and every push after it changed only Markdown. The
+      # first push that did touch `gui-pro/` turned this gate red immediately.
+      - "trusttunnel/settings/**"
       - ".github/workflows/tauri-rust.yml"
   workflow_dispatch:
 
