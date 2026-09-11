@@ -970,11 +970,25 @@ pub(crate) fn task_is_enabled(task_name: &str) -> Result<bool, String> {
             Err(e) => Err(e),
         }
     })
-    .map(|state| matches!(state, Some(true)))
+    .map(enabled_from)
     // The error keeps its stable code so the Settings row can name the cause in its own words
     // rather than only going dim with a generic sentence. Same mechanism as the write path; no
     // second one was invented for the read.
     .map_err(explain_scheduler_failure)
+}
+
+/// Collapse the read's THREE answers into the two the caller sees.
+///
+/// Split out of [`task_is_enabled`] for G-32-19, so the collapse itself is provable on a machine
+/// whose scheduler service is stopped — which is the one machine where the arm that used to guard
+/// it (`a_task_that_was_never_registered_reads_as_absent_and_not_enabled`) cannot run at all.
+///
+/// The positive form is deliberate: `None` («no such task») and `Some(false)` («there, switched
+/// off») collapse into the same `false` ON PURPOSE, while the third answer — the scheduler could
+/// not be asked — cannot be collapsed into anything, because it never reaches here. It is carried
+/// by the `Err` half of the `Result` this maps over.
+fn enabled_from(state: Option<bool>) -> bool {
+    matches!(state, Some(true))
 }
 
 /// Delete the task. Removing a task that is already absent is a SUCCESS — absent IS the
@@ -1067,20 +1081,291 @@ mod tests {
     /// `E_ACCESSDENIED`, as it appears inside the strings [`com_err`] formats.
     const E_ACCESSDENIED_HEX: &str = "0x80070005";
 
-    /// The tests whose DISCRIMINATING assertions live behind a successful registration.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    // G-32-19 — TWO ambient conditions, ONE honest census
+    //
+    // `cargo test --lib` reported 1223 of 1229 on a real Windows install while his «Планировщик
+    // задач» service was Stopped, and 1229 of 1229 once he started it again — with ZERO `.rs`
+    // commits in between. A suite whose number moves because a SERVICE moved gives false reds
+    // today, and false greens the moment somebody widens a tolerance to make the red go away.
+    //
+    // This suite already owned the honest mechanism for ONE ambient condition: elevation, which
+    // is measured and announced rather than assumed. What follows extends THAT mechanism to the
+    // second condition instead of building a rival beside it.
+    //
+    //   * The state is ASKED FOR BEFORE THE PROBE, never inferred from a returned HRESULT. The
+    //     tempting fix — adding `0x80070003` next to `E_ACCESSDENIED_HEX` in the tolerated arm —
+    //     turns six failures green while UN-TESTING them, and `0x80070003` is also what a HEALTHY
+    //     machine answers for a task folder nobody ever created, so it would blind the suite to a
+    //     real defect as well. [`a_path_not_found_from_a_reachable_scheduler_is_never_tolerated`]
+    //     is what keeps that fix out.
+    //   * Every verdict is per HALF of an arm's contract, so an arm can no longer report a bare
+    //     pass over a half it never reached.
+    //   * The DECISION is a pure function of a service state — the same split `32-FIX-25` made
+    //     between `classify_scheduler_failure` and `query_scheduler_service` — so BOTH directions
+    //     are asserted without touching this machine's services: an unavailable scheduler must
+    //     report NOT MEASURED, and a healthy one must never skip an arm that could have run.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+
+    /// The two halves of a contract an arm of this suite can be prevented from measuring.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Half {
+        /// Everything an ordinary account may do through this module to a task that is REALLY
+        /// THERE: ask whether it exists, read its enabled bit, read its execution time limit,
+        /// delete it. Measured on any machine whose scheduler service is running, because
+        /// [`register_fixture`] puts a real, ORDINARY task in front of the production readers
+        /// rather than waiting for a privileged registration most machines refuse.
+        Unprivileged,
+        /// [`register_logon_task`] itself — a `TASK_RUNLEVEL_HIGHEST` registration. Windows
+        /// refuses that to an unelevated process (measured on a real Windows install: `0x80070005`
+        /// at `RegisterTaskDefinition`), and the run level is deliberately NOT made a parameter
+        /// to get round it: a security-critical constant that becomes a knob is a constant some
+        /// future caller can turn down, which is the shape
+        /// [`binding_the_trigger_to_a_user_is_not_conditional`] already forbids one field over.
+        /// So this half is measured on an elevated runner, and reported NOT MEASURED BY NAME
+        /// everywhere else.
+        Privileged,
+    }
+
+    impl Half {
+        /// The half in words, for the census line a reader of an ordinary run actually sees.
+        fn as_str(self) -> &'static str {
+            match self {
+                Half::Unprivileged => {
+                    "the UNPRIVILEGED half (a real task, read and deleted by this account)"
+                }
+                Half::Privileged => {
+                    "the PRIVILEGED half (register_logon_task, a highest-run-level write)"
+                }
+            }
+        }
+    }
+
+    /// One census line, built purely so its SHAPE can be asserted without a machine in the state
+    /// that produces it.
     ///
-    /// Held as data so the census below can name them, and so a fifth cannot join them silently:
-    /// adding one without adding it here leaves the census under-reporting, which is the bug this
-    /// whole block exists to end.
-    const WRITE_HALF_ARMS: [&str; 4] = [
-        "a_registered_task_reads_back_as_existing_and_enabled",
-        "a_task_that_was_never_registered_reads_as_absent_and_not_enabled",
-        "deleting_a_task_that_is_already_absent_is_a_success",
-        "the_registered_task_is_allowed_to_run_indefinitely",
+    /// The unmeasured wording is the point of the whole finding. Its predecessor ended «The test
+    /// still reports PASS; what it proved is only the read half» — a sentence that announced the
+    /// arm's own incompleteness and then let it count as green anyway. A test may be honest about
+    /// being unable to measure something; it may not call that a pass.
+    fn verdict_line(measured: bool, arm: &str, half: Half, why: &str) -> String {
+        if measured {
+            format!(
+                "MEASURED task_scheduler::{arm} — {half} was exercised on this machine.",
+                half = half.as_str()
+            )
+        } else {
+            format!(
+                "NOT MEASURED task_scheduler::{arm} — {half} could not be exercised here: {why}. \
+                 This arm asserts NOTHING about that half; whatever verdict libtest prints for it \
+                 covers only the halves reported MEASURED.",
+                half = half.as_str()
+            )
+        }
+    }
+
+    /// How many halves this run measured, and how many it could not.
+    ///
+    /// Two counters rather than one, because «4 skipped» means nothing without «out of how many»,
+    /// and the pair is what makes the summary line comparable between two runs on two machines.
+    static MEASURED_HALVES: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    static UNMEASURED_HALVES: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    /// Record — out loud and counted — that an arm exercised one half of its contract.
+    fn measured(arm: &str, half: Half) {
+        MEASURED_HALVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        say_out_loud(&verdict_line(true, arm, half, ""));
+    }
+
+    /// Record — out loud and counted — that an arm could NOT exercise one half of its contract.
+    fn not_measured(arm: &str, half: Half, why: &str) {
+        UNMEASURED_HALVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        say_out_loud(&verdict_line(false, arm, half, why));
+    }
+
+    /// **The pre-flight.** Ask the SCM whether the scheduler is there BEFORE probing it; if it is
+    /// not, account for every half this arm was going to measure and tell the caller to stop.
+    ///
+    /// A check on STATE, asked first — never a widened match on an HRESULT that came back. The
+    /// difference is the whole finding: `0x80070003` from a machine whose service is RUNNING is a
+    /// real defect and must still fail, and it still does, because nothing here inspects it.
+    fn scheduler_or_skip(arm: &str, halves: &[Half]) -> bool {
+        match out_of_reach(query_scheduler_service()) {
+            None => true,
+            Some(why) => {
+                for half in halves {
+                    not_measured(arm, *half, &why);
+                }
+                false
+            }
+        }
+    }
+
+    /// Put a real, ORDINARY task in front of the production readers.
+    ///
+    /// **This is what turns «the read half only» into a measurement.** Four arms of this suite
+    /// were about the LIFECYCLE — a task exists, reads as enabled, carries the limit it was given,
+    /// and can be deleted — and all four hid those assertions behind [`register_logon_task`],
+    /// which registers at `TASK_RUNLEVEL_HIGHEST` and is therefore refused to every unelevated
+    /// process. So on an ordinary machine the readers were never once pointed at a task that was
+    /// actually there, and the arms passed anyway.
+    ///
+    /// Nothing here is production code and nothing here is privileged: it is the same definition
+    /// minus the run level, which is exactly the part Windows refuses. Measured on the
+    /// machine, unelevated: registration `Ok`, `task_exists` true, `task_is_enabled` `Ok(true)`,
+    /// the limit read back verbatim, `delete_task` `Ok` and the task gone afterwards.
+    ///
+    /// The limit is a PARAMETER so a caller can register something other than `RUN_INDEFINITELY`.
+    /// A fixture that always used the production constant would let a reader that ignored the task
+    /// and returned that constant pass — the exact vacuity `the_registered_task_is_allowed_to_run_
+    /// indefinitely` already warns about in its own last assertion.
+    fn register_fixture(name: &str, limit: &str) -> Result<(), String> {
+        let identity = current_user_id()?;
+        let exe = protected_target();
+        let exe_str = exe.to_string_lossy().into_owned();
+
+        with_scheduler("self-test fixture RegisterTaskDefinition", |service, root| unsafe {
+            let def = service.NewTask(0)?;
+
+            // No `SetRunLevel`. The platform default is the unprivileged one, and that is the
+            // single deliberate difference from the production definition.
+            let principal = def.Principal()?;
+            principal.SetId(&BSTR::from("Author"))?;
+            principal.SetLogonType(TASK_LOGON_INTERACTIVE_TOKEN)?;
+
+            let settings = def.Settings()?;
+            settings.SetEnabled(VARIANT_TRUE)?;
+            settings.SetExecutionTimeLimit(&BSTR::from(limit))?;
+
+            let trigger = def.Triggers()?.Create(TASK_TRIGGER_LOGON)?;
+            let logon: ILogonTrigger = trigger.cast()?;
+            logon.SetId(&BSTR::from("LogonTrigger"))?;
+            logon.SetUserId(&BSTR::from(identity.account.as_str()))?;
+
+            let action = def.Actions()?.Create(TASK_ACTION_EXEC)?;
+            let exec: IExecAction = action.cast()?;
+            exec.SetPath(&BSTR::from(exe_str.as_str()))?;
+
+            let empty = VARIANT::default();
+            let folder = autostart_folder(root, true)?;
+            folder.RegisterTaskDefinition(
+                &BSTR::from(name),
+                &def,
+                TASK_CREATE_OR_UPDATE.0,
+                &empty,
+                &empty,
+                TASK_LOGON_INTERACTIVE_TOKEN,
+                &empty,
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Why an arm that must reach the REAL Task Scheduler cannot be measured in this service
+    /// state — or `None` when it can.
+    ///
+    /// **One function rather than a predicate standing next to a sentence**, so the two can never
+    /// drift into disagreeing about the same state. This is the pre-flight's whole decision, and
+    /// it is pure precisely so the unavailable case is testable: stopping the machine's real
+    /// scheduler to run a test suite is not a thing a test suite may do, and it is certainly not
+    /// a thing this suite may do to a real Windows install.
+    ///
+    /// `Unknown` is out of reach and that is deliberate, though it differs from
+    /// [`absence_is_an_answer`], which treats `Unknown` as no ground to overturn a plain answer.
+    /// The two questions are not the same one. There, the cost of being wrong is a dim row in
+    /// front of a user whose scheduler was fine. Here, the question is whether an arm may CLAIM
+    /// to have reached the scheduler, and «the SCM would not say» is not evidence that it did.
+    fn out_of_reach(service: SchedulerService) -> Option<String> {
+        match service {
+            // The one state in which an arm may claim it reached the scheduler.
+            SchedulerService::Running => None,
+            SchedulerService::NotRunning => Some(format!(
+                "the Windows Task Scheduler service («{SCHEDULER_SERVICE_KEY}») is STOPPED, so no \
+                 task can be registered, read or removed through it on this machine"
+            )),
+            SchedulerService::Unknown => Some(format!(
+                "the Service Control Manager would not say whether the \
+                 «{SCHEDULER_SERVICE_KEY}» service is running, so this arm cannot establish that \
+                 the scheduler was reachable at all"
+            )),
+        }
+    }
+
+    /// What a REFUSED registration means.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Refusal {
+        /// The scheduler was reached and declined a highest-run-level write to this process.
+        NotElevated,
+        /// Anything else. Not tolerated — see
+        /// [`a_path_not_found_from_a_reachable_scheduler_is_never_tolerated`].
+        Unexplained,
+    }
+
+    /// Classify a failed registration, given that the caller has ALREADY established that the
+    /// scheduler service is running.
+    ///
+    /// That precondition is what makes the narrowness safe, and what makes widening it unsafe.
+    fn classify_registration_refusal(err: &str) -> Refusal {
+        // EXACTLY ONE tolerated code, and it stays exactly one. Anything else — `0x80070003`
+        // above all — is a defect in the code under test, because the caller has already
+        // established that the service is running.
+        if err.contains(E_ACCESSDENIED_HEX) {
+            Refusal::NotElevated
+        } else {
+            Refusal::Unexplained
+        }
+    }
+
+    /// Every arm of this suite that REACHES THE REAL WINDOWS TASK SCHEDULER, with the halves of
+    /// its contract that are accounted for separately.
+    ///
+    /// Held as data so [`every_arm_that_reaches_the_scheduler_establishes_that_it_can_be_reached`]
+    /// can check it against the source THE COMPILER READS. Its predecessor carried the warning
+    /// «adding one without adding it here leaves the census under-reporting» and had no way
+    /// whatsoever to enforce it; an eighth arm could join in silence, and did — three arms below
+    /// reach the scheduler and were never named in it at all.
+    const SCHEDULER_ARMS: [(&str, &[Half]); 7] = [
+        (
+            "a_registered_task_reads_back_as_existing_and_enabled",
+            &[Half::Unprivileged, Half::Privileged],
+        ),
+        (
+            "a_task_that_was_never_registered_reads_as_absent_and_not_enabled",
+            &[Half::Unprivileged],
+        ),
+        (
+            "deleting_a_task_that_is_already_absent_is_a_success",
+            &[Half::Unprivileged],
+        ),
+        (
+            "the_registered_task_is_allowed_to_run_indefinitely",
+            &[Half::Unprivileged, Half::Privileged],
+        ),
+        (
+            "a_target_in_a_protected_system_directory_gets_past_the_gate",
+            &[Half::Unprivileged],
+        ),
+        (
+            "a_failure_carries_the_code_in_hexadecimal",
+            &[Half::Unprivileged],
+        ),
+        (
+            "the_write_half_of_the_task_contract_reports_whether_it_was_measured",
+            &[Half::Privileged],
+        ),
     ];
 
-    /// How many arms have reported themselves unmeasured on this run.
-    static UNMEASURED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    /// The one arm that names a registration function and yet never reaches the scheduler.
+    ///
+    /// The ACL gate refuses BEFORE the scheduler is touched, and that arm's own third assertion —
+    /// «the refusal must not carry `0x80070005`» — is what proves it. Making it pre-flight would
+    /// turn an arm that is fully measurable on every machine, stopped service included, into one
+    /// that skips; the exemption is therefore a strengthening, not a loophole, and it is listed
+    /// by name so it stays a decision rather than an oversight.
+    const REFUSED_BEFORE_THE_SCHEDULER_IS_TOUCHED: [&str; 1] =
+        ["a_target_a_standard_account_can_replace_is_refused_before_the_scheduler_is_touched"];
 
     /// Say something a reader of an ORDINARY `cargo test` run can actually see.
     ///
@@ -1097,37 +1382,87 @@ mod tests {
         let _ = err.flush();
     }
 
-    /// Register a task, or report — VISIBLY and COUNTED — that this machine refuses the write.
+    /// Every `#[test]` in this module, as (name, body), read out of the source the compiler was
+    /// actually given.
     ///
-    /// Whether the scheduler's root folder accepts a registration without elevation is a property
-    /// of the MACHINE, not of this code, so it is measured at run time rather than assumed. The
-    /// skip is deliberately narrow: only an access-denied result skips, and only the tests that
-    /// must write are affected. It is not `#[ignore]` precisely because `#[ignore]` would also
-    /// disable these tests on the elevated runner, where they are the mechanism's only real
-    /// coverage.
-    ///
-    /// The notice NAMES THE TEST and carries a running count, so a reader sees how many arms of
-    /// the write half went unmeasured rather than merely that something was skipped. The phase's
-    /// cited green run reported «4 passed» over four tests whose discriminating assertions had all
-    /// been skipped in silence; a bare `return` is what made that possible.
-    fn register_or_skip(test: &str, name: &str, exe: &std::path::Path) -> Option<String> {
-        match register_logon_task(name, exe) {
-            Ok(limit) => Some(limit),
-            Err(e) if e.contains(E_ACCESSDENIED_HEX) => {
-                let n = UNMEASURED.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                say_out_loud(&format!(
-                    "NOT MEASURED ({n}/{total}) task_scheduler::{test} — registering a task was \
-                     refused with {E_ACCESSDENIED_HEX}, so this process is not elevated and the \
-                     WRITE half of the contract was not exercised. The test still reports PASS; \
-                     what it proved is only the read half. Run the suite elevated to measure the \
-                     rest. Full error: {e}",
-                    total = WRITE_HALF_ARMS.len()
-                ));
-                None
+    /// Line-based rather than brace-matched on purpose: this module's bodies are full of format
+    /// strings, and a brace matcher would have to understand string literals before it could stop
+    /// counting the braces in `{err}`. Every test here sits at exactly one level of indentation
+    /// inside `mod tests`, so its closing brace is a line that is exactly four spaces and a brace
+    /// — and no line INSIDE a body can be, because an inner block always closes deeper.
+    fn test_bodies(source: &str) -> Vec<(String, String)> {
+        let lines: Vec<&str> = source.lines().collect();
+        let mut found = Vec::new();
+        let mut index = 0;
+        while index < lines.len() {
+            if lines[index].trim() != "#[test]" {
+                index += 1;
+                continue;
             }
-            Err(e) => panic!(
-                "registration must either succeed or be refused with {E_ACCESSDENIED_HEX}, got: {e}"
-            ),
+            let head = lines[index + 1..]
+                .iter()
+                .position(|line| line.trim_start().starts_with("fn "))
+                .map(|offset| index + 1 + offset)
+                .expect("a #[test] attribute is always followed by the function it marks");
+            let name = lines[head]
+                .trim_start()
+                .trim_start_matches("fn ")
+                .split('(')
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let end = lines[head..]
+                .iter()
+                .position(|line| *line == "    }")
+                .map(|offset| head + offset)
+                .expect("every test in this module closes at four-space indentation");
+            found.push((name, lines[head..=end].join("\n")));
+            index = end + 1;
+        }
+        found
+    }
+
+    /// Attempt the PRIVILEGED registration, and account for that half either way.
+    ///
+    /// Whether a `TASK_RUNLEVEL_HIGHEST` registration is accepted is a property of the PROCESS's
+    /// privileges, not of this code, so it is measured at run time rather than assumed. It is not
+    /// `#[ignore]` precisely because `#[ignore]` would also disable it on an elevated runner,
+    /// where it is this half's only coverage.
+    ///
+    /// **The `panic!` arm is load-bearing and must stay narrow.** Callers reach this only after
+    /// [`scheduler_or_skip`] has established that the scheduler service is RUNNING — so once here,
+    /// «you are not elevated» is the only refusal the machine is entitled to give, and every other
+    /// one indicts the code. Widening it to also accept `0x80070003` is the fix G-32-19 forbids:
+    /// it would silence the six failures a stopped service caused AND blind this arm to a task
+    /// folder that is genuinely missing on a healthy machine, which answers the same code.
+    fn register_or_skip(arm: &str, name: &str, exe: &std::path::Path) -> Option<String> {
+        match register_logon_task(name, exe) {
+            Ok(limit) => {
+                measured(arm, Half::Privileged);
+                Some(limit)
+            }
+            Err(e) => match classify_registration_refusal(&e) {
+                Refusal::NotElevated => {
+                    not_measured(
+                        arm,
+                        Half::Privileged,
+                        &format!(
+                            "the registration was refused with {E_ACCESSDENIED_HEX}, so this \
+                             process is not elevated and a highest-run-level write is not \
+                             something it may make. Run the suite elevated to measure it. Full \
+                             error: {e}"
+                        ),
+                    );
+                    None
+                }
+                Refusal::Unexplained => panic!(
+                    "registration must either succeed or be refused with {E_ACCESSDENIED_HEX}. \
+                     This arm has ALREADY established that the scheduler service is running, so \
+                     any other refusal is a defect in the code under test and must not be \
+                     tolerated — least of all 0x80070003, which a healthy machine also answers \
+                     for a task folder that genuinely is not there. Got: {e}"
+                ),
+            },
         }
     }
 
@@ -1167,26 +1502,39 @@ mod tests {
     /// whatever it created, and on an unelevated host it creates nothing.
     #[test]
     fn the_write_half_of_the_task_contract_reports_whether_it_was_measured() {
+        const ARM: &str = "the_write_half_of_the_task_contract_reports_whether_it_was_measured";
+        if !scheduler_or_skip(ARM, &[Half::Privileged]) {
+            return;
+        }
+
         let _cleanup = ScopedTask(T_CENSUS);
-        let measured = match register_logon_task(T_CENSUS, &protected_target()) {
-            Ok(_) => true,
-            Err(e) if e.contains(E_ACCESSDENIED_HEX) => false,
-            Err(e) => panic!(
-                "the probe must either succeed or be refused with {E_ACCESSDENIED_HEX}, got: {e}"
-            ),
-        };
+        let reached = register_or_skip(ARM, T_CENSUS, &protected_target()).is_some();
+
+        // The roster is read out of the same data the source guard checks, so this summary cannot
+        // drift from the arms it summarises.
+        let (privileged, unprivileged): (Vec<&str>, Vec<&str>) = (
+            SCHEDULER_ARMS
+                .iter()
+                .filter(|(_, halves)| halves.contains(&Half::Privileged))
+                .map(|(arm, _)| *arm)
+                .collect(),
+            SCHEDULER_ARMS
+                .iter()
+                .filter(|(_, halves)| halves.contains(&Half::Unprivileged))
+                .map(|(arm, _)| *arm)
+                .collect(),
+        );
+
         say_out_loud(&format!(
-            "== task_scheduler: the WRITE half of the contract is {verdict} on this machine. \
-             {n} arm(s) of this suite have their discriminating assertions behind a successful \
-             registration: {arms}. {tail}",
-            verdict = if measured { "MEASURED" } else { "NOT MEASURED" },
-            n = WRITE_HALF_ARMS.len(),
-            arms = WRITE_HALF_ARMS.join(", "),
-            tail = if measured {
-                "They were exercised."
-            } else {
-                "They reported PASS having exercised only the read half. Run the suite elevated."
-            }
+            "== task_scheduler census: the PRIVILEGED half (a highest-run-level registration) is \
+             {verdict} on this machine, and {u} arm(s) measure the UNPRIVILEGED half against a \
+             real task this account registered itself. Privileged: {privileged:?}. Unprivileged: \
+             {unprivileged:?}. Running totals for this process: {m} half(s) measured, {n} not \
+             measured — and every «not» is named on its own line above, with the reason.",
+            verdict = if reached { "MEASURED" } else { "NOT MEASURED" },
+            u = unprivileged.len(),
+            m = MEASURED_HALVES.load(std::sync::atomic::Ordering::SeqCst),
+            n = UNMEASURED_HALVES.load(std::sync::atomic::Ordering::SeqCst),
         ));
     }
 
@@ -1235,6 +1583,11 @@ mod tests {
     /// assertion; one hardwired to `false` fails on the last two.
     #[test]
     fn a_registered_task_reads_back_as_existing_and_enabled() {
+        const ARM: &str = "a_registered_task_reads_back_as_existing_and_enabled";
+        if !scheduler_or_skip(ARM, &[Half::Unprivileged, Half::Privileged]) {
+            return;
+        }
+
         let name = T_ROUNDTRIP;
         let _cleanup = ScopedTask(name);
 
@@ -1243,7 +1596,28 @@ mod tests {
             "precondition: this test's own task must not already exist"
         );
 
-        if register_or_skip(WRITE_HALF_ARMS[0], name, &protected_target()).is_none() {
+        // THE UNPRIVILEGED HALF, measured on every machine whose scheduler answers. Until
+        // G-32-19 the whole round trip sat behind the privileged registration below, so on an
+        // ordinary machine the readers were never pointed at a task that was really there and
+        // this arm passed having asserted only that a name it had not registered was absent.
+        register_fixture(name, RUN_INDEFINITELY)
+            .expect("an ordinary task this account owns must be registrable");
+        assert!(task_exists(name), "the task we just registered must exist");
+        assert_eq!(
+            task_is_enabled(name),
+            Ok(true),
+            "a freshly registered, enabled task must read as enabled"
+        );
+        delete_task(name).expect("and the fixture must come back out again");
+        assert!(
+            !task_exists(name),
+            "the readers must follow the task's real state, not a cached first answer"
+        );
+        measured(ARM, Half::Unprivileged);
+
+        // THE PRIVILEGED HALF: the same round trip through the production registration, which is
+        // the one that carries TASK_RUNLEVEL_HIGHEST and therefore needs an elevated runner.
+        if register_or_skip(ARM, name, &protected_target()).is_none() {
             return;
         }
 
@@ -1269,6 +1643,16 @@ mod tests {
     /// fails on the absent name.
     #[test]
     fn a_task_that_was_never_registered_reads_as_absent_and_not_enabled() {
+        const ARM: &str = "a_task_that_was_never_registered_reads_as_absent_and_not_enabled";
+        // Both assertions below need the scheduler to ANSWER. With the service stopped,
+        // `task_is_enabled` correctly returns `Err` — the G-32-15 behaviour — and this arm was
+        // the one that then failed, indicting the production code for doing what it was changed
+        // to do. Asking the SCM first is what tells «the machine could not answer» apart from
+        // «the code answered wrongly».
+        if !scheduler_or_skip(ARM, &[Half::Unprivileged]) {
+            return;
+        }
+
         assert!(!task_exists(T_ABSENT), "an unregistered task must not exist");
         assert_eq!(
             task_is_enabled(T_ABSENT),
@@ -1279,11 +1663,15 @@ mod tests {
              rendered ON by any careless caller"
         );
 
+        // The control is what stops the pair above from being vacuous, and it is registered as an
+        // ORDINARY task rather than through the privileged path — because what it has to be is
+        // PRESENT, and nothing about this contract needs it to be privileged. That is the whole
+        // difference: this arm's discriminating half is now measured on an ordinary machine
+        // instead of skipped on one.
         let control = T_ABSENT_CONTROL;
         let _cleanup = ScopedTask(control);
-        if register_or_skip(WRITE_HALF_ARMS[1], control, &protected_target()).is_none() {
-            return;
-        }
+        register_fixture(control, RUN_INDEFINITELY)
+            .expect("an ordinary control task must be registrable by the account running this");
 
         assert!(
             task_exists(control),
@@ -1295,6 +1683,7 @@ mod tests {
             Ok(true),
             "the control task must read as enabled — same reason"
         );
+        measured(ARM, Half::Unprivileged);
     }
 
     /// «Absent IS the requested state» — the same rule the autostart disable arm already lived by
@@ -1306,14 +1695,22 @@ mod tests {
     /// simply returned `Ok(())` and did nothing would satisfy this test.
     #[test]
     fn deleting_a_task_that_is_already_absent_is_a_success() {
+        const ARM: &str = "deleting_a_task_that_is_already_absent_is_a_success";
+        if !scheduler_or_skip(ARM, &[Half::Unprivileged]) {
+            return;
+        }
+
         let name = T_DELETE;
         let _cleanup = ScopedTask(name);
 
         delete_task(name).expect("deleting a task that never existed must succeed");
 
-        if register_or_skip(WRITE_HALF_ARMS[2], name, &protected_target()).is_none() {
-            return;
-        }
+        // The middle steps need a task that is PRESENT, and nothing more than that — so they are
+        // taken against an ordinary fixture instead of behind a privileged registration. Before
+        // G-32-19 every assertion below this line was skipped on any unelevated machine, which
+        // means `delete_task` was never once observed to actually remove anything.
+        register_fixture(name, RUN_INDEFINITELY)
+            .expect("an ordinary task must be registrable, so there is something to delete");
 
         assert!(
             task_exists(name),
@@ -1326,6 +1723,7 @@ mod tests {
         );
         delete_task(name).expect("deleting the same, now-absent task must succeed too");
         assert!(!task_exists(name), "and it must still be gone afterwards");
+        measured(ARM, Half::Unprivileged);
     }
 
     /// The platform default terminates long-running tasks. A VPN session left connected for days
@@ -1335,10 +1733,42 @@ mod tests {
     /// `RUN_INDEFINITELY` without consulting the scheduler would satisfy everything above it.
     #[test]
     fn the_registered_task_is_allowed_to_run_indefinitely() {
+        const ARM: &str = "the_registered_task_is_allowed_to_run_indefinitely";
+        if !scheduler_or_skip(ARM, &[Half::Unprivileged, Half::Privileged]) {
+            return;
+        }
+
         let name = T_LIMIT;
         let _cleanup = ScopedTask(name);
 
-        let Some(reported) = register_or_skip(WRITE_HALF_ARMS[3], name, &protected_target()) else {
+        // THE UNPRIVILEGED HALF: does the reader report what the TASK carries, or a constant?
+        //
+        // The fixture is deliberately given a limit that is NOT `RUN_INDEFINITELY`. A reader
+        // hardwired to the production constant satisfies every assertion in the privileged half
+        // below — the arm's own doc has warned about that vacuity since it was written, and then
+        // guarded it with a check that only ran on an elevated machine. «PT1H» is a value nothing
+        // in this module would ever invent, so reporting it is proof the answer came off the task.
+        const NOT_THE_PRODUCTION_LIMIT: &str = "PT1H";
+        register_fixture(name, NOT_THE_PRODUCTION_LIMIT)
+            .expect("an ordinary task carrying a distinctive limit must be registrable");
+        assert_eq!(
+            read_execution_time_limit(name).expect("the fixture must be readable"),
+            NOT_THE_PRODUCTION_LIMIT,
+            "the reader must report the limit the TASK carries. Reporting «{RUN_INDEFINITELY}» \
+             here would mean it returns the production constant without consulting the scheduler \
+             at all, and every assertion in the privileged half below would then prove nothing"
+        );
+        assert!(
+            read_execution_time_limit(T_LIMIT_ABSENT).is_err(),
+            "reading a task that was never registered must fail rather than report a limit — \
+             otherwise the assertions above prove nothing about WHERE the limit came from"
+        );
+        delete_task(name).expect("the fixture must come back out before the real registration");
+        measured(ARM, Half::Unprivileged);
+
+        // THE PRIVILEGED HALF: that `register_logon_task` ITSELF sets the run-indefinitely limit.
+        // Only the production write can prove this, and only an elevated runner may make it.
+        let Some(reported) = register_or_skip(ARM, name, &protected_target()) else {
             return;
         };
 
@@ -1350,11 +1780,6 @@ mod tests {
             read_execution_time_limit(name).expect("the registered task must be readable"),
             RUN_INDEFINITELY,
             "the registered task must carry the run-indefinitely limit"
-        );
-        assert!(
-            read_execution_time_limit(T_LIMIT_ABSENT).is_err(),
-            "reading a task that was never registered must fail rather than report a limit — \
-             otherwise the assertions above prove nothing about WHERE the limit came from"
         );
     }
 
@@ -1435,6 +1860,15 @@ mod tests {
     /// on most of them.
     #[test]
     fn a_target_in_a_protected_system_directory_gets_past_the_gate() {
+        const ARM: &str = "a_target_in_a_protected_system_directory_gets_past_the_gate";
+        // This arm's contract is «the attempt REACHED the scheduler», so a scheduler that is not
+        // there does not weaken the claim — it removes the subject entirely. Its `Err` arm is
+        // also exactly where a stopped service used to land, producing the 0x80070003 that made
+        // this test red for something the code had not done.
+        if !scheduler_or_skip(ARM, &[Half::Unprivileged]) {
+            return;
+        }
+
         let root = std::env::var("SystemRoot").expect("SystemRoot is set on every Windows install");
         let exe = std::path::PathBuf::from(root).join("explorer.exe");
         assert!(
@@ -1450,9 +1884,11 @@ mod tests {
                 e.contains(E_ACCESSDENIED_HEX),
                 "a target in a protected root must get past the gate and reach the scheduler; \
                  the only failure allowed here is the machine declining the write to an \
-                 unelevated process. Got: {e}"
+                 unelevated process. The service has already been confirmed RUNNING, so no other \
+                 code may be excused. Got: {e}"
             ),
         }
+        measured(ARM, Half::Unprivileged);
     }
 
     // ── Who the logon trigger binds to (CR-03) ───────────────────────────────────────────────
@@ -1518,14 +1954,31 @@ mod tests {
     /// log, not the switch, not Task Manager. A type can express «this cannot be skipped» and
     /// this arm asserts the source keeps expressing it.
     ///
-    /// The needle is assembled with `concat!` so this test's own text does not contain the
-    /// string it searches for — otherwise the arm would find itself and pass on its own body.
+    /// The needles are assembled with `concat!` so this test's own text does not contain the
+    /// strings it searches for — otherwise the arm would find itself and pass on its own body.
+    ///
+    /// **Scoped to the production half, and then applied to EVERY site (G-32-19).** It used to
+    /// assert one site in the whole file and inspect only that one. That was the same claim as
+    /// long as the file held a single trigger, and it stopped being so the moment
+    /// [`register_fixture`] added a second — a test fixture that binds its own trigger for
+    /// exactly the reason this arm exists. The count belongs to the production half, where a
+    /// second registration path really would be a second thing to keep right; the
+    /// UNCONDITIONALITY belongs to every site there is, fixtures included, because an unbound
+    /// logon trigger is a hazard wherever it is created. Splitting the two makes this arm
+    /// strictly stronger than the version it replaces, not weaker: before, a second binding could
+    /// only ever be reported as a wrong number, and was never itself inspected.
     #[test]
     fn binding_the_trigger_to_a_user_is_not_conditional() {
         const SELF_SOURCE: &str = include_str!("task_scheduler.rs");
         const NEEDLE: &str = concat!("logon.Set", "UserId(");
+        const TESTS_BEGIN: &str = concat!("#[cfg", "(test)]");
 
         let lines: Vec<&str> = SELF_SOURCE.lines().collect();
+        let production_ends = lines
+            .iter()
+            .position(|line| line.trim() == TESTS_BEGIN)
+            .expect("this file keeps its tests behind a cfg gate, and the scope below needs it");
+
         let sites: Vec<usize> = lines
             .iter()
             .enumerate()
@@ -1533,28 +1986,31 @@ mod tests {
             .map(|(index, _)| index)
             .collect();
 
+        let in_production = sites.iter().filter(|at| **at < production_ends).count();
         assert_eq!(
-            sites.len(),
-            1,
-            "there must be exactly one place that binds the trigger to a user, found {}",
-            sites.len()
+            in_production, 1,
+            "there must be exactly one place in the PRODUCTION half of this file that binds the \
+             logon trigger to a user, found {in_production}. Two registration paths mean two \
+             places to keep this right, and the second one is the one nobody updates"
         );
 
-        let site = sites[0];
-        let previous = lines[..site]
-            .iter()
-            .rev()
-            .map(|line| line.trim())
-            .find(|line| !line.is_empty() && !line.starts_with("//"))
-            .expect("the binding is not the first statement in the file");
+        for site in sites {
+            let previous = lines[..site]
+                .iter()
+                .rev()
+                .map(|line| line.trim())
+                .find(|line| !line.is_empty() && !line.starts_with("//"))
+                .expect("no binding is the first statement in the file");
 
-        assert!(
-            !previous.contains("if ") && !previous.contains("match "),
-            "the trigger binding is guarded by «{previous}». A skipped binding leaves an UNBOUND \
-             logon trigger, which fires at EVERY user's logon and runs this application with \
-             highest privileges — the shared-machine hazard this module's own comment forbids. \
-             The identity must be refused, never degraded (CR-03)."
-        );
+            assert!(
+                !previous.contains("if ") && !previous.contains("match "),
+                "a trigger binding on line {line} is guarded by «{previous}». A skipped binding \
+                 leaves an UNBOUND logon trigger, which fires at EVERY user's logon and runs this \
+                 application with highest privileges — the shared-machine hazard this module's \
+                 own comment forbids. The identity must be refused, never degraded (CR-03).",
+                line = site + 1
+            );
+        }
     }
 
     // ── One registration per user, not one per machine (the finding CR-01's sibling) ─────────
@@ -1636,6 +2092,15 @@ mod tests {
     /// mentioning a hex prefix satisfies it today. A full eight-digit HRESULT is required.
     #[test]
     fn a_failure_carries_the_code_in_hexadecimal() {
+        const ARM: &str = "a_failure_carries_the_code_in_hexadecimal";
+        // Never in the finding's six, and it should have been: with the service stopped this arm
+        // goes green over a failure that came from the SCHEDULER NOT BEING THERE, while claiming
+        // to have inspected one the scheduler produced. A pass for the wrong reason is the same
+        // false green as a skip that calls itself a pass.
+        if !scheduler_or_skip(ARM, &[Half::Unprivileged]) {
+            return;
+        }
+
         let err = read_execution_time_limit(T_LIMIT_ABSENT)
             .expect_err("reading a task that does not exist must fail");
 
@@ -1651,6 +2116,7 @@ mod tests {
             tail.len() >= 8 && tail.chars().take(8).all(|c| c.is_ascii_hexdigit()),
             "the failure must carry a full eight-digit hexadecimal HRESULT, got: {err}"
         );
+        measured(ARM, Half::Unprivileged);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -1830,5 +2296,218 @@ mod tests {
              authoritative check that always answers «Unknown» would silently degrade to the \
              HRESULT guess it exists to replace"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    // G-32-19 — the pre-flight's own contracts, in BOTH directions
+    //
+    // The Task Scheduler service cannot be stopped to test this, and must not be: what
+    // runs on that machine is his call. So the unavailable state is simulated AT THE SEAM, which
+    // is exactly why `32-FIX-25` split the decision from the query in the first place.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+
+    /// **Unavailable → NOT MEASURED, said out loud, and never called a pass.**
+    #[test]
+    fn an_arm_that_cannot_reach_the_scheduler_reports_not_measured_rather_than_a_bare_pass() {
+        for state in [SchedulerService::NotRunning, SchedulerService::Unknown] {
+            let why = out_of_reach(state).unwrap_or_else(|| {
+                panic!(
+                    "a scheduler in state {state:?} cannot be reached, so an arm that needs it \
+                     must be told why rather than being allowed to probe and blame the code for \
+                     what the machine did"
+                )
+            });
+
+            let line = verdict_line(false, "an_arm_that_needed_the_scheduler", Half::Privileged, &why);
+            assert!(
+                line.starts_with("NOT MEASURED"),
+                "the verdict must LEAD with the words a reader greps for: {line}"
+            );
+            assert!(
+                line.contains("an_arm_that_needed_the_scheduler"),
+                "the verdict must NAME the arm, or a reader learns only that something was \
+                 skipped: {line}"
+            );
+            assert!(
+                line.contains("asserts NOTHING about that half"),
+                "the verdict must say plainly that the arm proved nothing about the half it could \
+                 not reach. Its predecessor said «The test still reports PASS; what it proved is \
+                 only the read half» — announcing an arm's own incompleteness and then letting it \
+                 count as green, which is the false green this finding is about. Got: {line}"
+            );
+            assert!(
+                !line.contains("reports PASS"),
+                "a half that was not measured may not be described as a pass at all: {line}"
+            );
+        }
+    }
+
+    /// **Absence is a plain answer, on every machine including one whose scheduler is stopped.**
+    ///
+    /// The machine-free twin of `a_task_that_was_never_registered_reads_as_absent_and_not_enabled`
+    /// (G-32-19 § 4 item 2). That arm needs the scheduler to answer, so on a machine whose service
+    /// is down it now honestly skips — and the contract it guards would go unguarded there, which
+    /// is how a skip quietly becomes the same false green it was meant to replace. This one holds
+    /// the collapse itself, and it runs anywhere.
+    #[test]
+    fn an_absent_task_collapses_to_a_plain_false_and_never_to_an_error() {
+        assert!(
+            !enabled_from(None),
+            "«no such task» must collapse to a plain, confident `false`. A read that made absence \
+             an error would be interpreted as «unknown» and rendered ON by any careless caller — \
+             a switch claiming a startup that will not happen"
+        );
+        assert!(
+            !enabled_from(Some(false)),
+            "«there, but switched off» must also read false: a task disabled in Task Manager must \
+             never show as ON here"
+        );
+        assert!(
+            enabled_from(Some(true)),
+            "and the conjunction — present AND enabled — is the only thing that reads true; a \
+             collapse that answered false to everything would satisfy both assertions above"
+        );
+    }
+
+    /// **Healthy → nothing is skipped.** The other direction, and the one a lenient pre-flight
+    /// would quietly break: a check that skips whenever it is unsure un-tests the whole suite on
+    /// every machine, which is a far larger false green than the one being fixed.
+    #[test]
+    fn a_healthy_machine_never_skips_an_arm_that_could_have_run() {
+        assert_eq!(
+            out_of_reach(SchedulerService::Running),
+            None,
+            "with the scheduler service RUNNING every arm that can run must run — no arm may skip \
+             itself on a machine that was able to answer it"
+        );
+    }
+
+    /// **The forbidden fix, kept out by a test rather than by a comment.**
+    ///
+    /// Widening the tolerated set to include `0x80070003` turns all six of this finding's
+    /// failures green while un-testing them. Worse, it is not even specific to a stopped service:
+    /// `0x80070003` is what a perfectly healthy machine answers for a task folder nobody ever
+    /// created, so the widened arm would swallow a real defect too. The narrow set is safe only
+    /// because the caller has ALREADY established that the service is running — and once that is
+    /// established, any refusal other than «you are not elevated» is about the code under test.
+    #[test]
+    fn a_path_not_found_from_a_reachable_scheduler_is_never_tolerated() {
+        assert_eq!(
+            classify_registration_refusal(
+                "RegisterTaskDefinition: The system cannot find the path specified. (0x80070003)"
+            ),
+            Refusal::Unexplained,
+            "0x80070003 must NOT join the tolerated set. On a machine whose service is running it \
+             means a folder that is genuinely not there — a defect — and tolerating it would make \
+             this suite unable to see one"
+        );
+        assert_eq!(
+            classify_registration_refusal(
+                "ITaskService::Connect: The RPC server is unavailable. (0x800706ba)"
+            ),
+            Refusal::Unexplained,
+            "nor may the other unreachable-scheduler HRESULT be tolerated: the pre-flight is a \
+             check on the service's STATE, never a widened match on a returned code"
+        );
+        assert_eq!(
+            classify_registration_refusal("RegisterTaskDefinition: Access is denied. (0x80070005)"),
+            Refusal::NotElevated,
+            "the one ambient refusal that IS tolerated, because it is a property of the process's \
+             privileges rather than of the code under test"
+        );
+    }
+
+    /// **Every arm that reaches the real Windows Task Scheduler must first establish that the
+    /// scheduler can be reached, and must account for every half of its contract.**
+    ///
+    /// The invariant stated once, in the suite's own words, and checked against THE SOURCE THE
+    /// COMPILER READS — the same technique
+    /// [`binding_the_trigger_to_a_user_is_not_conditional`] already uses one screen up, and for
+    /// the same reason: the mistake this guards against is an omission, and no runtime assertion
+    /// can observe an omission. libtest also runs these arms in an arbitrary order and in
+    /// parallel, so a census that tried to observe its peers at run time would be checking
+    /// whichever of them happened to have finished.
+    ///
+    /// Needles are assembled with `concat!` so this arm's own body does not contain the strings
+    /// it searches for and find itself.
+    #[test]
+    fn every_arm_that_reaches_the_scheduler_establishes_that_it_can_be_reached() {
+        const SELF_SOURCE: &str = include_str!("task_scheduler.rs");
+        /// Calls that go to the machine's scheduler, or to a helper that does.
+        const TOUCHES: [&str; 7] = [
+            concat!("register_logon", "_task("),
+            concat!("register_or", "_skip("),
+            concat!("register_", "fixture("),
+            concat!("task_is", "_enabled("),
+            concat!("task_", "exists("),
+            concat!("delete_", "task("),
+            concat!("read_execution", "_time_limit("),
+        ];
+        const PREFLIGHT: &str = concat!("scheduler_or", "_skip(");
+        const HALF_TOKENS: [(&str, Half); 2] = [
+            (concat!("Half", "::Unprivileged"), Half::Unprivileged),
+            (concat!("Half", "::Privileged"), Half::Privileged),
+        ];
+
+        let arms = test_bodies(SELF_SOURCE);
+        let named = |name: &str| arms.iter().any(|(arm, _)| arm == name);
+
+        for (name, _) in SCHEDULER_ARMS {
+            assert!(
+                named(name),
+                "«{name}» is listed as reaching the scheduler but no test by that name exists any \
+                 more — a stale roster silently stops guarding the arm it was renamed from"
+            );
+        }
+        for name in REFUSED_BEFORE_THE_SCHEDULER_IS_TOUCHED {
+            assert!(named(name), "«{name}» is exempted but does not exist");
+        }
+
+        for (name, body) in &arms {
+            let touches: Vec<&str> = TOUCHES
+                .iter()
+                .copied()
+                .filter(|needle| body.contains(needle))
+                .collect();
+            let listed = SCHEDULER_ARMS.iter().find(|(arm, _)| arm == name);
+            let exempt = REFUSED_BEFORE_THE_SCHEDULER_IS_TOUCHED.contains(&name.as_str());
+
+            if touches.is_empty() {
+                assert!(
+                    listed.is_none(),
+                    "«{name}» is listed as reaching the scheduler but its body calls nothing that \
+                     does. Either the roster is stale, or the arm stopped measuring what it claims"
+                );
+                continue;
+            }
+
+            assert!(
+                listed.is_some() || exempt,
+                "«{name}» calls {touches:?} and so reaches the real Windows Task Scheduler, but it \
+                 is in neither roster. An arm that probes the scheduler without first establishing \
+                 that the scheduler is there does not report a defect when the machine is at \
+                 fault — it reports one against the code"
+            );
+
+            if let Some((_, halves)) = listed {
+                assert!(
+                    body.contains(PREFLIGHT),
+                    "«{name}» reaches the scheduler without calling the pre-flight. Every arm that \
+                     reaches the real Windows Task Scheduler must first establish that the \
+                     scheduler can be reached, and must say plainly when it could not"
+                );
+                for (token, half) in HALF_TOKENS {
+                    if halves.contains(&half) {
+                        assert!(
+                            body.contains(token),
+                            "«{name}» is declared to have {what}, but its body never names that \
+                             half — so on a machine that cannot measure it, the arm would report a \
+                             bare pass over a half it never reached",
+                            what = half.as_str()
+                        );
+                    }
+                }
+            }
+        }
     }
 }

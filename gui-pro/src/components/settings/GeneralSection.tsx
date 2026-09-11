@@ -230,6 +230,23 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
   // pair the row is mockable exactly like «Запускать в свёрнутом режиме», and the trap is gone.
   const [autostart, setAutostart] = useState(false);
 
+  // What is on screen right now, readable from a callback created in an earlier render. Only the
+  // change-detection further down uses it; nothing renders from it.
+  //
+  // Written by `applyAutostart` BELOW, in the same statement as the state — never by an effect.
+  // That is the 2026-09-10 fix and it is not a style preference: an effect writes this mirror on
+  // React's clock (a scheduled task, after paint) while every read that consults it resolves on the
+  // microtask clock. A read landing between the two compared the operating system's new answer
+  // against the row's PREVIOUS value and concluded nothing had changed — so the instrument that
+  // exists to catch the switch and Windows drifting apart went silent exactly when it had something
+  // to say, and a later poll logged the drift under its own trigger name. The two clocks are gone:
+  // there is one writer, and it moves the mirror and the state together.
+  const autostartRef = useRef(false);
+  const applyAutostart = useCallback((value: boolean) => {
+    autostartRef.current = value;
+    setAutostart(value);
+  }, []);
+
   // Whether the app could find out at all.
   //
   // `get_autostart` has THREE answers, not two: the task is on, the task is off (absent or
@@ -287,7 +304,7 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
     invoke<boolean>("get_autostart")
       .then((value) => {
         setAutostartUnreadableKey(null);
-        seedIfUntouched("autostart", setAutostart)(value);
+        seedIfUntouched("autostart", applyAutostart)(value);
       })
       .catch((e) => {
         // G-32-15, the instrument gap. `refresh` has logged a failed read since G-32-13; THIS
@@ -351,12 +368,8 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
   // The hook itself is called further up, next to the mount read, because G-32-15 showed that read
   // needs the same instrument: it was the one path that could fail in complete silence.
 
-  // What is on screen right now, readable from a callback created in an earlier render. Only the
-  // change-detection above uses it; nothing renders from it.
-  const autostartRef = useRef(autostart);
-  useEffect(() => {
-    autostartRef.current = autostart;
-  }, [autostart]);
+  // (`autostartRef` and its single writer `applyAutostart` are declared up beside the state itself
+  // — the mirror and the value must be set in one statement, see the comment there.)
 
   // Has a re-read ever landed? The row mounts on its `false` default and the first answer moves it
   // to whatever the task says — that is a SEED, not a disagreement, and logging it would put a line
@@ -386,11 +399,11 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
           }
           autostartSeeded.current = true;
           setAutostartUnreadableKey(null);
-          setAutostart(value);
+          applyAutostart(value);
         })
         .catch((e) => readFailed(trigger, e));
     },
-    [activityLog, readFailed]
+    [activityLog, applyAutostart, readFailed]
   );
 
   useEffect(() => {
@@ -463,7 +476,10 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
     // Same mark, second reader: `markPending` drives the spinner, this ref stops the focus refresh
     // from reading across the write (see the refresh effect above).
     autostartWritePending.current = true;
-    setAutostart(value);
+    // Through the single writer like every other move of this row: a value the user chose is the
+    // new «what is on screen», so the next read must compare against IT and not report the user's
+    // own press as a disagreement with Windows.
+    applyAutostart(value);
     try {
       await invoke("set_autostart", { enabled: value });
       onSaved?.();
@@ -472,7 +488,7 @@ export function GeneralSection({ onSaved, onSaveFailed, active = true }: Props) 
       // updates the same flag. Without this a refused write followed by an unreadable re-read would
       // put the switch back on the last value the app happened to report and present it as fact.
       const failureKey = autostartSaveFailureKey(e);
-      await revertTo(setAutostart, reported, async () => {
+      await revertTo(applyAutostart, reported, async () => {
         try {
           const value = await invoke<boolean>("get_autostart");
           setAutostartUnreadableKey(null);

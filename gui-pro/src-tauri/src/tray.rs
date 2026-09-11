@@ -372,7 +372,7 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
 
     // 3.6 F-TRAY (F10): mirror the tray connect to the window so its active-config pointer + hero
     // follow the config the tray actually connected, instead of a stale/reverted FE pointer (the
-    // owner's "tray icon green while the tab shows all «Подключить» / no active card" split). Carries
+    // "tray icon green while the tab shows all «Подключить» / no active card" split). Carries
     // origin + the config PATH only — paths already cross this boundary via the config commands; no
     // secret (D-29).
     app.emit(

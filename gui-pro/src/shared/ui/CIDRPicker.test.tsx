@@ -137,9 +137,9 @@ describe("CIDRPicker", () => {
     fireEvent.paste(inputs[0], {
       clipboardData: { getData: () => "203.0.113.8" },
     });
-    expect(inputs[0]).toHaveValue("109");
-    expect(inputs[1]).toHaveValue("194");
-    expect(inputs[2]).toHaveValue("163");
+    expect(inputs[0]).toHaveValue("203");
+    expect(inputs[1]).toHaveValue("0");
+    expect(inputs[2]).toHaveValue("113");
     expect(inputs[3]).toHaveValue("8");
   });
 
@@ -163,7 +163,7 @@ describe("CIDRPicker", () => {
     fireEvent.paste(inputs[0], {
       clipboardData: { getData: () => "  IP: 203.0.113.8 (home) " },
     });
-    expect(inputs[0]).toHaveValue("109");
+    expect(inputs[0]).toHaveValue("203");
     expect(inputs[3]).toHaveValue("8");
   });
 

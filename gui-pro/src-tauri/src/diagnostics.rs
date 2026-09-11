@@ -91,10 +91,12 @@ pub fn collect_system_info() -> String {
     // Disk space
     #[cfg(windows)]
     {
-        // Measures the volume the DATA lives on, resolved through the shared helper. Those are
-        // the same volume today, but they will not be once the install moves (phases 31/32:
-        // Program Files on C:, a redirected user profile on D:), and the one that can actually
-        // fill up — logs, geodata `.dat` files, the webview profile — is the data volume.
+        // Measures the volume the DATA lives on, resolved through the shared helper rather than
+        // assumed to be C:. Since phase 32 the install and the data are two separate roots —
+        // `Program Files` for the binaries, `%LOCALAPPDATA%\TrustTunnel Client Pro` for
+        // everything written at runtime — and on a machine with a redirected user profile those
+        // are two different VOLUMES. The one that can actually fill up is the data volume: logs,
+        // geodata `.dat` files, the webview profile.
         let data_drive = user_data_dir()
             .to_str()
             .map(|s| s.chars().next().unwrap_or('C').to_string());

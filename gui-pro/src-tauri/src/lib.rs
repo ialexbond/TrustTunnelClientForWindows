@@ -123,7 +123,7 @@ fn start_minimized_requested() -> bool {
 ///
 /// Sits in `ssh::user_data_dir()`, the app's data root — the same place the configs, logs and
 /// dns snapshot live. Resolved through that helper rather than spelled out here, so this marker
-/// follows the root wherever it goes (phases 31/32 move it with the install relocation).
+/// follows the root wherever it goes (phase 32 moved it with the install relocation).
 ///
 /// Scope of the guarantee: the hint is shown once and never again for as long as this directory
 /// survives. An installer that wipes the data root would let it appear one more time —

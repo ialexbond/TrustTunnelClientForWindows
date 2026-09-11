@@ -179,7 +179,7 @@ export function GeoDataStatusCard({ status, downloading, busy = false, onDownloa
   // Format release tag for display: "202608171005" → "17.08.2026 10:05".
   //
   // The time used to be dropped, and that single omission is what made the card look broken on the
-  // owner's first real install: upstream publishes SEVERAL releases a day, so an installed
+  // first real install: upstream publishes SEVERAL releases a day, so an installed
   // 202608170512 and an available 202608171005 both rendered as a bare «v17.08.2026» — the button
   // read «Обновить → v17.08.2026» while the version beside it said v17.08.2026. Identical strings,
   // so the honest offer looked like a bug. Two releases of the same day are only distinguishable by

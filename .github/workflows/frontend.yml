@@ -34,6 +34,23 @@ on:
       - "gui-pro/src-tauri/nsis/**"
       - "gui-pro/src-tauri/tauri.conf.json"
       - "scripts/nsis-text-gate.cjs"
+      # The Rust sources, watched here for one reason: the PII gate below. Every
+      # hostname and IP that reached the public release branch was in a .rs file —
+      # comments in vpn.rs and ping.rs, fixtures in server_config.rs — and none of
+      # those paths started a run. A gate that cannot be triggered by the files it
+      # guards is decoration. (Rust's own clippy/test gates live in the Tauri Rust
+      # workflow; this entry does not duplicate them, it makes the leak check
+      # reachable.)
+      - "gui-pro/src-tauri/src/**"
+      # The PII gate and its suite. Its allowlists decide what counts as a leak, so
+      # an edit to either can flip this job's verdict with no other file changing —
+      # it has to be able to trigger its own run.
+      - "scripts/pii-gate.cjs"
+      - "scripts/pii-gate.test.cjs"
+      # The baseline of accepted findings. Removing a line from it turns a green tree
+      # red and adding one turns a red tree green, so it is as load-bearing as the
+      # matchers — and an edit to it alone has to be able to start this run.
+      - "scripts/pii-baseline.txt"
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
@@ -95,6 +112,26 @@ jobs:
       # MEASURED here rather than skipping quietly.
       - name: Signing plumbing tests
         run: npm run sign:test
+
+      # Account names in paths, hostnames, routable addresses and e-mail outside
+      # the documentation ranges must not reach the public branch. Review does not
+      # catch this class reliably, so CI does.
+      #
+      # Its own suite runs first: the gate must be able to fail, and a detector
+      # edited into always-false would otherwise report a clean tree and stay green
+      # forever — the defect class this repository has already hit twice.
+      - name: PII gate self-tests
+        run: npm run pii:test
+
+      - name: PII gate
+        run: npm run pii:check
+
+      # The same class, one step later: compilers write the build machine's paths
+      # into the binary (rustc panic locations, C/C++ __FILE__), so a clean source
+      # tree still ships the build account's name. The check itself runs on the
+      # release build (`npm run artifact:check`, CLAUDE.md); CI proves it can fail.
+      - name: Artifact path gate self-tests
+        run: npm run artifact:test
 
   # gui-light job removed 2026-05-23 — the Light edition is out of scope
   # until its dedicated redesign milestone. Last on-fork typecheck failed

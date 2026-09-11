@@ -19,7 +19,11 @@
     "nsis:check": "node ../scripts/nsis-text-gate.cjs",
     "nsis:check:post": "node ../scripts/nsis-text-gate.cjs --post-build",
     "sign:test": "node ../scripts/sign-windows-artifact.test.cjs",
-    "prerelease": "npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run rust:check && npm run build",
+    "pii:check": "node ../scripts/pii-gate.cjs",
+    "pii:test": "node ../scripts/pii-gate.test.cjs",
+    "artifact:check": "node ../scripts/artifact-path-gate.cjs src-tauri/target/release/trusttunnel.exe src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe src-tauri/target/release/bundle/nsis",
+    "artifact:test": "node ../scripts/artifact-path-gate.test.cjs",
+    "prerelease": "npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run pii:test && npm run pii:check && npm run artifact:test && npm run rust:check && npm run build",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },

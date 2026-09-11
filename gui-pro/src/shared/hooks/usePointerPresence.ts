@@ -234,7 +234,7 @@ function noteUserInput(): void {
  * Can a focus event that has just arrived be attributed to something the user did in this document?
  *
  * Asked at the moment a focus-driven visual would be SHOWN, which is what makes it survive the
- * owner's case: the element is focused before the window is hidden and the focus event arrives only
+ * case: the element is focused before the window is hidden and the focus event arrives only
  * on the way back, so there is nothing to notice on the way out — and nothing was being delivered
  * there anyway, as build `t3ykm8` measured.
  *

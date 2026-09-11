@@ -12,8 +12,8 @@
 //! whatever still survives to the session manager for the next restart and writes the surviving
 //! paths into a marker beside the new binaries. Between them the ordinary case is covered.
 //!
-//! What none of them covers is a machine that is ALREADY in the failed state — including the
-//! one that carries no marker at all because its failure predates the marker. One launch
+//! What none of them covers is a machine that is ALREADY in the failed state — including one
+//! that carries no marker at all because its failure predates the marker. One launch
 //! later those files are ordinary files: the processes that held them are gone. So this is the one
 //! place from which the leftovers are visible at all.
 //!
@@ -859,9 +859,9 @@ mod tests {
             .collect();
         assert!(
             offenders.is_empty(),
-            "this module removes files. That was offered on 2026-09-06 and \
-             answered `report-only`: it reports and it does not delete. Adding a removal is a new \
-             decision of his, not an edit — and the folder in question holds the saved configs and passwords, \
+            "this module removes files. That was offered on 2026-09-06 and answered \
+             `report-only`: it reports and it does not delete. Adding a removal is a new product \
+             decision, not an edit — and the folder in question holds the saved configs, the \
              saved passwords and the browser profile:\n  {}",
             offenders.join("\n  ")
         );

@@ -378,7 +378,7 @@ fn dismiss_plate_on_success(app: &tauri::AppHandle, next: VpnStatus) {
 /// WHAT THIS USED TO BE, AND WHY IT CHANGED (owner ruling, 28-UAT test 2). The gate used to read
 /// VISIBILITY only: `!main_visible || main_minimized`. That equated "the window is on screen" with
 /// "the user is reading it", which is false the moment the window sits behind something else. The
-/// owner's words: «даже если она развёрнута, но пользователь находится в проводнике — всё равно
+/// words: «даже если она развёрнута, но пользователь находится в проводнике — всё равно
 /// должно выходить уведомление». A restored-but-background window let a switch or a drop announce
 /// itself into an in-app snackbar nobody was looking at, while the desktop plate — the one surface
 /// that WOULD have been seen — was suppressed precisely when it was needed. Focus is the honest
