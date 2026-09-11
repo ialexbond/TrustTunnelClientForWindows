@@ -142,10 +142,6 @@ TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&
         : m_config(std::move(config))
         , m_extra_loop(vpn_event_loop_create())
         , m_callbacks(std::move(callbacks)) {
-    if (!m_config.blocked.empty()) {
-        m_blocked_filter.update_exclusions(VPN_MODE_GENERAL, m_config.blocked);
-    }
-
     // Parse process filter lists (newline-separated process names, case-insensitive)
     auto parse_process_list = [](const std::string &content) {
         std::unordered_set<std::string> result;
@@ -196,7 +192,16 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect(Listener
 int TrustTunnelClient::disconnect() {
     if (Vpn *vpn = m_vpn.exchange(nullptr)) {
         vpn_stop(vpn);
+        // `_dispatch_sync` on a stopped loop blocks forever.
+        // Call `_dispatch_sync` before `vpn_close` so handlers can observe a valid vpn pointer.
+        if (vpn_event_loop_is_active(m_extra_loop.get())) {
+            vpn_event_loop_dispatch_sync(m_extra_loop.get(), nullptr, nullptr);
+        }
         vpn_close(vpn);
+    }
+
+    if (m_tunnel != nullptr) {
+        std::exchange(m_tunnel, nullptr)->deinit();
     }
 
     return 0;
@@ -254,8 +259,11 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_impl(Lis
             .handler = {static_vpn_handler, this},
             .mode = m_config.mode,
             .exclusions = {m_config.exclusions.data(), (uint32_t) m_config.exclusions.size()},
-            .blocked = {m_config.blocked.data(), (uint32_t) m_config.blocked.size()},
             .killswitch_enabled = m_config.killswitch_enabled,
+            .exclusions_tcp_early_ack_enabled = m_config.exclusions_tcp_early_ack_enabled,
+            .exclusions_preresolve_enabled = m_config.exclusions_preresolve_enabled,
+            .exclusions_preresolve_max_queries = m_config.exclusions_preresolve_max_queries,
+            .exclusions_scannable_ports = m_config.exclusions_scannable_ports.c_str(),
     };
 
     if (m_config.ssl_session_storage_path.has_value()) {
@@ -330,6 +338,15 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
         std::memcpy(dst.data, decoded.data(), data_len);
     };
 
+    // A single endpoint to resolve, paired with the parsed hostname/remote_id it belongs to.
+    struct ResolveTarget {
+        size_t host_index; // index into `hostnames` / `remote_ids`
+        bool is_relay;
+        std::string address;
+    };
+    std::vector<ResolveTarget> targets;
+    targets.reserve(m_config.location.endpoints.size());
+
     for (const auto &endpoint : m_config.location.endpoints) {
         auto pipe_pos = endpoint.hostname.find('|');
         if (!endpoint.custom_sni.empty() && pipe_pos != std::string::npos) {
@@ -346,12 +363,33 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
             hostnames.emplace_back(endpoint.hostname);
             remote_ids.emplace_back("");
         }
-        if (endpoint.address.starts_with("|")) {
-            auto resolved = resolve_endpoint_address(endpoint.address.substr(1).c_str());
-            if (resolved.empty()) {
-                warnlog(m_logger, "Failed to resolve relay address: {}", endpoint.address);
-                continue;
-            }
+        bool is_relay = endpoint.address.starts_with("|");
+        targets.push_back(ResolveTarget{
+                .host_index = hostnames.size() - 1,
+                .is_relay = is_relay,
+                .address = is_relay ? endpoint.address.substr(1) : endpoint.address,
+        });
+    }
+
+    // Resolve every endpoint address in parallel under a single overall deadline.
+    std::vector<std::string> to_resolve;
+    to_resolve.reserve(targets.size());
+    for (const auto &target : targets) {
+        to_resolve.push_back(target.address);
+    }
+    static constexpr size_t kResolveTimeoutSeconds = 15;
+    auto resolved_all = resolve_endpoint_addresses(to_resolve, kResolveTimeoutSeconds);
+
+    // Build the endpoints and relays from the resolved addresses.
+    for (size_t i = 0; i < targets.size(); ++i) {
+        const auto &target = targets[i];
+        const auto &resolved = resolved_all[i];
+        if (resolved.empty()) {
+            warnlog(m_logger, "Failed to resolve {} address: {}", target.is_relay ? "relay" : "endpoint",
+                    target.address);
+            continue;
+        }
+        if (target.is_relay) {
             // Use only the first resolved address for relay
             auto &relay = relays.emplace_back(resolved.front());
             if (!m_config.location.client_random.empty()) {
@@ -362,16 +400,11 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
             }
             continue;
         }
-        auto resolved = resolve_endpoint_address(endpoint.address.c_str());
-        if (resolved.empty()) {
-            warnlog(m_logger, "Failed to resolve endpoint address: {}", endpoint.address);
-            continue;
-        }
         for (const auto &addr : resolved) {
             auto &last_el = endpoints.emplace_back(VpnEndpoint{
                     .address = addr,
-                    .name = hostnames.back().c_str(),
-                    .remote_id = remote_ids.back().c_str(),
+                    .name = hostnames[target.host_index].c_str(),
+                    .remote_id = remote_ids[target.host_index].c_str(),
                     .has_ipv6 = m_config.location.has_ipv6,
             });
             if (!m_config.location.client_random.empty()) {
@@ -400,6 +433,10 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
                                     },
                             .username = m_config.location.username.c_str(),
                             .password = m_config.location.password.c_str(),
+                            .recovery =
+                                    {
+                                            .attempts = UINT32_MAX,
+                                    },
                             .anti_dpi = m_config.location.anti_dpi,
                     },
     };
@@ -423,6 +460,8 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
         VpnTunListenerConfig listener_config = {
                 .fd = use_fd->fd.release(),
                 .mtu_size = config.mtu_size,
+                .tcp_recv_buf_size = config.tcp_recv_buf_size,
+                .tcp_send_buf_size = config.tcp_send_buf_size,
         };
 
         return vpn_create_tun_listener(m_vpn, &listener_config);
@@ -432,6 +471,8 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
         VpnTunListenerConfig listener_config = {
                 .fd = -1,
                 .mtu_size = config.mtu_size,
+                .tcp_recv_buf_size = config.tcp_recv_buf_size,
+                .tcp_send_buf_size = config.tcp_send_buf_size,
         };
 
         return vpn_create_tun_listener(m_vpn, &listener_config);
@@ -475,7 +516,9 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
             .included_routes = {.data = included_routes.data(), .size = uint32_t(included_routes.size())},
             .excluded_routes = {.data = excluded_routes.data(), .size = uint32_t(excluded_routes.size())},
             .mtu = int(config.mtu_size),
-            .dns_servers = config.change_system_dns ? defaults->dns_servers : VpnAddressArray{}};
+            .dns_servers = config.change_system_dns ? defaults->dns_servers : VpnAddressArray{},
+            .device_name = !config.device_name.empty() ? config.device_name.c_str() : defaults->device_name,
+            .use_existing = config.use_existing};
 
     m_tunnel = ag::make_vpn_tunnel();
     if (m_tunnel == nullptr) {
@@ -491,14 +534,12 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
         return nullptr;
     }
     VpnWinTunnelSettings win_settings = *vpn_win_tunnel_settings_defaults();
-    if (!config.adapter_name.empty()) {
-        win_settings.adapter_name = config.adapter_name.c_str();
-    } else {
-        // Fallback to hostname if adapter_name is not specified
+    if (config.device_name.empty()) {
+        // Fallback to hostname if no name is specified
         if (!m_config.location.endpoints.empty()) {
             static std::string fallback_name;
             fallback_name = AG_FMT("TrustTunnel ({})", m_config.location.endpoints[0].hostname);
-            win_settings.adapter_name = fallback_name.c_str();
+            tunnel_settings.device_name = fallback_name.c_str();
         }
     }
     win_settings.wintun_lib = m_wintun;
@@ -524,6 +565,8 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
             .tunnel = m_tunnel.get(),
 #endif
             .mtu_size = config.mtu_size,
+            .tcp_recv_buf_size = config.tcp_recv_buf_size,
+            .tcp_send_buf_size = config.tcp_send_buf_size,
     };
 
     return vpn_create_tun_listener(m_vpn, &listener_config);
@@ -601,6 +644,9 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         break;
     }
     case VPN_EVENT_CONNECT_REQUEST: {
+        // The task below carries a raw `Vpn *` captured now and dereferenced later, on another
+        // thread. `disconnect()` drains this loop before `vpn_close`, which is what keeps that
+        // pointer from outliving the VPN.
         struct TaskContext {
             VpnConnectionInfo *info;
             Vpn *vpn;
@@ -626,26 +672,8 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
             }
         }
 
-        // Check if destination should be blocked (domains and IPs)
         VpnConnectAction action = VPN_CA_DEFAULT;
-        if (!m_config.blocked.empty() && event->dst != nullptr) {
-            if (event->dst->type == VPN_AT_HOST) {
-                std::string_view host{event->dst->host.name.data, event->dst->host.name.size};
-                if (!host.empty() && m_blocked_filter.match_domain(host) == DFMS_EXCLUSION) {
-                    action = VPN_CA_REJECT;
-                    infolog(m_logger, "[ROUTE] BLOCKED domain: {}", host);
-                }
-            } else if (event->dst->type == VPN_AT_ADDR) {
-                SocketAddress addr;
-                memcpy(&addr, &event->dst->addr, sizeof(SocketAddressStorage));
-                SockAddrTag tag{addr};
-                if (m_blocked_filter.match_tag(tag).status == DFMS_EXCLUSION) {
-                    action = VPN_CA_REJECT;
-                    infolog(m_logger, "[ROUTE] BLOCKED IP: {}", addr.str());
-                }
-            }
-        }
-        // Process-based routing (after blocked check)
+        // Process-based routing
         std::string resolved_app;
         if (action == VPN_CA_DEFAULT
                 && (!m_process_direct.empty() || !m_process_proxy.empty() || !m_process_block.empty())) {

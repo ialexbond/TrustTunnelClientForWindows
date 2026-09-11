@@ -41,12 +41,15 @@ struct TrustTunnelConfig {
     };
 
     struct TunListener {
-        std::string adapter_name;
+        std::string device_name;
         std::vector<std::string> included_routes;
         std::vector<std::string> excluded_routes;
         uint32_t mtu_size = 0;
+        uint32_t tcp_recv_buf_size = 0; ///< TCP receive window size in bytes (0 = compile-time default)
+        uint32_t tcp_send_buf_size = 0; ///< TCP send buffer size in bytes (0 = compile-time default)
         std::string bound_if;
         bool change_system_dns = true;
+        bool use_existing = false;
         std::optional<std::string> netns;
     };
 
@@ -57,15 +60,15 @@ struct TrustTunnelConfig {
     bool killswitch_enabled = false;
     std::string killswitch_allow_ports;
     bool post_quantum_group_enabled = true;
+    bool exclusions_tcp_early_ack_enabled = false;
+    bool exclusions_preresolve_enabled = true;
+    uint32_t exclusions_preresolve_max_queries = 0; // Use default value
+    std::string exclusions_scannable_ports;         // Empty = use default list
     std::string log_file_path;
     std::string exclusions;
     /// Path to a plain-text file (one entry per line) used as an alternative/addition to inline exclusions.
     /// Avoids TOML size limits for large lists.
     std::string exclusions_file;
-    /// Whitespace-separated list of domains/IPs/CIDRs that should be blocked (connection rejected).
-    std::string blocked;
-    /// Path to a plain-text file (one entry per line) with entries to be blocked.
-    std::string blocked_file;
     /// Newline-separated process names to bypass VPN (direct access).
     std::string process_direct;
     /// Newline-separated process names to route through VPN.

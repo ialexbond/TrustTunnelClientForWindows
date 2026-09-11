@@ -65,19 +65,13 @@ void NativeVpnInterface::SetUp(
       channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
         try {
           const auto& args = std::get<EncodableList>(message);
-          const auto& encodable_server_name_arg = args.at(0);
-          if (encodable_server_name_arg.IsNull()) {
-            reply(WrapError("server_name_arg unexpectedly null."));
-            return;
-          }
-          const auto& server_name_arg = std::get<std::string>(encodable_server_name_arg);
-          const auto& encodable_config_arg = args.at(1);
+          const auto& encodable_config_arg = args.at(0);
           if (encodable_config_arg.IsNull()) {
             reply(WrapError("config_arg unexpectedly null."));
             return;
           }
           const auto& config_arg = std::get<std::string>(encodable_config_arg);
-          std::optional<FlutterError> output = api->Start(server_name_arg, config_arg);
+          std::optional<FlutterError> output = api->Start(config_arg);
           if (output.has_value()) {
             reply(WrapError(output.value()));
             return;
@@ -99,6 +93,48 @@ void NativeVpnInterface::SetUp(
       channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
         try {
           std::optional<FlutterError> output = api->Stop();
+          if (output.has_value()) {
+            reply(WrapError(output.value()));
+            return;
+          }
+          EncodableList wrapped;
+          wrapped.push_back(EncodableValue());
+          reply(EncodableValue(std::move(wrapped)));
+        } catch (const std::exception& exception) {
+          reply(WrapError(exception.what()));
+        }
+      });
+    } else {
+      channel.SetMessageHandler(nullptr);
+    }
+  }
+  {
+    BasicMessageChannel<> channel(binary_messenger, "dev.flutter.pigeon.com_adguard_testapp.NativeVpnInterface.exportLogs" + prepended_suffix, &GetCodec());
+    if (api != nullptr) {
+      channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
+        try {
+          ErrorOr<EncodableList> output = api->ExportLogs();
+          if (output.has_error()) {
+            reply(WrapError(output.error()));
+            return;
+          }
+          EncodableList wrapped;
+          wrapped.push_back(EncodableValue(std::move(output).TakeValue()));
+          reply(EncodableValue(std::move(wrapped)));
+        } catch (const std::exception& exception) {
+          reply(WrapError(exception.what()));
+        }
+      });
+    } else {
+      channel.SetMessageHandler(nullptr);
+    }
+  }
+  {
+    BasicMessageChannel<> channel(binary_messenger, "dev.flutter.pigeon.com_adguard_testapp.NativeVpnInterface.clearLogs" + prepended_suffix, &GetCodec());
+    if (api != nullptr) {
+      channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
+        try {
+          std::optional<FlutterError> output = api->ClearLogs();
           if (output.has_value()) {
             reply(WrapError(output.value()));
             return;

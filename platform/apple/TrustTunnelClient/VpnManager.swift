@@ -1,5 +1,6 @@
 import Foundation
 import NetworkExtension
+import VpnClientFramework
 
 enum VpnSessionState: Int {
     case disconnected;
@@ -35,6 +36,8 @@ public struct AppSettings {
     }
 }
 
+/// Logs emitted by VpnManager respect Logger.setCallback.
+/// Set the callback before creating VpnManager if you want to capture logs emitted during initialization.
 public final class VpnManager {
     private var apiQueue: DispatchQueue
     private var queue: DispatchQueue
@@ -47,8 +50,14 @@ public final class VpnManager {
     private var readyContinuation: CheckedContinuation<NETunnelProviderManager, Never>?
     private var bundleIdentifier: String
     private var appGroup: String
-    private var readIndex: UInt32? = nil
+    private var readIndex: UInt64? = nil
+    /// Whether connect-on-demand (killswitch) rules may be installed once the tunnel
+    /// connects. Set from the applied config; cleared by `stop()` and by configuration
+    /// deletion so a late `.connected` notification cannot reinstall rules afterwards.
+    /// Access only on `queue`.
+    private var killswitchEnabled = false
     private let logger = Logger(category: "VpnManager")
+    private let fileLogger: FileLogger?
 
     public init(bundleIdentifier: String,
                         appGroup: String,
@@ -61,6 +70,13 @@ public final class VpnManager {
         self.appGroup = appGroup
         self.stateChangeCallback = stateChangeCallback
         self.connectionInfoCallback = connectionInfoCallback
+        if !appGroup.isEmpty, let logsDir = FileLogger.logsDirectory(appGroup: appGroup) {
+            let logger = FileLogger(directory: logsDir, baseName: FileLogger.appBaseName)
+            logger.install()
+            self.fileLogger = logger
+        } else {
+            self.fileLogger = nil
+        }
         self.apiQueue.async {
             self.startObservingStatus(manager: self.getManager())
             if !self.appGroup.isEmpty {
@@ -133,6 +149,9 @@ public final class VpnManager {
                     && (manager.connection.status == .disconnected || manager.connection.status == .invalid) {
                     self.cancelStopTimer()
                 }
+            }
+            if manager.connection.status == .connected {
+                self.enableOnDemandIfNeeded(manager: manager)
             }
             self.logCurrentStatus(prefix: "status change", manager: manager)
         }
@@ -216,11 +235,16 @@ public final class VpnManager {
             var result: [String]? = nil
             fileCoordinator.coordinate(
                 readingItemAt: fileURL, error: &coordinatorError) { fileUrl in
-                    let (records, newIndex) =
-                        PrefixedLenRingProto.read_all(fileUrl: fileUrl, startIndex: self.readIndex)
-                    if let records = records {
-                        result = records
-                        self.readIndex = newIndex
+                    let bridge = PersistentRingBuffer(path: fileUrl.path)
+                    let readResult = if let readIndex = self.readIndex {
+                        bridge.read(since: readIndex)
+                    } else {
+                        bridge.readAll()
+                    }
+
+                    if let readResult {
+                        result = readResult.records
+                        self.readIndex = readResult.nextSequence
                     }
                 }
 
@@ -233,7 +257,8 @@ public final class VpnManager {
                 fileCoordinator.coordinate(writingItemAt: fileURL,
                                                  options: .forDeleting,
                                                    error: &coordinatorError) { fileUrl in
-                    PrefixedLenRingProto.clear(fileUrl: fileUrl)
+                    let bridge = PersistentRingBuffer(path: fileUrl.path)
+                    _ = bridge.clear()
                 }
                 self.readIndex = nil
                 return
@@ -261,10 +286,33 @@ public final class VpnManager {
         }
     }
 
+    private func enableOnDemandIfNeeded(manager: NETunnelProviderManager) {
+        self.apiQueue.async {
+            let shouldEnable = self.queue.sync {
+                return self.killswitchEnabled
+            }
+            guard shouldEnable, !manager.isOnDemandEnabled else {
+                return
+            }
+            manager.isOnDemandEnabled = true
+            manager.onDemandRules = [NEOnDemandRuleConnect()]
+            self.reloadManager(manager: manager) { error in
+                if let error = error {
+                    self.logger.error("Failed to enable connect-on-demand rules: \(error)")
+                    manager.isOnDemandEnabled = false
+                    manager.onDemandRules = nil
+                    return
+                }
+                self.logger.debug("Connect-on-demand rules have been enabled")
+                // Recreate observer to update newly loaded connection object
+                self.stopObservingStatus()
+                self.startObservingStatus(manager: manager)
+            }
+        }
+    }
+
     private func updateConfiguration(manager: NETunnelProviderManager,
-                                  serverName: String!,
                                       config: String!,
-                                 setOnDemand: Bool,
                            completionHandler: @escaping ((any Error)?) -> Void) {
         let isAllowedStatus = self.queue.sync {
             return manager.connection.status == .disconnected
@@ -281,6 +329,29 @@ public final class VpnManager {
                 completionHandler(error)
                 return
             }
+
+            var vpnConfig: VpnConfig!
+            do {
+                vpnConfig = try parseVpnConfig(from: config)
+            } catch {
+                self.logger.error("Failed to parse config: \(error)")
+                completionHandler(error)
+                return
+            }
+
+            // The VPN client, which normally applies the log level from config, is only created
+            // in the network extension. Apply it here so that logs emitted in the application
+            // process (including VpnManager) respect the configured level too.
+            if let loglevel = vpnConfig.loglevel, let logLevel = Logger.LogLevel(configName: loglevel) {
+                Logger.setLogLevel(logLevel)
+            }
+
+            // Remember whether the killswitch is enabled: connect-on-demand rules are
+            // installed later, only after the tunnel has successfully connected.
+            self.queue.sync {
+                self.killswitchEnabled = vpnConfig.killswitch_enabled
+            }
+
             let configuration = (manager.protocolConfiguration as? NETunnelProviderProtocol) ??
             NETunnelProviderProtocol()
             configuration.providerBundleIdentifier = self.bundleIdentifier
@@ -289,25 +360,10 @@ public final class VpnManager {
                 "appGroup": self.appGroup as NSObject,
                 "bundleIdentifier": self.bundleIdentifier as NSObject
             ]
-            configuration.serverAddress = serverName
+            configuration.serverAddress = vpnConfig.endpoint.name
             manager.protocolConfiguration = configuration
             manager.localizedDescription = "TrustTunnel"
             manager.isEnabled = true
-
-            if setOnDemand {
-                var vpnConfig: VpnConfig!
-                do {
-                    vpnConfig = try parseVpnConfig(from: config)
-                } catch {
-                    self.logger.error("Failed to parse config: \(error)")
-                    completionHandler(error)
-                    return
-                }
-                if (vpnConfig.killswitch_enabled) {
-                    manager.isOnDemandEnabled = true
-                    manager.onDemandRules = [NEOnDemandRuleConnect()]
-                }
-            }
 
             self.reloadManager(manager: manager) { error in
                 if let error = error {
@@ -343,7 +399,7 @@ public final class VpnManager {
         }
     }
 
-    public func updateConfiguration(serverName: String?, config: String?) {
+    public func updateConfiguration(config: String?) {
         apiQueue.async {
             let manager = self.getManager()
             let group = DispatchGroup()
@@ -359,15 +415,16 @@ public final class VpnManager {
             let timeout = DispatchTime.now() + .seconds(15)
             timerSource.schedule(deadline: timeout)
             timerSource.resume()
-            if serverName == nil || config == nil {
+            if config == nil {
+                self.queue.sync {
+                    self.killswitchEnabled = false
+                }
                 self.deleteConfiguration(manager: manager) { error in
                     timerSource.cancel()
                 }
             } else {
                 self.updateConfiguration(manager: manager,
-                                      serverName: serverName!,
-                                          config: config!,
-                                     setOnDemand: false) { error in
+                                          config: config!) { error in
                     timerSource.cancel()
                 }
             }
@@ -375,16 +432,14 @@ public final class VpnManager {
         }
     }
 
-    public func start(serverName: String, config: (String)) {
+    public func start(config: (String)) {
         apiQueue.async {
             let manager = self.getManager()
             let group = DispatchGroup()
             group.enter()
 
             self.updateConfiguration(manager: manager,
-                                  serverName: serverName,
-                                      config: config,
-                                 setOnDemand: true) { error in
+                                      config: config) { error in
                 if let error = error {
                     self.logger.error("Failed to start VPN tunnel: \(error)")
                 } else {
@@ -419,6 +474,7 @@ public final class VpnManager {
             timerSource.resume()
             let manager = self.getManager()
             self.queue.sync {
+                self.killswitchEnabled = false
                 self.stopTimer = timerSource
             }
             manager.isOnDemandEnabled = false
@@ -444,5 +500,101 @@ public final class VpnManager {
             group.wait()
             self.logger.info("VPN has been stopped!")
         }
+    }
+
+    /// Export log files from both the app process and the Network Extension process.
+    ///
+    /// Both processes write into the shared App Group `logs/` directory, differing
+    /// only by their base name. This method snapshots each one through the
+    /// identical `FileLogger.snapshot(directory:baseName:into:)` call.
+    ///
+    /// Returns the paths to snapshot copies in a temporary directory.
+    /// The caller (Flutter) is responsible for cleaning up returned files.
+    ///
+    /// Safe to call while the tunnel is active. Snapshots are point-in-time
+    /// coordinated copies; a trailing line may be truncated but the data before
+    /// it is always valid.
+    public func exportLogs() -> [String] {
+        guard let logsDir = FileLogger.logsDirectory(appGroup: appGroup) else {
+            return []
+        }
+
+        let dateStr = Self.exportDirTimestamp()
+        let exportDirName = "trusttunnel_\(Self.platformName)_logs_\(dateStr)"
+        let exportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(exportDirName)
+
+        do {
+            try FileManager.default.createDirectory(at: exportDir,
+                                                    withIntermediateDirectories: true)
+        } catch {
+            logger.warn("exportLogs: failed to create export dir: \(error.localizedDescription)")
+            return []
+        }
+
+        // Both processes live in the same logsDir; snapshot each through
+        // the one static code path, keyed by base name only.
+        let results = [FileLogger.appBaseName, FileLogger.extensionBaseName].flatMap { baseName in
+            FileLogger.snapshot(directory: logsDir, baseName: baseName, into: exportDir)
+        }
+
+        return results.map { $0.path }
+    }
+
+    /// Remove all log files from both the app and Network Extension processes.
+    /// Safe to call while the tunnel is running: the app clears `app.log`
+    /// through its live writer, and posts a Darwin notification so a running
+    /// NE clears its own open `extension.log` through its live writer. When the
+    /// NE is not running, its file is deleted directly.
+    public func clearLogs() -> Bool {
+        guard let logsDir = FileLogger.logsDirectory(appGroup: appGroup) else {
+            return false
+        }
+
+        // Own log — cleared through the live writer.
+        fileLogger?.clearLogs()
+
+        let manager = self.queue.sync { self.vpnManager }
+        let neRunning = manager != nil
+            && manager!.connection.status != .disconnected
+            && manager!.connection.status != .invalid
+
+        if neRunning {
+            // NE holds the file open — ask it to clear its own log.
+            let name = "\(bundleIdentifier).\(ClearLogsParams.notificationName)" as CFString
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName(name),
+                nil, nil, true
+            )
+        } else {
+            // NE not running — delete the files directly.
+            FileLogger.clearLogs(directory: logsDir, baseName: FileLogger.extensionBaseName)
+        }
+        return true
+    }
+
+    // MARK: - exportLogs helpers
+
+    private static let platformName: String = {
+#if os(macOS)
+        return "mac"
+#elseif os(iOS)
+        return "ios"
+#else
+        return "apple"
+#endif
+    }()
+
+    private static let exportDirDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd'T'HHmmss"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone.current
+        return df
+    }()
+
+    private static func exportDirTimestamp() -> String {
+        exportDirDateFormatter.string(from: Date())
     }
 }

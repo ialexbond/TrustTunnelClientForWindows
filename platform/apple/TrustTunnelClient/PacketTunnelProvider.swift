@@ -8,6 +8,10 @@ enum TunnelError : Error {
     case start_failed;
 }
 
+/// Logs emitted by this base class respect Logger.setCallback.
+/// A `FileLogger` is installed automatically inside `startTunnel`, so subclass
+/// `init` logs are not captured to file unless the subclass calls
+/// `Logger.setCallback` in its initializer.
 open class AGPacketTunnelProvider: NEPacketTunnelProvider {
     private let clientQueue = DispatchQueue(label: "packet.tunnel.queue", qos: .userInitiated)
     private var vpnClient: VpnClient? = nil
@@ -15,6 +19,7 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
     private var appGroup: String = ""
     private var startProcessed = false
     private let logger = Logger(category: "PacketTunnel")
+    private var fileLogger: FileLogger?
 
     private let ADGUARD_DNS_SERVERS = ["46.243.231.30", "46.243.231.31", "2a10:50c0::2:ff", "2a10:50c0::1:ff"]
     private let FAKE_DNS_SERVER = ["198.18.53.53"]
@@ -34,6 +39,17 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
             } else {
                 logger.warn("Query log processing is disabled because either application group or bundle identifier are not provided")
             }
+        }
+        if !self.appGroup.isEmpty, let logsDir = FileLogger.logsDirectory(appGroup: self.appGroup) {
+            let fileLog = FileLogger(directory: logsDir, baseName: FileLogger.extensionBaseName)
+            fileLog.install()
+            self.fileLogger = fileLog
+        } else {
+            self.fileLogger = nil
+        }
+        // Register the app's clear-logs request handler.
+        if !self.bundleIdentifier.isEmpty {
+            self.setupClearLogsListener()
         }
         if (config == nil) {
             completionHandler(TunnelError.parse_config_failed)
@@ -67,7 +83,7 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
         let networkSettings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelAddress)
         networkSettings.ipv4Settings = ipv4Settings
         networkSettings.ipv6Settings = ipv6Settings
-        let dnsServers = vpnConfig.endpoint.dns_upstreams.isEmpty
+        let dnsServers = (vpnConfig.endpoint.dns_upstreams ?? []).isEmpty
             ? ADGUARD_DNS_SERVERS
             : FAKE_DNS_SERVER
         let dnsSettings = NEDNSSettings(servers: dnsServers)
@@ -112,6 +128,8 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
                                 self.reasserting = false
                             }
                             break
+                        case .waiting_for_network:
+                            fallthrough
                         case .waiting_for_recovery:
                             fallthrough
                         case .recovering:
@@ -138,6 +156,7 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
     
     open override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         self.clientQueue.async {
+            self.stopClearLogsListener()
             self.stopVpnClient()
             completionHandler()
         }
@@ -188,7 +207,8 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
             var coordinatorError: NSError?
             var result = true
             fileCoordinator.coordinate(writingItemAt: fileURL, options: .forReplacing, error: &coordinatorError) { (writeUrl) in
-                guard PrefixedLenRingProto.append(fileUrl: writeUrl, record: json) else {
+                let bridge = PersistentRingBuffer(path: writeUrl.path)
+                guard bridge.appendRecord(json) else {
                     self.logger.warn("Failed to append connection info to file")
                     result = false
                     return
@@ -213,5 +233,49 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
             nil, nil, true
         )
         logger.debug("notifyAppOnConnectionInfo done")
+    }
+
+    // MARK: - Clear logs (App → Network Extension)
+
+    /// Registers a Darwin notification observer so the app can ask a running NE
+    /// to clear its own log file. Idempotent: removes any prior registration.
+    private func setupClearLogsListener() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = Unmanaged.passUnretained(self).toOpaque()
+        let name = "\(bundleIdentifier).\(ClearLogsParams.notificationName)" as CFString
+
+        CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(name), nil)
+
+        CFNotificationCenterAddObserver(
+            center,
+            observer,
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let provider = Unmanaged<AGPacketTunnelProvider>.fromOpaque(observer).takeUnretainedValue()
+                provider.handleClearLogsNotification()
+            },
+            name,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    /// No-op if not registered.
+    private func stopClearLogsListener() {
+        let name = "\(bundleIdentifier).\(ClearLogsParams.notificationName)" as CFString
+        CFNotificationCenterRemoveObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            CFNotificationName(name),
+            nil
+        )
+    }
+
+    private func handleClearLogsNotification() {
+        fileLogger?.clearLogs()
+    }
+
+    deinit {
+        stopClearLogsListener()
     }
 }

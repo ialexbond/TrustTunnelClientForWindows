@@ -260,15 +260,24 @@ VpnError VpnClient::init(const VpnSettings *settings) {
             .relative_priority = settings->qos_settings.relative_priority};
 #endif // __APPLE__ && TARGET_OS_IPHONE
 
+    UniquePtr<VpnDefaultSettings, &vpn_free_default_settings> default_settings{vpn_get_default_settings()};
+
     this->tunnel->udp_close_wait_hostname_cache = g_udp_close_wait_hostname_cache;
     this->kill_switch_on = settings->killswitch_enabled;
-    update_exclusions(settings->mode, {settings->exclusions.data, settings->exclusions.size});
-
-    // Initialize blocked filter (domains/IPs to reject completely)
-    if (settings->blocked.data != nullptr && settings->blocked.size > 0) {
-        this->blocked_filter.update_exclusions(VPN_MODE_GENERAL, {settings->blocked.data, settings->blocked.size});
-        log_client(this, info, "Blocked filter initialized ({} bytes)", settings->blocked.size);
+    this->exclusions_tcp_early_ack_enabled = settings->exclusions_tcp_early_ack_enabled;
+    this->exclusions_preresolve_enabled = settings->exclusions_preresolve_enabled;
+    this->exclusions_preresolve_max_queries = settings->exclusions_preresolve_max_queries == 0
+            ? default_settings->exclusions_preresolve_max_queries
+            : settings->exclusions_preresolve_max_queries;
+    const char *scannable_ports_str = settings->exclusions_scannable_ports != nullptr
+            ? settings->exclusions_scannable_ports
+            : default_settings->exclusions_scannable_ports;
+    std::optional<PortRangeSet> parsed_scannable_ports = ag::parse_scannable_ports(scannable_ports_str);
+    if (!parsed_scannable_ports.has_value()) {
+        parsed_scannable_ports = ag::parse_scannable_ports(default_settings->exclusions_scannable_ports);
     }
+    this->exclusions_scannable_ports = parsed_scannable_ports.value();
+    update_exclusions(settings->mode, {settings->exclusions.data, settings->exclusions.size});
 
     if (settings->tmp_files_base_path != nullptr) {
         this->tmp_files_base_path = settings->tmp_files_base_path;
@@ -462,6 +471,7 @@ VpnError VpnClient::listen(std::unique_ptr<ClientListener> listener, const VpnLi
     this->listener_config = vpn_listener_config_clone(config);
 
     VpnError error = {.code = VPN_EC_ERROR};
+    bool need_update_dns_handler_params = true;
 
     if (this->listener_config.timeout_ms == 0) {
         this->listener_config.timeout_ms = VPN_DEFAULT_TCP_TIMEOUT_MS;
@@ -495,7 +505,13 @@ VpnError VpnClient::listen(std::unique_ptr<ClientListener> listener, const VpnLi
                 error.text = "Failed to start DNS upstream health check";
                 goto fail;
             }
+            need_update_dns_handler_params = false;
         }
+    }
+
+    if (need_update_dns_handler_params && !this->tunnel->update_dns_handler_parameters()) {
+        error.text = "Failed to initialize the DNS handler";
+        goto fail;
     }
 
     log_client(this, dbg, "Done");

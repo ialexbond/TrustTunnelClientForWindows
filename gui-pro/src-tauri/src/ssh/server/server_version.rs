@@ -1,0 +1,104 @@
+use super::super::*;
+use super::super::sanitize::validate_version;
+
+/// Fetch available TrustTunnel versions from GitHub releases API.
+pub async fn server_get_available_versions() -> Result<Vec<String>, String> {
+    // THE THIRD UNTIMED VERSION PROBE (30.1 item 10). The milestone review named two —
+    // both in `commands/updater.rs` — and the class sweep found this one, which nobody had
+    // looked at. It is the quieter defect of the three: the builder here SET something
+    // (a user agent) and so read as configured, while carrying no timeout at all. A
+    // GitHub endpoint that accepts the connection and then never answers left this call
+    // outstanding for the rest of the session, and the version list it feeds never
+    // resolved.
+    //
+    // The budgets and the builder are imported, not re-declared: one place decides how
+    // long a version probe may wait, and `no_version_probe_builds_its_own_untimed_client`
+    // in `updater.rs` scans this function's body by name to keep it that way. A local
+    // `reqwest::Client::builder()` here — even one that remembered `.timeout(..)` today —
+    // is a second budget waiting to drift, so the guard rejects it outright.
+    //
+    // The user agent moves to the request. `build_update_check_client` sets no default
+    // one, and GitHub's API refuses a request without it; the two sibling probes already
+    // pass theirs as a header, so this is the shape the class already uses.
+    let client = crate::commands::updater::build_update_check_client(
+        crate::commands::updater::UPDATE_CHECK_CONNECT_TIMEOUT,
+        crate::commands::updater::UPDATE_CHECK_TIMEOUT,
+    )?;
+
+    let resp = client
+        .get("https://api.github.com/repos/TrustTunnel/TrustTunnel/releases")
+        .header("User-Agent", "TrustTunnel-Client")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch releases: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API returned status {}", resp.status()));
+    }
+
+    let releases: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse releases: {e}"))?;
+
+    let versions: Vec<String> = releases
+        .iter()
+        .filter_map(|r| r.get("tag_name").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .collect();
+
+    Ok(versions)
+}
+
+/// Upgrade TrustTunnel on the remote server to a specific version.
+pub async fn server_upgrade(
+    app: &tauri::AppHandle,
+    params: SshParams,
+    version: String,
+) -> Result<(), String> {
+    // Validate version before interpolating into shell command
+    validate_version(&version)?;
+
+    let handle = params.connect_with_app(app.clone()).await?;
+
+    let sudo = detect_sudo(&handle, app).await;
+
+    // Stop existing service before upgrade
+    let _ = exec_command(&handle, app, &format!("{sudo}systemctl stop trusttunnel 2>/dev/null; sleep 1; true")).await;
+
+    // Run install script with version flag.
+    // install.sh expects version WITHOUT "v" prefix — it adds "v" itself when building
+    // the download URL. Passing "v1.0.33" would produce "vv1.0.33" → 404.
+    let clean_version = version.strip_prefix('v').unwrap_or(&version);
+    let escaped_version = clean_version.replace('\'', "'\\''");
+    let install_cmd = format!(
+        "curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh | {sudo}sh -s -- -V '{escaped_version}' -a y"
+    );
+
+    let (install_output, install_code) = exec_command(&handle, app, &install_cmd).await?;
+
+    if install_code != 0 {
+        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+        // Extract last meaningful line from output for the error message.
+        let hint = install_output
+            .lines()
+            .rev()
+            .find(|l| {
+                let t = l.trim().to_lowercase();
+                !t.is_empty() && (t.contains("error") || t.contains("fail") || t.contains("not found") || t.contains("no such"))
+            })
+            .or_else(|| install_output.lines().rev().find(|l| !l.trim().is_empty()))
+            .unwrap_or("unknown error")
+            .trim();
+        return Err(format!("UPGRADE_FAILED|{install_code}|{hint}"));
+    }
+
+    // Restart service — use --no-block so SSH channel doesn't hang
+    let _ = exec_command(
+        &handle, app,
+        &format!("{sudo}systemctl --no-block restart trusttunnel"),
+    ).await;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    Ok(())
+}

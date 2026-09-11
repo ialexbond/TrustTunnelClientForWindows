@@ -1,0 +1,131 @@
+name: Tauri Rust (gui-pro)
+
+# Closes audit finding H-2 (ln-622 build, ln-624 quality): the existing
+# `lint-rust.yml` only runs `cargo clippy` against the C++ setup_wizard
+# crate. The Tauri Rust crate in `gui-pro/src-tauri/` — the bulk of the
+# backend — had zero CI coverage. The only quality gate for it was the
+# local `npm run prerelease` script, which itself regressed silently
+# (TD-05) until manually fixed this session.
+#
+# This workflow runs the two Rust gates the audit identified as
+# mandatory on every PR:
+#   1. cargo clippy --no-deps -- -D warnings
+#   2. cargo test --lib
+#
+# Runner choice: windows-latest is required, not preferred.
+#   - `keyring 3.6` is enabled with `features = ["windows-native"]`
+#     (Phase 16). On Linux, the same crate would pick a different
+#     backend (Secret Service / D-Bus) and the SshKeyModal disable-PW
+#     code path would compile against a different API surface —
+#     defeating the point of CI as a production-mirror.
+#   - `apply_win11_rounded_corners` and `tauri_build::WindowsAttributes`
+#     (build.rs) are inside `#[cfg(windows)]` blocks — Linux runners
+#     would silently skip them and never catch a regression.
+#   - The bundled vcruntime + wintun DLL copy in build.rs is Windows-
+#     only too.
+#
+# Cache: Swatinem/rust-cache@v2 keys on Cargo.lock + workspace root.
+# Cold first run on Windows is 8-12 min; warm cache cuts it to ~2 min.
+#
+# Trigger scope: any `.rs` / `Cargo.toml` / `Cargo.lock` change anywhere
+# in `gui-pro/src-tauri/` (the only Rust crate in scope per the
+# 2026-05-23 user direction — gui-light is parked until its dedicated
+# redesign milestone).
+
+env:
+  RUST_CHANNEL: stable
+
+on:
+  push:
+    branches:
+      # `**` not `*` — single-star does NOT match `/` in branch refs, so
+      # any push to `release/*` or `claude/*` would silently skip the
+      # gate. Existing workflows had the same latent bug; this one ships
+      # with the fix from day one.
+      - "**"
+    paths:
+      - "gui-pro/src-tauri/**/*.rs"
+      - "gui-pro/src-tauri/Cargo.toml"
+      - "gui-pro/src-tauri/Cargo.lock"
+      - "gui-pro/src-tauri/build.rs"
+      - "gui-pro/src-tauri/tauri.conf.json"
+      - ".github/workflows/tauri-rust.yml"
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - "gui-pro/src-tauri/**/*.rs"
+      - "gui-pro/src-tauri/Cargo.toml"
+      - "gui-pro/src-tauri/Cargo.lock"
+      - "gui-pro/src-tauri/build.rs"
+      - "gui-pro/src-tauri/tauri.conf.json"
+      - ".github/workflows/tauri-rust.yml"
+  workflow_dispatch:
+
+jobs:
+  rust-quality:
+    runs-on: windows-latest
+    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
+    defaults:
+      run:
+        working-directory: gui-pro/src-tauri
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_CHANNEL }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_CHANNEL }}
+          components: clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gui-pro/src-tauri
+          # Keep the cache scoped to this workflow — sharing keys with
+          # lint-rust.yml (C++ setup_wizard) would pollute both caches
+          # with each other's artifacts and slow cold-start.
+          shared-key: tauri-rust-gui-pro
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: gui-pro/package-lock.json
+
+      - name: npm ci (gui-pro)
+        working-directory: gui-pro
+        run: npm ci --legacy-peer-deps
+
+      - name: Build frontend (Vite -> gui-pro/dist)
+        working-directory: gui-pro
+        # tauri::generate_context!() at compile time validates the
+        # `frontendDist` path declared in tauri.conf.json ("../dist").
+        # Without the Vite build, clippy on the lib crate panics with
+        # "frontendDist `../dist` doesn't exist". Vite production build
+        # is ~3-5 s after the npm cache is warm.
+        run: npm run build
+
+      - name: Stub Tauri externalBin + resources
+        shell: pwsh
+        # build.rs calls `tauri_build::try_build(attrs)` which validates
+        # that every path in tauri.conf.json `externalBin` and `resources`
+        # actually exists on disk. These are .gitignored sidecar artifacts
+        # (CLAUDE.md §Worktree Setup) that don't ship with the repo —
+        # they are produced by the separate `TrustTunnel/TrustTunnel`
+        # sidecar build. Clippy and `cargo test --lib` never execute
+        # these binaries, so zero-byte stubs are sufficient to clear the
+        # path-existence check. The real bundle still needs the real
+        # binaries — this only unblocks lint + unit-test CI.
+        run: |
+          New-Item -ItemType File -Force -Path "trusttunnel_client-x86_64-pc-windows-msvc.exe" | Out-Null
+          New-Item -ItemType File -Force -Path "wintun.dll" | Out-Null
+          New-Item -ItemType File -Force -Path "vcruntime140.dll" | Out-Null
+          New-Item -ItemType File -Force -Path "vcruntime140_1.dll" | Out-Null
+
+      - name: Clippy (-D warnings)
+        run: cargo clippy --no-deps -- -D warnings
+
+      - name: Cargo test --lib
+        run: cargo test --lib --quiet

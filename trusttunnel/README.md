@@ -104,6 +104,10 @@ The configuration file uses TOML format. Below are all available settings.
 | `killswitch_enabled` | bool | `true` | Block traffic when VPN connection is lost |
 | `killswitch_allow_ports` | array[int] | `[]` | Local ports to allow inbound connections when kill switch is active |
 | `post_quantum_group_enabled` | bool | `true` | Enable post-quantum key exchange in TLS handshakes |
+| `exclusions_tcp_early_ack_enabled` | bool | `false` | Route all TCP connections to scannable ports through a fake upstream first to read TLS SNI before connecting to endpoint. Ensures wildcard exclusions and external-DNS setups work correctly |
+| `exclusions_preresolve_enabled` | bool | `true` | Pre-resolve DNS-resolvable exclusions in background after exclusion list is updated, to populate the suspects cache |
+| `exclusions_preresolve_max_queries` | int | `50` | Max exclusion domains to pre-resolve. `0` uses the default value |
+| `exclusions_scannable_ports` | string | `"443,80,8080,8008,853"` | Comma-separated list of ports considered scannable for domain extraction and exclusion matching. Supports ranges, e.g. `443,80,8080:8090,853`. Empty uses the default list |
 | `exclusions` | array[string] | `[]` | Domains/IPs to route specially based on `vpn_mode` |
 | `dns_upstreams` | array[string] | `[]` | **Legacy.** Kept only for backward compatibility with old configs; prefer `[endpoint].dns_upstreams` instead |
 
@@ -130,8 +134,16 @@ The configuration file uses TOML format. Below are all available settings.
 | `bound_if` | string | auto-detected | Network interface for VPN client connections (Linux/Windows/macOS: auto) |
 | `included_routes` | array[string] | `["0.0.0.0/0", "2000::/3"]` | Routes in CIDR notation to set to the virtual interface |
 | `excluded_routes` | array[string] | `["0.0.0.0/8", "10.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"]` | Routes in CIDR notation to exclude from VPN routing |
-| `mtu_size` | int | `1280` | MTU size on the virtual interface |
+| `mtu_size` | int | `1350` | MTU size on the virtual interface |
+| `tcp_recv_buf_size` | int | `0` | TCP receive window size in bytes. 0 = optimized default (256 KB). Adjust only for constrained environments |
+| `tcp_send_buf_size` | int | `0` | TCP send buffer size in bytes. 0 = optimized default (256 KB). Adjust only for constrained environments |
 | `change_system_dns` | bool | `true` | Allow changing system DNS servers |
+| `device_name` | string | `""` | On Linux, the TUN interface name (empty = kernel-assigned). On Windows, the Wintun adapter name (empty = auto-generated from hostname). On macOS, request a specific `utun<N>` unit (empty = kernel-assigned). |
+| `use_existing` | bool | `false` | Attach to a pre-existing TUN device named `device_name` instead of creating one. Requires `device_name`. Linux only. |
+
+To disable route management on any supported platform, set `included_routes = []`.
+On Linux this also suppresses cleanup of table `880` and the associated `ip rule`
+entries; on Windows, DNS-only route handling remains controlled by `change_system_dns`.
 
 ### SOCKS Listener Settings (`[listener.socks]`)
 
@@ -151,6 +163,7 @@ The `exclusions` array supports the following formats:
 - **IPv4 address**: `192.168.1.1` or `192.168.1.1:443` (port optional)
 - **IPv6 address**: `[::1]` or `[::1]:443` or `2001:db8::1`
 - **CIDR range**: `192.168.0.0/16` or `2001:db8::/32`
+- **Wildcard port**: `*:80` — matches any connection to the specified port regardless of destination address
 
 ### DNS Upstreams Syntax
 
@@ -172,6 +185,9 @@ vpn_mode = "general"
 killswitch_enabled = true
 killswitch_allow_ports = []
 post_quantum_group_enabled = true
+exclusions_tcp_early_ack_enabled = false
+exclusions_preresolve_enabled = true
+exclusions_preresolve_max_queries = 50
 exclusions = []
 
 [endpoint]
@@ -189,9 +205,17 @@ anti_dpi = false
 
 [listener.tun]
 bound_if = ""
+# For OpenWrt with external policy routing (`pbr`, `mwan3`):
+# device_name = "tt0"
+# use_existing = true
+# included_routes = []
 included_routes = ["0.0.0.0/0", "2000::/3"]
 excluded_routes = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
-mtu_size = 1280
+mtu_size = 1350
+# Uncomment to tune TCP window size (bytes). Default 0 uses optimized values (256 KB).
+# It is recommended to leave defaults unless you have specific requirements.
+# tcp_recv_buf_size = 0
+# tcp_send_buf_size = 0
 ```
 
 ---

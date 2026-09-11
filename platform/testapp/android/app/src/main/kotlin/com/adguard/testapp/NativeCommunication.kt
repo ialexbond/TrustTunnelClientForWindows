@@ -60,8 +60,19 @@ private open class NativeCommunicationPigeonCodec : StandardMessageCodec() {
 
 /** Generated interface from Pigeon that represents a handler of messages from Flutter. */
 interface NativeVpnInterface {
-  fun start(serverName: String, config: String)
+  fun start(config: String)
   fun stop()
+  /**
+   * Export log files from the VPN process(es).
+   *
+   * Returns a list of absolute paths to snapshot files in a temporary
+   * directory. The caller is responsible for cleaning up these files.
+   */
+  fun exportLogs(): List<String>
+  /**
+   * Clear all log files from the VPN process(es).
+   */
+  fun clearLogs()
 
   companion object {
     /** The codec used by NativeVpnInterface. */
@@ -77,10 +88,9 @@ interface NativeVpnInterface {
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
-            val serverNameArg = args[0] as String
-            val configArg = args[1] as String
+            val configArg = args[0] as String
             val wrapped: List<Any?> = try {
-              api.start(serverNameArg, configArg)
+              api.start(configArg)
               listOf(null)
             } catch (exception: Throwable) {
               NativeCommunicationPigeonUtils.wrapError(exception)
@@ -97,6 +107,37 @@ interface NativeVpnInterface {
           channel.setMessageHandler { _, reply ->
             val wrapped: List<Any?> = try {
               api.stop()
+              listOf(null)
+            } catch (exception: Throwable) {
+              NativeCommunicationPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.com_adguard_testapp.NativeVpnInterface.exportLogs$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> = try {
+              listOf(api.exportLogs())
+            } catch (exception: Throwable) {
+              NativeCommunicationPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.com_adguard_testapp.NativeVpnInterface.clearLogs$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> = try {
+              api.clearLogs()
               listOf(null)
             } catch (exception: Throwable) {
               NativeCommunicationPigeonUtils.wrapError(exception)

@@ -1,0 +1,158 @@
+name: Installer Bundle (gui-pro)
+
+# WHY THIS WORKFLOW EXISTS
+#   No gate in this repository has ever PACKAGED the installer. `.planning/WINDOWS.md` entry 10
+#   records the consequence in one sentence: makensis was never invoked by anything standing, so
+#   plans 32-02 through 32-05 all passed green over a product that could not be built at all — a
+#   lost space in a LangString had made it unbuildable and nothing said so for four plans.
+#   `deferred-items.md` D32-3 states the requirement precisely: it is not «run makensis», it is
+#   «a phase gate packages the installer at least once and fails if it cannot».
+#
+#   The second, larger reason is the one measured here. `nsis-text-gate.cjs` rule 10 judges the
+#   ORDERING of the emitted script — whether the pre-install hook closes the application before
+#   the section removes anything — and that ordering is a CROSS-FILE fact that lives only in build
+#   output. Nothing git-tracked carries it, so no Rust `include_str!` contract can reach it. Get it
+#   wrong and nine files are deleted while the program still has its image mapped, NSIS `Delete`
+#   fails silently on each, and three binaries survive next to the user's plaintext credential
+#   store. That is not a hypothetical: it is UAT gap G-32-2, measured on a real disk.
+#
+# WHY ITS OWN WORKFLOW
+#   Frontend Quality runs on `ubuntu-latest`; this measurement needs a Windows bundle. And it is
+#   not a step in `tauri-rust.yml` because that job builds for lint and unit tests, while this one
+#   is a full RELEASE build of the whole dependency tree followed by an NSIS bundle.
+#
+# WHAT IT COSTS, stated rather than hidden. Cold, this is the most expensive job in the
+#   repository: a release build of the Rust dependency tree plus a bundle, on the order of 15-25
+#   minutes; warm, roughly 5-8. (Estimated from `tauri-rust.yml`'s recorded 8-12 min cold for a
+#   cheaper build — it will be re-stated with a measured figure once this job has run.) That cost
+#   is paid for by the trigger scope below, which is the design decision in this file: only the
+#   inputs that can change the emitted script's ordering start a run. Everything else in the
+#   repository leaves the answer alone and must not pay for the build. If this ever fires on
+#   every push, the trigger list has been widened by mistake and IS the thing to fix — not the job.
+#
+# NON-VACUITY IS THE WHOLE POINT
+#   No error-swallowing key appears anywhere in this file, and the measure step carries no
+#   condition — a gate that can be skipped by a commit message is the disease this phase keeps
+#   diagnosing, so the `skipci:` escape hatch the other two workflows carry is deliberately absent
+#   here. The two steps at the end of the job are ordered `npx tauri build --bundles nsis` and
+#   THEN the measuring gate, and the gate measures only — it does not build. So a build step that
+#   was skipped, cancelled or failed leaves no artifact and the measure step FAILS naming the
+#   missing file: «the build did not happen» and «the ordering is wrong» read as different
+#   failures in the log, and neither reads as a pass.
+#
+# THE .exe THIS JOB PRODUCES MUST NEVER BE HANDED TO A PERSON
+#   Its `externalBin` and `resources` are ZERO-BYTE STUBS (see the stub step below), so it is a
+#   rendering fixture for the gate and a working installer for nobody. The job uploads nothing and
+#   keeps nothing. The only installer anyone tests is the one built by the ritual in CLAUDE.md,
+#   which carries a build label the owner is given.
+
+env:
+  RUST_CHANNEL: stable
+
+on:
+  push:
+    branches:
+      # `**` not `*` — single-star does NOT match `/` in branch refs, so pushes to `release/*` or
+      # `claude/*` would silently skip the gate. That is the same disease this workflow treats.
+      - "**"
+    paths:
+      # Exactly the inputs that can change the emitted script's ordering, and nothing else:
+      - "gui-pro/src-tauri/nsis/**" # our hook and the language files
+      - "gui-pro/src-tauri/tauri.conf.json" # the bundler's configuration
+      - "scripts/nsis-text-gate.cjs" # the gate itself decides the verdict
+      # The pinned @tauri-apps/cli version lives here and in the lock. A bundler upgrade brings a
+      # NEW template, which is the single likeliest way the ordering defect returns.
+      - "gui-pro/package.json"
+      - "gui-pro/package-lock.json"
+      - ".github/workflows/installer-bundle.yml"
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - "gui-pro/src-tauri/nsis/**"
+      - "gui-pro/src-tauri/tauri.conf.json"
+      - "scripts/nsis-text-gate.cjs"
+      - "gui-pro/package.json"
+      - "gui-pro/package-lock.json"
+      - ".github/workflows/installer-bundle.yml"
+  workflow_dispatch:
+
+jobs:
+  installer-bundle:
+    name: Installer Bundle (gui-pro)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_CHANNEL }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_CHANNEL }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gui-pro/src-tauri
+          # Its OWN key, for the reason tauri-rust.yml already records: sharing one with a
+          # neighbouring workflow pollutes both caches with each other's artifacts. This job's
+          # profile is `release`, tauri-rust.yml's is not, so a shared key would be worse than
+          # useless here.
+          shared-key: installer-bundle-gui-pro
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: gui-pro/package-lock.json
+
+      - name: npm ci (gui-pro)
+        working-directory: gui-pro
+        run: npm ci --legacy-peer-deps
+
+      - name: Build frontend (Vite -> gui-pro/dist)
+        working-directory: gui-pro
+        # `tauri::generate_context!()` validates `frontendDist` ("../dist") at compile time; the
+        # bundle cannot be produced without it.
+        run: npm run build
+
+      - name: Stub Tauri externalBin + resources
+        working-directory: gui-pro/src-tauri
+        shell: pwsh
+        # The sidecar and the three DLLs are .gitignored artifacts of a separate C++ build and are
+        # absent from `git ls-files`; `tauri.conf.json` names all four. `tauri_build::try_build`
+        # validates that every `externalBin` and `resources` path exists, so without these the
+        # build cannot start. Copied in intent from tauri-rust.yml, which is the existence proof
+        # that a checkout without them can still be built from.
+        #
+        # THE RESULTING INSTALLER IS A FIXTURE, NOT A PRODUCT. It contains four empty files. It is
+        # produced so the bundler emits `installer.nsi` for the gate to read, and for no other
+        # purpose; nothing is uploaded and nothing is kept.
+        run: |
+          New-Item -ItemType File -Force -Path "trusttunnel_client-x86_64-pc-windows-msvc.exe" | Out-Null
+          New-Item -ItemType File -Force -Path "wintun.dll" | Out-Null
+          New-Item -ItemType File -Force -Path "vcruntime140.dll" | Out-Null
+          New-Item -ItemType File -Force -Path "vcruntime140_1.dll" | Out-Null
+
+      - name: Package the NSIS installer
+        working-directory: gui-pro
+        # Downloads the NSIS toolchain into %LOCALAPPDATA%\tauri on first use. `bundle.windows.
+        # signCommand` invokes scripts/sign-windows-artifact.cjs, which is a stated no-op with no
+        # certificate configured — that is the shipped behaviour and this job does not change it.
+        run: npx tauri build --bundles nsis
+
+      - name: Measure the emitted script (nsis-text-gate --post-build)
+        working-directory: gui-pro
+        # Rule 9: the emitted script's bytes. Rule 10: the pre-install hook closes the application
+        # before the Install section removes anything. Rule 13: the erasure's two conditions, and
+        # the two paths that must delete nothing — an update and a reinstall. All three hard-fail
+        # on an absent or stale artifact, which is what makes a skipped build read as a failure
+        # rather than as a pass.
+        run: npm run nsis:check:post
+
+      - name: Name the artifact the verdict was about
+        working-directory: gui-pro/src-tauri/target/release/nsis/x64
+        shell: pwsh
+        # A verdict whose subject is not written down is one re-read away from being attributed to
+        # the wrong build. This prints the path and the write time of the exact file rule 10 read.
+        run: Get-Item installer.nsi | Select-Object FullName, LastWriteTimeUtc, Length | Format-List

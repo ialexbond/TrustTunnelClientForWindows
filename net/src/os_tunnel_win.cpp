@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <utility>
 
+#include <magic_enum/magic_enum.hpp>
 #include <openssl/sha.h>
 
 #include <WS2tcpip.h>
@@ -59,19 +60,7 @@ struct WintunThreadParams {
 };
 
 static void CALLBACK log_wintun(WINTUN_LOGGER_LEVEL level, DWORD64 /*timestamp*/, LPCWSTR log_line) {
-    switch (level) {
-    case WINTUN_LOG_INFO:
-        infolog(wintun_logger, "{}", ag::utils::from_wstring(log_line));
-        break;
-    case WINTUN_LOG_WARN:
-        warnlog(wintun_logger, "{}", ag::utils::from_wstring(log_line));
-        break;
-    case WINTUN_LOG_ERR:
-        errlog(wintun_logger, "{}", ag::utils::from_wstring(log_line));
-        break;
-    default:
-        return;
-    }
+    dbglog(wintun_logger, "{} {}", magic_enum::enum_name(level), ag::utils::from_wstring(log_line));
 }
 
 static bool initialize_wintun(HMODULE wintun) {
@@ -213,7 +202,7 @@ ag::VpnError ag::VpnWinTunnel::init(
     if (!wintun_init_success) {
         return {-1, "Unable to init wintun library"};
     }
-    m_wintun_adapter = create_wintun_adapter(win_settings->adapter_name, win_settings->tunnel_type);
+    m_wintun_adapter = create_wintun_adapter(settings->device_name, win_settings->tunnel_type);
     if (m_wintun_adapter == nullptr) {
         return {-1, "Unable to create wintun adapter"};
     }
@@ -230,13 +219,14 @@ ag::VpnError ag::VpnWinTunnel::init(
     if (m_wintun_session == nullptr) {
         return {-1, "Unable to create wintun session"};
     }
-    if (!setup_mtu()) {
-        errlog(logger, "{}", ag::sys::strerror(ag::sys::last_error()));
-        return {-1, "Unable to set mtu for wintun session"};
+    if (!setup_interface()) {
+        errlog(logger, "setup_interface: {}", ag::sys::strerror(ag::sys::last_error()));
+        return {-1, "Failed to configure the WinTun interface"};
     }
+    mark_tunnel_active();
     m_system_dns_setup_success = setup_dns();
     if (!m_system_dns_setup_success) {
-        errlog(logger, "{}", ag::sys::strerror(ag::sys::last_error()));
+        errlog(logger, "setup_dns: {}", ag::sys::strerror(ag::sys::last_error()));
         return {-1, "Unable to set dns for wintun session"};
     }
     if (m_win_settings->block_ipv6) {
@@ -270,7 +260,7 @@ ag::VpnError ag::VpnWinTunnel::init(
     return {};
 }
 
-bool ag::VpnWinTunnel::setup_mtu() {
+bool ag::VpnWinTunnel::setup_interface() {
     MIB_IPINTERFACE_ROW row{};
     row.InterfaceIndex = m_if_index;
     // set mtu for ipv4 and ipv6
@@ -279,6 +269,8 @@ bool ag::VpnWinTunnel::setup_mtu() {
         SetLastError(error);
         return false;
     }
+    row.UseAutomaticMetric = FALSE;
+    row.Metric = 0;
     // needed on ipv4 for correct work
     row.SitePrefixLength = 0;
     row.NlMtu = m_settings->mtu;
@@ -289,6 +281,9 @@ bool ag::VpnWinTunnel::setup_mtu() {
     row.Family = AF_INET6;
     if (DWORD error = GetIpInterfaceEntry(&row); error == ERROR_SUCCESS) {
         row.NlMtu = m_settings->mtu;
+        // Has to be set separately for IPv6 -- not redundant.
+        row.UseAutomaticMetric = FALSE;
+        row.Metric = 0;
         error = SetIpInterfaceEntry(&row);
         if (error != ERROR_SUCCESS) {
             SetLastError(error);
@@ -324,6 +319,8 @@ static bool add_adapter_route(const ag::CidrRange &route, uint32_t if_index) {
 
     row.DestinationPrefix = ip_address_prefix_from_cidr_range(route);
     row.InterfaceIndex = if_index;
+    row.Metric = 0;
+    row.Protocol = MIB_IPPROTO_NETMGMT;
 
     DWORD error = CreateIpForwardEntry2(&row);
     if (error != ERROR_SUCCESS) {
@@ -429,6 +426,7 @@ void ag::VpnWinTunnel::deinit() {
     m_wintun_session = nullptr;
     m_wintun_adapter = nullptr;
     m_system_dns_setup_success = false;
+    clear_tunnel_active();
 }
 
 evutil_socket_t ag::VpnWinTunnel::get_fd() {
@@ -500,6 +498,7 @@ void ag::VpnWinTunnel::stop_recv_packets() {
 }
 ag::VpnWinTunnel::~VpnWinTunnel() {
     close_wintun(m_wintun_session, m_wintun_adapter);
+    clear_tunnel_active();
     CloseHandle(m_wintun_quit_event);
 }
 
@@ -562,7 +561,7 @@ static bool protect_with_unicast_if(evutil_socket_t fd, const ag::SocketAddress 
 bool ag::vpn_win_socket_protect(evutil_socket_t fd, const sockaddr *addr) {
     uint32_t bound_if = vpn_network_manager_get_outbound_interface();
     if (bound_if == 0) {
-        return true;
+        return !vpn_network_manager_get_tunnel_active();
     }
 
     ag::SocketAddress sa(addr);

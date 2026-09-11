@@ -46,11 +46,14 @@ static ag::SocketAddress get_interface_address(const char *if_name, int family) 
 static bool protectSocket(ag::SocketProtectEvent *event) {
     char if_name[IF_NAMESIZE] = "not set";
     uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
-    if_indextoname(idx, if_name);
+    if (idx != 0 && !if_indextoname(idx, if_name)) {
+        dbglog(g_logger, "Failed to resolve outbound interface index {}: {}", idx, strerror(errno));
+        return false;
+    }
     dbglog(g_logger, "Setting outbound interface for connection to {} to {} ({})", ag::SocketAddress{event->peer}, idx,
            ag::safe_to_string_view(if_name));
     if (idx == 0) {
-        return false;
+        return !ag::vpn_network_manager_get_tunnel_active();
     }
     if (event->peer->sa_family == AF_INET) {
         if (setsockopt(event->fd, IPPROTO_IP, IP_BOUND_IF, &idx, sizeof(idx)) != 0) {
@@ -181,16 +184,6 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
             stateChangeHandler:(StateChangeHandler)stateChangeHandler {
     self = [super init];
     if (self) {
-
-        ag::Logger::set_callback([](ag::LogLevel level, std::string_view message) {
-            static const char *const levels[] = {
-                [ag::LOG_LEVEL_ERROR] = "ERROR",   [ag::LOG_LEVEL_WARN] = "WARN",   [ag::LOG_LEVEL_INFO] = "INFO",
-                [ag::LOG_LEVEL_DEBUG] = "DEBUG", [ag::LOG_LEVEL_TRACE] = "TRACE",
-            };
-            static os_log_t log_handle = os_log_create("com.adguard.TrustTunnel.VpnClientFramework", "VpnClient");
-            os_log(log_handle, "[%{public}s]\t%{public}.*s", levels[level], (int)message.size(), message.data());
-        });
-
         toml::parse_result parse_result = toml::parse(config.UTF8String);
         if (!parse_result) {
             errlog(g_logger, "Failed to parse configuration: {}", parse_result.error().description());

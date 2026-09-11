@@ -23,8 +23,7 @@ NativeVpnImpl::NativeVpnImpl(IUIThreadDispatcher *dispatcher, FlutterCallbacks &
         , m_dispatcher(dispatcher) {
 }
 
-std::optional<FlutterError> NativeVpnImpl::Start(const std::string &serverName, const std::string &config) {
-    (void) serverName;
+std::optional<FlutterError> NativeVpnImpl::Start(const std::string &config) {
     vpn_easy_start(config.c_str(), state_changed_handler, this);
     // Always return no error because flutter treats them as exceptions
     // and pigeon doesn't allow to handle them in a general way
@@ -33,5 +32,15 @@ std::optional<FlutterError> NativeVpnImpl::Start(const std::string &serverName, 
 
 std::optional<FlutterError> NativeVpnImpl::Stop() {
     vpn_easy_stop();
+    return std::nullopt;
+}
+
+ErrorOr<flutter::EncodableList> NativeVpnImpl::ExportLogs() {
+    // Log export is not yet implemented for the Windows adapter
+    return flutter::EncodableList{};
+}
+
+std::optional<FlutterError> NativeVpnImpl::ClearLogs() {
+    // Log clearing is not yet implemented for the Windows adapter
     return std::nullopt;
 }
