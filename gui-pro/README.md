@@ -37,7 +37,7 @@ gui-pro/
 │   │   ├── ssh/              # SSH client used by «Панель управления»
 │   │   └── …                # tray.rs, routing_rules.rs, logging.rs, connectivity.rs, …
 │   ├── trusttunnel_client-x86_64-pc-windows-msvc.exe   # prebuilt C++ VPN-core (sidecar)
-│   ├── wintun.dll, vcruntime140.dll, vcruntime140_1.dll  # bundled runtime deps
+│   ├── wintun.dll, vcruntime140.dll, vcruntime140_1.dll  # runtime deps; only wintun.dll is bundled
 │   ├── capabilities/         # Tauri 2 permissions (default.json)
 │   ├── nsis/                 # NSIS installer hooks + RU/EN language files
 │   ├── Cargo.toml
@@ -65,9 +65,17 @@ declared in `commands/mod.rs` and every command is wired into the `invoke_handle
 
 ## C++ VPN-core via Tauri sidecar
 
-The tunnel, the WinTUN adapter, route interception and the killswitch belong to a **prebuilt C++
-core** (`trusttunnel_client-*.exe`) whose sources are **not** in this repository. Rust/Tauri only
-spawns and kills that process — it never implements tunnelling itself.
+The tunnel, the WinTUN adapter, route interception and the killswitch belong to a separate **C++
+core** (`trusttunnel_client-*.exe`). Rust/Tauri only spawns and kills that process — it never
+implements tunnelling itself.
+
+**Its sources ARE in this repository**, on the `release/tt-win-3.0.0` branch and in the release tags;
+they were removed from `master` when that branch was trimmed to the application. Only the compiled
+binary is absent (it is gitignored) — build it with the recipe in the root `CLAUDE.md`. The shipped
+core version is `1.1.5`, synced from upstream on 2026-09-04.
+
+> This paragraph used to say the sources were "not in this repository", and the sentence sat on the
+> very branch that carries them. It was true before the core sync and has been wrong since.
 
 ### Where the sidecar binary lives
 
@@ -79,20 +87,21 @@ gui-pro/src-tauri/
   trusttunnel_client-x86_64-pc-windows-msvc.exe   # Windows x64 (the shipped target)
 ```
 
-The bundled runtime DLLs (`wintun.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`) live alongside it.
-In a git worktree these files are not duplicated — copy them in from the main checkout before running
-Rust commands (see root `CLAUDE.md` § «Критические правила»).
+Three runtime DLLs live alongside it on disk — `wintun.dll`, `vcruntime140.dll`,
+`vcruntime140_1.dll` — but **only `wintun.dll` is bundled into the installer** (see the config
+below). In a git worktree these files are not duplicated — copy them in from the main checkout before
+running Rust commands (see root `CLAUDE.md` § «Критические правила»).
 
 ### Configuration in `tauri.conf.json`
 
-The sidecar is declared via `bundle.externalBin`; the DLLs via `bundle.resources`. The shell plugin
-only exposes `open` (there is no shell-sidecar scope block):
+The sidecar is declared via `bundle.externalBin`; `wintun.dll` via `bundle.resources`. The shell
+plugin only exposes `open` (there is no shell-sidecar scope block):
 
 ```json
 {
   "bundle": {
     "externalBin": ["trusttunnel_client"],
-    "resources": ["wintun.dll", "vcruntime140.dll", "vcruntime140_1.dll"]
+    "resources": ["wintun.dll"]
   },
   "plugins": {
     "shell": { "open": true }
