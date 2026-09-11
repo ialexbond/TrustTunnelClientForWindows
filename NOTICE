@@ -1,0 +1,49 @@
+TrustTunnel Client for Windows
+Copyright 2026 ialexbond
+
+This product is licensed under the Apache License, Version 2.0.
+The full licence text is in the LICENSE file in the root of this repository.
+
+--------------------------------------------------------------------------------
+What this repository contains, and who holds copyright in it
+--------------------------------------------------------------------------------
+
+This repository is a fork of https://github.com/TrustTunnel/TrustTunnelClient.
+It contains work by two parties, both released under the Apache License 2.0:
+
+  * The C++ VPN core — the tunnel, the WinTUN adapter, route interception and the
+    kill switch, shipped as the `trusttunnel_client` sidecar process, together
+    with the protocol implementation it is built on.
+
+        Copyright 2020 AdGuard Software Ltd
+
+    Sources live on the `release/tt-win-3.0.0` branch and in the release tags.
+    This fork carries local changes to that code; they are confined to the
+    `trusttunnel/` directory.
+
+  * The Windows desktop application — the `gui-pro/` and `gui-light/`
+    directories, their Rust backends, and the supporting scripts. Written for
+    this fork; there is no counterpart upstream.
+
+        Copyright 2026 ialexbond
+
+--------------------------------------------------------------------------------
+Third-party components distributed with this product
+--------------------------------------------------------------------------------
+
+These are NOT covered by the Apache License above and carry their own terms:
+
+  * Wintun — WireGuard LLC, Prebuilt Binaries License.
+    Licence text: third-party/wintun/LICENSE.txt (release branch).
+    `wintun.dll` is redistributed inside the installer.
+
+  * lwIP — Copyright (c) 2001, 2002 Swedish Institute of Computer Science,
+    BSD 3-clause. Licence text: third-party/lwip/lwip/COPYING (release branch).
+
+  * Microsoft Visual C++ runtime redistributables (`vcruntime140.dll`,
+    `vcruntime140_1.dll`) — Microsoft Corporation, under Microsoft's
+    redistribution terms.
+
+  * Rust crates and npm packages, resolved at build time and enumerated in
+    `gui-pro/src-tauri/Cargo.lock` and `gui-pro/package-lock.json` (and the
+    `gui-light/` equivalents), predominantly MIT, BSD and ISC.
