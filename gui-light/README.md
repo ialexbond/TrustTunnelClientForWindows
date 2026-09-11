@@ -5,7 +5,7 @@
 ## Архитектура
 
 ```text
-gui-app/
+gui-pro/
 ├── src/                    # React frontend (Vite + Tailwind)
 │   ├── components/
 │   │   ├── Header.tsx      # Шапка приложения
@@ -42,7 +42,7 @@ cmake --build build --target trusttunnel_client
 Tauri требует, чтобы имя файла содержало **target triple** платформы:
 
 ```text
-gui-app/src-tauri/binaries/
+gui-pro/src-tauri/binaries/
   trusttunnel_client-x86_64-pc-windows-msvc.exe   # Windows x64
   trusttunnel_client-aarch64-pc-windows-msvc.exe   # Windows ARM64
   trusttunnel_client-x86_64-unknown-linux-gnu      # Linux x64
@@ -54,7 +54,7 @@ gui-app/src-tauri/binaries/
 
 ```powershell
 # Windows x64
-copy build\trusttunnel\Release\trusttunnel_client.exe gui-app\src-tauri\binaries\trusttunnel_client-x86_64-pc-windows-msvc.exe
+copy build\trusttunnel\Release\trusttunnel_client.exe gui-pro\src-tauri\binaries\trusttunnel_client-x86_64-pc-windows-msvc.exe
 ```
 
 ### Шаг 3: Конфигурация в tauri.conf.json
@@ -102,7 +102,7 @@ copy build\trusttunnel\Release\trusttunnel_client.exe gui-app\src-tauri\binaries
 ## Разработка
 
 ```bash
-cd gui-app
+cd gui-pro
 
 # Установить зависимости
 npm install

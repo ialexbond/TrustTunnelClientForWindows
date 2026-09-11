@@ -16,9 +16,18 @@ import 'package:pigeon/pigeon.dart';
 
 @HostApi()
 abstract class NativeVpnInterface {
-  void start(String serverName, String config);
+  void start(String config);
 
   void stop();
+
+  /// Export log files from the VPN process(es).
+  ///
+  /// Returns a list of absolute paths to snapshot files in a temporary
+  /// directory. The caller is responsible for cleaning up these files.
+  List<String> exportLogs();
+
+  /// Clear all log files from the VPN process(es).
+  void clearLogs();
 }
 
 @FlutterApi()

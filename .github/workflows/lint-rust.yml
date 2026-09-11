@@ -1,12 +1,14 @@
 name: Lint Rust
 
 env:
-  RUST_CHANNEL: 1.88
+  RUST_CHANNEL: stable
 
 on:
   push:
     branches:
-      - "*"
+      # `**` not `*` — single-star does NOT match `/` in branch refs.
+      # See frontend.yml header for the regression that exposed this.
+      - "**"
     paths:
       - '**.rs'
       - '**/Cargo.toml'
@@ -21,7 +23,7 @@ jobs:
     if: "!startsWith(github.event.head_commit.message, 'skipci:')"
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust ${{ env.RUST_CHANNEL }}
         uses: dtolnay/rust-toolchain@master

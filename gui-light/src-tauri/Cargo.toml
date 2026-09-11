@@ -37,6 +37,19 @@ chrono = "0.4"
 ipconfig = "0.3"
 socket2 = { version = "0.5", features = ["all"] }
 
+# Job Object FFI (D-06 / STATUS-04): сайдкар привязывается к Job Object с
+# KILL_ON_JOB_CLOSE, чтобы ОС убивала его при смерти родителя (включая краш).
+# Берём windows-sys (официальный MS crate, УЖЕ транзитивно в Cargo.lock — нулевая
+# новая загрузка), а НЕ полный `windows` crate и НЕ `win32job` (он тянет
+# `windows ^0.61`). JobObjects не используют HWND, так что правило avoid-windows
+# здесь не применимо. Только нужные модули: JobObjects/Threading/Foundation.
+# Зеркало решения Pro Plan 02-03.
+[target.'cfg(windows)'.dependencies]
+# Win32_Security needed for CreateJobObjectW's SECURITY_ATTRIBUTES parameter type
+# (in Pro this feature is enabled transitively by another crate; Light's transitive
+# set differs, so we enable it explicitly here).
+windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_Security"] }
+
 [profile.release]
 strip = true
 lto = true
@@ -46,3 +59,7 @@ opt-level = "s"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Dev-only tooling gate (T-14). Mirrors Pro: enables the F12 devtools AND the
+# `open_log_window` command. A public/release build (`cargo build` without this
+# feature) contains neither, so the dev log window provably cannot ship.
+devtools = ["tauri/devtools"]

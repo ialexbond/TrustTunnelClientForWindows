@@ -21,29 +21,90 @@ struct LogState {
 const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client_random"];
 
 /// Replace values of sensitive keys with `***`.
+///
+/// FIX-OO-5: earlier revision matched `{key}: ` ANYWHERE in the text, which
+/// swallowed error-message detail like `Failed to verify certificate: <wincrypt
+/// error>` (the `<error>` got replaced by `***` and cert-verify failures became
+/// undebuggable). Now we scan line-by-line and only redact values that
+/// appear as a TOML/config-style key=value assignment — i.e. the line
+/// starts with optional whitespace, then the key, then `=` or `:`, then the
+/// quoted value. Free-form prose that merely contains the key word is left
+/// intact. This keeps leak prevention for real config dumps without
+/// destroying diagnostic detail.
 pub fn sanitize(text: &str) -> String {
-    let mut result = text.to_string();
+    text.lines()
+        .map(|line| redact_if_assignment(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn redact_if_assignment(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let indent = &line[..line.len() - trimmed.len()];
+    let lower = trimmed.to_lowercase();
     for key in SENSITIVE_KEYS {
-        let patterns = [
-            format!(r#"{key} = ""#),
-            format!("{key} = '"),
-            format!("{key}="),
-            format!("{key}: "),
-        ];
-        for pat in &patterns {
-            if let Some(start) = result.to_lowercase().find(&pat.to_lowercase()) {
-                let after = start + pat.len();
-                if after < result.len() {
-                    let rest = &result[after..];
-                    let end = rest
-                        .find(|c: char| c == '"' || c == '\'' || c == '\n' || c == '\r')
-                        .unwrap_or(rest.len());
-                    result = format!("{}***{}", &result[..after], &result[after + end..]);
-                }
-            }
+        if !lower.starts_with(&key.to_lowercase()) {
+            continue;
         }
+        let after_key = &trimmed[key.len()..];
+        // Separator must be `=`, `:`, or whitespace-then-one-of-those.
+        // `Failed to verify certificate: <err>` has ` to ...` after `certificate`,
+        // which starts with whitespace but then `to` — not a separator.
+        let after_trimmed = after_key.trim_start();
+        let sep_char = after_trimmed.chars().next().unwrap_or(' ');
+        if sep_char != '=' && sep_char != ':' {
+            continue;
+        }
+        // Take whatever follows as "the value" and replace with ***.
+        return format!("{indent}{key} {sep_char} ***");
     }
-    result
+    line.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_redacts_toml_assignment() {
+        let input = r#"password = "s3cret""#;
+        let out = sanitize(input);
+        assert!(!out.contains("s3cret"));
+        assert!(out.contains("***"));
+    }
+
+    #[test]
+    fn sanitize_redacts_indented_assignment() {
+        let input = r#"    username = "alice""#;
+        let out = sanitize(input);
+        assert!(!out.contains("alice"));
+    }
+
+    #[test]
+    fn sanitize_preserves_error_message_containing_certificate_word() {
+        // FIX-OO-5 regression guard: previous sanitizer treated every
+        // occurrence of "certificate: " as a key=value pair and redacted
+        // the actual wincrypt error — making cert-verify failures
+        // undebuggable. Now the key is only redacted when it starts the
+        // line as a real assignment.
+        let input = "ERROR Failed to verify certificate: WCRYPT_E_TRUST_STATUS";
+        let out = sanitize(input);
+        assert!(out.contains("WCRYPT_E_TRUST_STATUS"), "real error must survive sanitization");
+    }
+
+    #[test]
+    fn sanitize_preserves_username_in_prose() {
+        let input = "User logged in with username alice — activity";
+        let out = sanitize(input);
+        assert!(out.contains("alice"));
+    }
+
+    #[test]
+    fn sanitize_redacts_client_random_assignment() {
+        let input = "client_random = \"aabbccdd\"";
+        let out = sanitize(input);
+        assert!(!out.contains("aabbccdd"));
+    }
 }
 
 fn logs_dir() -> PathBuf {

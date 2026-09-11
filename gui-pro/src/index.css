@@ -1,0 +1,207 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme-swapped visibility helpers.
+   useTheme() хранит local state per-component, так что theme-switch в Settings
+   не доходит до TitleBar / AboutPanel пока те не re-mount'ятся. CSS-only
+   подход через `data-theme` на <html> (который useTheme обновляет globally)
+   работает атомарно для любого DOM-узла. */
+[data-theme="dark"] .only-light { display: none !important; }
+[data-theme="light"] .only-dark { display: none !important; }
+
+@layer base {
+  body {
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    /* Canonical font-family token (Phase 14.2). Legacy literal "Geist Sans" stack
+       replaced with --font-family-sans → fallback chain управляется в tokens.css. */
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-normal);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  button, nav, header, aside, [data-tauri-drag-region] {
+    user-select: none;
+  }
+}
+
+/* Window control buttons */
+.window-control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+  -webkit-app-region: no-drag;
+  margin: 0 2px;
+}
+.window-control-btn:hover {
+  color: var(--color-text-primary);
+}
+.window-control-close:hover {
+  color: #fff;
+}
+
+@layer components {
+  /* ── Glass card: adapts to theme ── */
+  .glass-card {
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+  }
+
+  /* ── Wizard input: theme-aware ── */
+  .wizard-input {
+    width: 100%;
+    background-color: var(--color-input-bg);
+    border: 1px solid var(--color-input-border);
+    border-radius: var(--radius-xl);
+    padding: 0.75rem 1rem;
+    font-size: var(--font-size-body-sm);
+    color: var(--color-text-primary);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .wizard-input::placeholder {
+    color: var(--color-text-muted);
+  }
+  .wizard-input:focus {
+    border-color: var(--color-accent-500);
+    box-shadow: 0 0 0 2px var(--color-accent-tint-15);
+  }
+  .wizard-input-sm {
+    padding: 0.5rem 1rem;
+    font-size: var(--font-size-caption);
+  }
+
+  /* Hide native password reveal button (Edge/Chrome) to avoid double eye icon */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
+  [data-theme] input::-webkit-credentials-auto-fill-button {
+    display: none;
+  }
+}
+
+/* Borders — ensure all .border elements use theme token, not Tailwind default */
+.border {
+  border-color: var(--color-border);
+}
+
+/* ── Animations ── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes skeleton-pulse {
+  /* Opacity pulse. The fix for "invisible / disappearing" skeletons is the BASE colour
+     (Skeleton fills with --color-bg-hover, one step off the elevated/surface cards it
+     sits on), so the block is always distinct from the card and the pulse just dips it
+     toward the surface — it never fades fully into the card, and it's symmetric across
+     light/dark. The reduced-motion override (--pulse-duration: 0s) still stops it. */
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Indeterminate horizontal progress bar — sliding stripe l→r continuous loop */
+@keyframes progress-indeterminate {
+  0%   { left: -35%; right: 100%; }
+  60%  { left: 100%; right: -90%; }
+  100% { left: 100%; right: -90%; }
+}
+@keyframes progress-indeterminate-short {
+  0%   { left: -200%; right: 100%; }
+  60%  { left: 107%; right: -8%; }
+  100% { left: 107%; right: -8%; }
+}
+
+/* ── Number input spinners ── */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* ── Scrollbar hidden — content width never shifts ── */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-overlay {
+  overflow-y: auto;
+}
+
+/* Thin visible scrollbar — adapts to theme */
+.scroll-visible {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-hover) transparent;
+}
+.scroll-visible::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+.scroll-visible::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-visible::-webkit-scrollbar-thumb {
+  background: var(--color-border-hover);
+  border-radius: 3px;
+}
+.scroll-visible::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-active);
+}
+.scroll-visible::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+/* Non-scrolling container */
+.scroll-gutter-match {
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+/* ── View Transitions layering ── */
+/* F1 (14-UAT): keep the bottom tab navigation ABOVE the config cards during a config-switch View
+   Transition. The promoted card's ::view-transition-group animates in the browser's TOP LAYER, which
+   would otherwise paint OVER the bottom nav for the whole switch. The nav wrapper carries
+   view-transition-name: bottom-nav (App.tsx); forcing its group's z-index above the card groups keeps it
+   on top through the transition (the sticky hero has z-10, so without this it could legally paint above).
+   F25 (round 3): this z-index is only HALF the fix — it puts the nav group on TOP, but the nav snapshot
+   was TRANSPARENT (a vt-named element is snapshotted without its ancestors' bg), so cards gliding UNDER it
+   showed THROUGH. The other half is an opaque --color-bg-primary painted ON the bottom-nav wrapper in
+   App.tsx so the snapshot actually occludes. Keep BOTH. */
+::view-transition-group(bottom-nav) {
+  z-index: 1000;
+}

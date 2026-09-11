@@ -7,8 +7,10 @@
 class NativeVpnImpl : public NativeVpnInterface {
 public:
     NativeVpnImpl(IUIThreadDispatcher *dispatcher, FlutterCallbacks &&callbacks);
-    std::optional<FlutterError> Start(const std::string &serverName, const std::string &config) override;
+    std::optional<FlutterError> Start(const std::string &config) override;
     std::optional<FlutterError> Stop() override;
+    ErrorOr<flutter::EncodableList> ExportLogs() override;
+    std::optional<FlutterError> ClearLogs() override;
     void NotifyStateChanged(int state);
 
 private:

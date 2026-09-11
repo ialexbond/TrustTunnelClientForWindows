@@ -1,0 +1,204 @@
+[package]
+name = "trusttunnel"
+version = "3.0.0"
+description = "TrustTunnel VPN Client"
+authors = ["Alex Bond"]
+edition = "2021"
+
+[lib]
+name = "trusttunnel_lib"
+crate-type = ["lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+# RUSTSEC-2026-0154 (russh, "Unbounded 32-bit allocation") + RUSTSEC-2026-0153
+# (russh-cryptovec, "Unchecked CryptoVec allocation and growth") — both CVSS 7.5,
+# both fixed in 0.60.3. We pin the conservative 0.60.3 line (which stays on the
+# stable ssh-key 0.6.x fork) rather than 0.61.x — the latter pulls rc-pinned crypto
+# deps (ssh-key 0.7.0-rc, ssh-encoding 0.3.0-rc) and would force OUR `ssh-key = "0.6"`
+# pin (used by server_ssh_key.rs Ed25519 keygen) up to a release candidate. Staying on
+# 0.60.3 keeps the cross-crate compat (our ssh-key-generated PEM ↔ russh decode_secret_key,
+# server_ssh_key.rs canary test) intact. russh-keys merged into `russh::keys` in this
+# line, so it is no longer a separate crate — the `russh::keys::*` imports cover it.
+russh = "0.60.3"
+# Phase 16 — Ed25519 keypair generation (D-1.1) для SSH-key feature.
+# Features:
+#  - ed25519: Ed25519 algorithm support
+#  - alloc: heap-allocated key types (PrivateKey/PublicKey)
+#  - rand_core: random key generation via OsRng
+ssh-key = { version = "0.6", features = ["ed25519", "alloc", "rand_core"] }
+async-trait = "0.1"
+toml = "0.8"
+toml_edit = "0.22"
+tauri-plugin-single-instance = "2.4.0"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+reqwest = { version = "0.13.2", features = ["default-tls", "stream", "json"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+notify = { version = "7", features = ["macos_fsevent"] }
+uuid = { version = "1", features = ["v4"] }
+# used by commands/updater.rs validate_download_url (09-17, S-B). Added here because
+# 09-02 (S-A) owns ALL Cargo.toml edits in the phase and 09-17 depends_on 09-02 —
+# declaring `url` as a DIRECT dependency guarantees `url::Url` is importable in 09-17
+# (a merely-transitive `url` via tauri/reqwest is not directly usable in Rust).
+url = "2"
+# ROUTE-11 — punycode/IDNA for domain_scope::to_core_ascii. NOT a new crate in the build: `url`
+# above already pulls idna 1.1.0 transitively, and Cargo.lock is unchanged by this line. It is
+# declared DIRECTLY for the same reason `url` is, one comment up — a merely-transitive crate is not
+# importable in Rust, and the alternative (hand-rolling punycode) would be our own encoder deciding
+# what hostname the C++ core matches against.
+idna = "1"
+base64 = "0.22"
+# Phase 24 (D-01) — PNG-кодирование иконок программ в processes.rs. Обе версии (0.17.16 и 0.18.1)
+# УЖЕ разрешены в Cargo.lock транзитивно (через image/tauri), поэтому объявление прямой
+# зависимости — НУЛЕВАЯ новая загрузка, ровно та же логика, что для windows-sys ниже. Берём
+# `png`, а не самописный энкодер и не base64-BMP: BMP в data URL теряет альфа-канал в большинстве
+# браузеров, а иконка без альфы выглядит как чёрный квадрат на строке списка.
+png = "0.17"
+sha2 = "0.10"
+trusttunnel-settings = { path = "../../trusttunnel/settings" }
+winreg = "0.55"
+chrono = "0.4"
+ipconfig = "0.3"
+socket2 = { version = "0.5", features = ["all"] }
+keyring = { version = "3.6", features = ["windows-native"] }
+# Phase 14.1 — endpoint TLS cert probe for certificate pinning UI
+tokio-rustls = "0.26"
+rustls-pki-types = "1"
+# FIX-OO-7: check whether the probed cert is already trusted by the OS root
+# store. System-trusted certs (Let's Encrypt etc.) are omitted from the
+# deeplink to keep the TLV payload small enough for a QR code — the sidecar
+# falls through to the platform verifier at connect time and trusts them
+# anyway.
+rustls-platform-verifier = "0.6"
+rand = "0.8"
+# DwmSetWindowAttribute вызывается через raw FFI в tray.rs (см.
+# `apply_win11_rounded_corners`) — не тянем windows crate, чтобы
+# избежать HWND type-mismatch с версией, встроенной в Tauri.
+
+# Job Object FFI (D-06 / STATUS-04): сайдкар привязывается к Job Object с
+# KILL_ON_JOB_CLOSE, чтобы ОС убивала его при смерти родителя (включая краш).
+# Берём windows-sys (официальный MS crate, УЖЕ транзитивно в Cargo.lock — нулевая
+# новая загрузка), а НЕ полный `windows` crate и НЕ `win32job` (он тянет
+# `windows ^0.61`). JobObjects не используют HWND, так что правило avoid-windows
+# здесь не применимо. Только нужные модули: JobObjects/Threading/Foundation.
+#
+# 02-14 (STATUS-05, real-time local-loss detection): добавлены ТОЛЬКО features к
+# УЖЕ закреплённому windows-sys 0.59 — это НЕ новый crate и НЕ новая загрузка
+# (Package Legitimacy Gate), а включение модулей на существующей зависимости.
+# NotifyIpInterfaceChange / MIB_IPINTERFACE_ROW в windows-sys 0.59 закрыты под
+# all(Win32_NetworkManagement_Ndis, Win32_Networking_WinSock) (тип ADDRESS_FAMILY
+# живёт в WinSock, а row-структуры — в Ndis), поэтому нужны три feature:
+# Win32_NetworkManagement_IpHelper + Win32_NetworkManagement_Ndis +
+# Win32_Networking_WinSock. Вместе они дают NotifyIpInterfaceChange /
+# CancelMibChangeNotify2 + MIB_IPINTERFACE_ROW / MIB_NOTIFICATION_TYPE, которыми
+# connectivity.rs будит монитор мгновенно при смене состояния сетевого интерфейса
+# (выдернули кабель / выключили Wi-Fi), вместо ожидания ~10-15s пробинга (Plan 02-07).
+#
+# Phase 24 (D-01, извлечение иконок программ в processes.rs): снова добавлены ТОЛЬКО features к
+# УЖЕ закреплённому windows-sys 0.59 — новых crates и новых загрузок нет.
+#   Win32_UI_Shell                — SHGetFileInfoW / SHFILEINFOW / SHGFI_*
+#   Win32_UI_WindowsAndMessaging  — GetIconInfo / ICONINFO / DestroyIcon / HICON
+#   Win32_Graphics_Gdi            — GetDIBits / GetObjectW / DeleteObject / GetDC / ReleaseDC /
+#                                   BITMAP / BITMAPINFO / RGBQUAD
+#   Win32_System_Com              — CoInitializeEx / CoUninitialize (SHGetFileInfoW требует COM
+#                                   НА ВЫЗЫВАЮЩЕМ потоке)
+#   Win32_Storage_FileSystem      — не «наш» модуль, но обязателен: сигнатура SHGetFileInfoW в
+#                                   windows-sys закрыта под all(Win32_Storage_FileSystem,
+#                                   Win32_UI_WindowsAndMessaging), потому что аргумент
+#                                   dwFileAttributes имеет тип FILE_FLAGS_AND_ATTRIBUTES оттуда.
+#                                   Без него биндинг просто не существует и сборка падает.
+#                                   С фикса HI-01 (код-ревью ф.24) этот модуль нужен и «сам по
+#                                   себе»: GetDriveTypeW + DRIVE_FIXED/REMOVABLE/RAMDISK/CDROM
+#                                   отсекают букву диска, которая на деле является сетевым
+#                                   маппингом (иначе SHGetFileInfoW снова уходит в SMB).
+# OpenProcess / QueryFullProcessImageNameW живут в Win32_System_Threading, который уже включён.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_Storage_FileSystem"] }
+# Фаза 32 (D-10.2, src/task_scheduler.rs) — ЯВНОЕ, ЗАДОКУМЕНТИРОВАННОЕ ИСКЛЮЧЕНИЕ из правила
+# «не тянем windows crate» (комментарий выше, у tray.rs). Исключение держится на том же основании,
+# на котором стоит само правило — «нулевая новая загрузка»:
+#   • windows 0.61.3 УЖЕ в Cargo.lock транзитивно (через tauri 2.10.3), ровно эта версия. Прямое
+#     объявление ПОВЫШАЕТ существующий пакет, а не добавляет новый: ни нового вендора, ни новой
+#     загрузки, ни второй копии в сборке (0.62.2 в lock тоже есть — берём 0.61.3 именно ту, что
+#     разрешает дерево tauri).
+#   • Причина исходного правила (конфликт типа HWND с версией внутри Tauri) здесь не применима:
+#     Task Scheduler не оперирует HWND вовсе.
+#   • windows-sys 0.59 НЕ ПОДХОДИТ: в нём вообще нет Win32_System_TaskScheduler — ни одной строки
+#     про TaskScheduler в его манифесте. Обёртки COM-интерфейсов живут только в полном windows.
+#   • Стороннюю обёртку над планировщиком брать ЗАПРЕЩЕНО (deferred-items.md § item 5): она тянет
+#     третью мажорную версию того же crate, а поддержка нужных нам трёх свойств не проверена.
+# Features — ПЯТЬ штук. Четыре нужны по существу, пятая (Win32_Foundation) стоит здесь ради
+# документации; ниже сказано, почему её нельзя считать «обязательной», и почему пятую забыть
+# нельзя:
+#   Win32_System_TaskScheduler — ITaskService/ITaskFolder/IRegisteredTask и константы задач
+#   Win32_System_Com           — CoCreateInstance/CLSCTX_ALL (апартамент берём общий, из processes.rs)
+#   Win32_System_Variant       — RegisterTaskDefinition принимает &VARIANT (userid/password/sddl)
+#   Win32_System_Ole           — БЕЗ НЕЁ МОДУЛЬ НЕ СОБИРАЕТСЯ, и падает он неочевидно. Сам ТИП
+#                                VARIANT объявлен под cfg(all(Win32_System_Com, Win32_System_Ole))
+#                                (Variant/mod.rs:742), а МЕТОДЫ ITaskService::Connect
+#                                (TaskScheduler/mod.rs:5527) и ITaskFolder::RegisterTaskDefinition
+#                                (:4645) — под cfg(all(Win32_System_Ole, Win32_System_Variant)).
+#                                Отсюда ловушка: пока в модуле есть только `use`-блок, всё
+#                                зелёное (ТИПЫ резолвятся), а как только появляется вызов —
+#                                «no method named RegisterTaskDefinition found for struct
+#                                ITaskFolder». Проверено сборкой пробного крейта: с этими пятью
+#                                features он собирается вчистую и НЕ тянет ни одного нового
+#                                пакета.
+#   Win32_Foundation           — VARIANT_BOOL, который возвращает IRegisteredTask::Enabled, и
+#                                VARIANT_TRUE/VARIANT_FALSE. Формально ИЗБЫТОЧНА: в манифесте
+#                                windows-0.61.3 Win32_System_TaskScheduler = ["Win32_System"]
+#                                (:670), Win32_System = ["Win32"] (:582), Win32 =
+#                                ["Win32_Foundation"] (:397) — то есть она включается транзитивно
+#                                и её удаление не меняет разрешённый набор ни на байт. Оставлена
+#                                НАМЕРЕННО: модуль импортирует символы именно из этого модуля, и
+#                                строка документирует намерение.
+# Откуда взялся неверный список из четырёх (без Ole): он скопирован дословно из
+# 30.1-RESEARCH.md:354, где утверждалось «no other features required», и тот список НИКОГДА не
+# компилировался. Всё прочее, взятое из того же блока, наследует ту же непроверенность.
+#
+# Ремедиация 32-FIX-01 (CR-01 + CR-03) добавила ещё ЧЕТЫРЕ. Все четыре — тот же вендор, та же
+# версия, ноль новых загрузок; каждая нужна по существу, и ни одна не тянет HWND:
+#   Win32_Security               — GetAce/ACL/ACCESS_ALLOWED_ACE/PSID + OpenProcessToken-константы
+#                                  (TOKEN_QUERY), GetTokenInformation(TokenUser), LookupAccountSidW.
+#                                  Ими проверяется, что каталог цели НЕ доступен на запись
+#                                  непривилегированному принципалу, и берётся SID из ТОКЕНА процесса.
+#   Win32_Security_Authorization — GetNamedSecurityInfoW (DACL файла/каталога) и
+#                                  ConvertSidToStringSidW. Живут отдельно от Win32_Security и
+#                                  включают её транзитивно (манифест: Win32_Security_Authorization =
+#                                  ["Win32_Security"]), но объявлены обе — ровно по тому же
+#                                  принципу, что и Win32_Foundation выше: строка документирует, из
+#                                  какого модуля импортируются символы.
+#   Win32_System_SystemServices  — ACCESS_ALLOWED_ACE_TYPE (тип ACE). Единственная константа из
+#                                  этого модуля, и её НЕТ ни в Win32_Security, ни в Foundation.
+#   Win32_System_Threading       — GetCurrentProcess/OpenProcessToken. Взяты ЗДЕСЬ, а не из уже
+#                                  подключённого windows-sys 0.59: у двух крейтов свои типы HANDLE
+#                                  и PSID, и токен пришлось бы гонять между ними приведением
+#                                  сырых указателей. Одна feature дешевле, чем каст, который
+#                                  компилятор проверить не может.
+windows = { version = "0.61.3", features = ["Win32_System_TaskScheduler", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_Services"] }
+
+[dev-dependencies]
+regex = "1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+devtools = ["tauri/devtools"]
+test = ["tauri/test"]

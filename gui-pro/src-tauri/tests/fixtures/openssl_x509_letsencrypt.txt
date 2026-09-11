@@ -1,0 +1,5 @@
+sha256 Fingerprint=A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90
+subject=CN = vpn.example.com
+issuer=C = US, O = Let's Encrypt, CN = R3
+notBefore=Apr 28 12:00:00 2026 GMT
+notAfter=Jul 27 12:00:00 2026 GMT

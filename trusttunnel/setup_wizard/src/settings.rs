@@ -80,6 +80,25 @@ kill switch, allow inbound connections to these local ports. An array of integer
 in TLS handshakes initiated by the VPN client."#)}
         #[serde(default = "Settings::default_post_quantum_group_enabled")]
         pub post_quantum_group_enabled: bool,
+        #{doc(r#"When enabled, all TCP connections to scannable ports are initially
+routed through a fake upstream to read the TLS SNI before making any real connection.
+This ensures site exclusions work correctly when a secure DNS resolver is configured
+outside of AdGuard VPN, or when the exclusion list contains wildcard entries (e.g. *.example.com)."#)}
+        #[serde(default = "Settings::default_exclusions_tcp_early_ack_enabled")]
+        pub exclusions_tcp_early_ack_enabled: bool,
+        #{doc(r#"When enabled, DNS-resolvable exclusions are pre-resolved in the background after the
+exclusion list is updated. This populates the suspects cache so that connections to
+excluded hosts are routed correctly without waiting for the first DNS response."#)}
+        #[serde(default = "Settings::default_exclusions_preresolve_enabled")]
+        pub exclusions_preresolve_enabled: bool,
+        #{doc(r#"Maximum number of exclusion domains to pre-resolve per cycle."#)}
+        #[serde(default = "Settings::default_exclusions_preresolve_max_queries")]
+        pub exclusions_preresolve_max_queries: u32,
+        #{doc(r#"Comma-separated list of ports considered "scannable" for domain extraction and exclusion matching.
+Supports individual ports and ranges, e.g. `443,80,8080:8090,853`.
+If empty, the default list is used."#)}
+        #[serde(default = "Settings::default_exclusions_scannable_ports")]
+        pub exclusions_scannable_ports: String,
         #{doc(r#"Domains and addresses which should be routed in a special manner.
 Supported syntax:
   * domain name
@@ -152,9 +171,24 @@ On Windows, an interface index as shown by `route print`, written as a string, m
         #{doc("MTU size on the interface")}
         #[serde(default = "TunListener::default_mtu_size")]
         pub mtu_size: usize,
+        #{doc("TCP receive window size in bytes. 0 uses optimized default (256 KB). Adjust only for constrained environments")}
+        #[serde(default = "TunListener::default_tcp_recv_buf_size")]
+        pub tcp_recv_buf_size: usize,
+        #{doc("TCP send buffer size in bytes. 0 uses optimized default (256 KB). Adjust only for constrained environments")}
+        #[serde(default = "TunListener::default_tcp_send_buf_size")]
+        pub tcp_send_buf_size: usize,
         #{doc("Allow changing system DNS servers")}
         #[serde(default = "TunListener::default_change_system_dns")]
         pub change_system_dns: bool,
+        #{doc(r#"TUN / Wintun device name.
+On Linux: TUN interface name (empty = kernel-assigned).
+On macOS: request a specific `utun<N>` unit (empty = kernel-assigned).
+On Windows: Wintun adapter name (empty = auto-generated from hostname)."#)}
+        #[serde(default = "TunListener::default_device_name")]
+        pub device_name: String,
+        #{doc("Attach to a pre-existing TUN device named `device_name` instead of creating one. Requires `device_name` to be non-empty. Linux only; ignored on Windows and macOS.")}
+        #[serde(default = "TunListener::default_use_existing")]
+        pub use_existing: bool,
     }
 }
 
@@ -183,6 +217,30 @@ impl Settings {
         // Keep in sync with common/include/vpn/default_settings.h
         // VPN_DEFAULT_POST_QUANTUM_GROUP_ENABLED
         true
+    }
+
+    pub fn default_exclusions_tcp_early_ack_enabled() -> bool {
+        // Keep in sync with common/src/default_settings.h
+        // VPN_DEFAULT_EXCLUSIONS_TCP_EARLY_ACK_ENABLED
+        false
+    }
+
+    pub fn default_exclusions_preresolve_enabled() -> bool {
+        // Keep in sync with common/src/default_settings.h
+        // VPN_DEFAULT_EXCLUSIONS_PRERESOLVE_ENABLED
+        true
+    }
+
+    pub fn default_exclusions_preresolve_max_queries() -> u32 {
+        // Keep in sync with common/src/default_settings.h
+        // VPN_DEFAULT_EXCLUSIONS_PRERESOLVE_MAX_QUERIES
+        50
+    }
+
+    pub fn default_exclusions_scannable_ports() -> String {
+        // Keep in sync with common/src/default_settings.h
+        // VPN_DEFAULT_EXCLUSIONS_SCANNABLE_PORTS
+        "443,80,8080,8008,853".into()
     }
 }
 
@@ -230,11 +288,27 @@ impl TunListener {
         ]
     }
     pub fn default_mtu_size() -> usize {
-        1280
+        1350
+    }
+
+    pub fn default_tcp_recv_buf_size() -> usize {
+        0
+    }
+
+    pub fn default_tcp_send_buf_size() -> usize {
+        0
     }
 
     pub fn default_change_system_dns() -> bool {
         true
+    }
+
+    pub fn default_device_name() -> String {
+        "".into()
+    }
+
+    pub fn default_use_existing() -> bool {
+        false
     }
 }
 
@@ -269,6 +343,18 @@ pub fn build(template: Option<&Settings>) -> Settings {
         post_quantum_group_enabled: opt_field!(template, post_quantum_group_enabled)
             .cloned()
             .unwrap_or_else(Settings::default_post_quantum_group_enabled),
+        exclusions_tcp_early_ack_enabled: opt_field!(template, exclusions_tcp_early_ack_enabled)
+            .cloned()
+            .unwrap_or_else(Settings::default_exclusions_tcp_early_ack_enabled),
+        exclusions_preresolve_enabled: opt_field!(template, exclusions_preresolve_enabled)
+            .cloned()
+            .unwrap_or_else(Settings::default_exclusions_preresolve_enabled),
+        exclusions_preresolve_max_queries: opt_field!(template, exclusions_preresolve_max_queries)
+            .cloned()
+            .unwrap_or_else(Settings::default_exclusions_preresolve_max_queries),
+        exclusions_scannable_ports: opt_field!(template, exclusions_scannable_ports)
+            .cloned()
+            .unwrap_or_else(Settings::default_exclusions_scannable_ports),
         exclusions: opt_field!(template, exclusions)
             .cloned()
             .unwrap_or_default(),
@@ -442,8 +528,7 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
         ..Default::default()
     };
 
-    if endpoint_config.is_some() {
-        let config = endpoint_config.as_ref().unwrap();
+    if let Some(config) = &endpoint_config {
         x.hostname = config.hostname.clone();
         x.certificate = empty_to_none(config.certificate.clone());
     } else {
@@ -596,12 +681,24 @@ fn build_listener(template: Option<&Listener>) -> Listener {
                 mtu_size: opt_field!(template, mtu_size)
                     .cloned()
                     .unwrap_or_else(TunListener::default_mtu_size),
+                tcp_recv_buf_size: opt_field!(template, tcp_recv_buf_size)
+                    .cloned()
+                    .unwrap_or_else(TunListener::default_tcp_recv_buf_size),
+                tcp_send_buf_size: opt_field!(template, tcp_send_buf_size)
+                    .cloned()
+                    .unwrap_or_else(TunListener::default_tcp_send_buf_size),
                 change_system_dns: ask_for_agreement_with_default(
                     &format!("{}\n", TunListener::doc_change_system_dns()),
                     opt_field!(template, change_system_dns)
                         .cloned()
                         .unwrap_or_else(TunListener::default_change_system_dns),
                 ),
+                device_name: opt_field!(template, device_name)
+                    .cloned()
+                    .unwrap_or_else(TunListener::default_device_name),
+                use_existing: opt_field!(template, use_existing)
+                    .cloned()
+                    .unwrap_or_else(TunListener::default_use_existing),
             })
         }
         _ => unreachable!(),

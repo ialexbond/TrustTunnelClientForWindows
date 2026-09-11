@@ -1,0 +1,72 @@
+########################################################################
+              IP QUALITY CHECK REPORT  198.51.100.42
+              https://github.com/xykt/IPQuality
+       bash <(curl -sL https://Check.Place) -EI       Version: v2026-03-13
+              Report Time: 2026-05-19 00:12:38 UTC
+########################################################################
+
+1. Basic Information (Maxmind Database)
+
+ASN:             AS41745
+Organization:    Example Hosting Provider
+Location:        5°43'38"E, 52°31'39"N
+Map:             https://check.place/52.5275,5.7271,15,en
+City:            Flevoland, Dronten, 8254
+Actual Region:   [NL]The Netherlands     [EU]Europe
+Registered Region: [RU]Russia
+Time Zone:       Europe/Amsterdam
+IP Type:         Geo-discrepant
+
+########################################################################
+
+2. IP Type
+
+Database:    IPinfo       ipregistry   ipapi        IP2Location  AbuseIPDB
+Usage:       Hosting      Hosting      Hosting      Hosting      Hosting
+Company:                  Hosting      Hosting      Hosting
+
+########################################################################
+
+3. Risk Score
+
+Levels:      VeryLow  Low  Medium  High  VeryHigh
+IP2Location:                                       3  Low
+Scamalytics:                                       17 Low
+ipapi:                                             3.91% High
+AbuseIPDB:                                         0  Low
+IPQS:                                              0  Low
+DB-IP:                                                Low
+
+########################################################################
+
+4. Risk Factors
+
+DB:          IP2Location  ipapi  ipregistry  IPQS  Scamalytics  ipdata  IPinfo  DB-IP
+Region:      [NL]         [NL]   [NL]        [NL]  [NL]         [NL]    [NL]    [NL]
+Proxy:       No           No     No          No    No           No      No      No
+Tor:         No           No     No          No    No           No      No      No
+VPN:         No           No     No          No    No           N/A     No      N/A
+Server:      Yes          Yes    Yes         N/A   Yes          No      Yes     N/A
+Abuser:      No           No     No          No    No           N/A     No      N/A
+Robot:       No           No     N/A         No    No           N/A     No      No
+
+########################################################################
+
+5. Accessibility check for media and AI services
+
+Service:     TikTok    Disney+   Netflix   Youtube   AmazonPV  Reddit    ChatGPT
+Status:      Yes       Yes       Yes       NoPrem    Yes       Yes       Yes
+Region:      [NL]      [NL]      [NL]      [NL]      [NL]      []        [NL]
+Type:        Native    Native    Native    Native    Native    Native    Native
+
+########################################################################
+
+6. Email service availability and blacklist detection
+
+Local Port 25 Outbound: Available
+Conn:        Gmail  Outlook  Yahoo  Apple  QQ  MailRU  AOL  GMX  MailCOM  163  Sohu  Sina
+DNSBL database:  Active 439   Clean 392   Marked 47   Blacklisted 0
+
+==============================================================================
+IP Checks Today: 45; Total: 1351270. Thanks for running xy scripts!
+Report Link: https://Report.Check.Place/ip/1ABCDEF123.svg
