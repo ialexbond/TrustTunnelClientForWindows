@@ -686,6 +686,12 @@ mod tests {
     }
 
     /// Truth: a closed/unused port → PingResult::Unreachable within the timeout (never hangs).
+    ///
+    /// KNOWN RACE, `WINDOWS.md` #38: the freed ephemeral port can be re-bound by any of the other
+    /// 1228 parallel tests, and then this connects. It was NOT converted to the port-0 endpoint
+    /// that fixed #37, because what it asserts is a LATENCY BOUND and it gets that latency from
+    /// the ~2037 ms a SYN-dropped loopback port costs. Port 0 refuses in ≤ 1 ms, which would
+    /// satisfy the bound without testing it — honest-but-racy beats green-but-empty.
     #[tokio::test]
     async fn ping_unused_port_unreachable() {
         // Bind then immediately drop the listener to free a port that is now (almost
@@ -713,6 +719,12 @@ mod tests {
     /// immediately — it does NOT then run the two real probes (which would burn another 2× the
     /// timeout for the same verdict). We prove the bound by measuring: a closed loopback port
     /// (refused fast) must resolve well under 2× the timeout, i.e. the reals were skipped.
+    ///
+    /// KNOWN RACE, `WINDOWS.md` #38 — same freed-port premise as `ping_unused_port_unreachable`,
+    /// and left unconverted for the same reason: the bound it measures is made of the endpoint's
+    /// latency. `unreachable_endpoint_records_exactly_one_probe` states the same truth by COUNTING
+    /// samples instead of timing them, which is why that one could be converted and this one
+    /// could not.
     #[tokio::test]
     async fn steady_state_early_returns_on_unreachable_warmup() {
         // A closed loopback port → the warm-up connect is refused fast (Unreachable). If the fn
@@ -1078,58 +1090,97 @@ mod diag01_tests {
         assert_ne!(slow.render(), refused.render());
     }
 
-    /// MEASURED ON THIS MACHINE (2026-09-04), and the reason this test is shaped the way it is:
-    /// a TCP connect to a CLOSED port — even on loopback — does not fail fast here. It takes a
-    /// dead-constant **~2050 ms** before returning `ConnectionRefused`, while a SUCCESSFUL
-    /// connect costs 0.6–1.8 ms locally and ~83 ms to a remote host. The refusal is slow because
-    /// the firewall drops the SYN instead of answering RST, so the stack only gives up after its
-    /// SYN-retransmit budget expires.
-    ///
-    /// That single number is the load-bearing fact behind the intermittent-degradation
-    /// report: against a 3000 ms probe budget, an endpoint that is merely FILTERED costs ~2 s,
-    /// and any real network slowdown on top of it pushes the measurement past the budget, so
-    /// every card flips to «Недоступен» while the browser still loads pages perfectly.
-    ///
     /// Truth pinned here: the instrument must never MIS-ATTRIBUTE the cause. A budget that
     /// expired is `TimedOut`; an error that arrived inside the budget is `Failed(kind)`. If those
     /// two were ever swapped or conflated, the log would actively mislead the diagnosis — worse
     /// than having no log at all.
+    ///
+    /// **THE ENDPOINT IS PORT 0, AND THAT IS THE WHOLE POINT.** No socket in any process can ever
+    /// be listening there: `bind(port = 0)` is the sockets API asking «assign me one», so port 0
+    /// is the one port that is never assigned to anybody. The connect is refused locally, every
+    /// time, whatever else the machine is running — measured 300/300 `Failed("AddrNotAvailable")`
+    /// in ≤ 1 ms (2026-09-10).
+    ///
+    /// **What that replaced, and why the old premise was unsound (`WINDOWS.md` #37).** This test
+    /// used to bind `127.0.0.1:0`, DROP the listener, and treat the freed ephemeral port as
+    /// closed. `cargo test --lib` runs 1229 tests in parallel and a dozen of them bind sockets,
+    /// so between the drop and the probe the port could be handed to another test. The probe then
+    /// connected, and the FIRST assertion — «a closed port still reads Unreachable» — failed with
+    /// `left: Ok { ms: 0 }`: one CI red on 2026-09-10 (run 34473092097) and a green re-run of the
+    /// same job on the same commit. Reproduced deterministically here by standing a single
+    /// competitor bind in for the parallel suite: `left: Ok { ms: 1 }, right: Unreachable`.
+    ///
+    /// **Reserving the port instead would NOT have closed it, and that was measured rather than
+    /// assumed.** Holding the listener open for the life of the test blocks only the binders that
+    /// ask for `127.0.0.1`; with `127.0.0.1:P` held, `0.0.0.0:P`, `127.0.0.2:P` and `127.0.0.3:P`
+    /// each still bind successfully beside it, and a listener on `0.0.0.0:P` answers a loopback
+    /// connect. A reservation that holds only against the addresses today's tests happen to use
+    /// is a survey of the suite, not a property of the code.
+    ///
+    /// **The ~2050 ms measurement the old comment was built around is still true, and is no
+    /// longer load-bearing HERE.** A TCP connect to a genuinely closed loopback port takes a
+    /// dead-constant ~2037 ms to return `ConnectionRefused` on this machine — the firewall drops
+    /// the SYN instead of answering RST, so the stack only gives up when its retransmit budget
+    /// expires — while a successful connect costs 0–4 ms. That number is the load-bearing fact
+    /// behind the intermittent-degradation report (a merely FILTERED endpoint eats ~2 s
+    /// of a 3000 ms budget, so every card flips to «Недоступен» while the browser still loads
+    /// pages), and it is what `expired_budget_is_labelled_timeout_never_a_refusal` still needs a
+    /// slow endpoint for. It bought THIS test nothing: against a 4000 ms budget the refusal
+    /// always arrived first, so the `TimedOut` arm that the generous budget was chosen to keep
+    /// reachable never once ran here.
+    ///
+    /// **What the assertions still catch, stated so a future reader can check rather than trust.**
+    /// Every comparison is between the label and the clock of the same probe, so the test does not
+    /// need to know which outcome will occur — it only requires that whichever occurs agrees with
+    /// itself. Swap the two arms in `probe_tcp_sampled` and the probe reports `TimedOut` after
+    /// ~0 ms against a 4000 ms budget: RED. Move the clock so it measures anything other than this
+    /// probe and the `Failed` arm's `elapsed < budget` stops holding: RED. What no test can pin
+    /// without gambling on the network is a NON-degenerate expiry — a real budget timeout needs a
+    /// slow peer, and a slow peer is precisely the ambient state this test was rewritten to stop
+    /// depending on.
     #[tokio::test]
     async fn outcome_label_always_matches_the_elapsed_time() {
-        // Bind then immediately drop the listener to free a port that is now closed.
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
-        };
+        // Nothing binds, nothing is dropped, so there is no window for another test to step into.
+        const NOBODY_CAN_LISTEN_HERE: u16 = 0;
 
-        // Budget generously above the measured ~2050 ms refusal latency so BOTH outcomes are
-        // reachable on any machine: a fast-refusing stack lands on Failed, a slow one on TimedOut.
-        let budget_ms = 4000;
-        let (verdict, sample) = probe_tcp_sampled("127.0.0.1", port, budget_ms).await;
+        // Three budgets, because the claim is a RULE about label-versus-clock and not a single
+        // observation. All three sit far above the ~1 ms this connect actually costs, so no branch
+        // below is selected by a timing coin-flip.
+        for budget_ms in [50u64, 200, 4000] {
+            let (verdict, sample) =
+                probe_tcp_sampled("127.0.0.1", NOBODY_CAN_LISTEN_HERE, budget_ms).await;
 
-        assert_eq!(verdict, PingResult::Unreachable, "a closed port still reads Unreachable");
+            assert_eq!(
+                verdict,
+                PingResult::Unreachable,
+                "a port nothing can listen on still reads Unreachable (budget {budget_ms} ms)"
+            );
 
-        match sample.outcome {
-            ProbeOutcome::Failed(ref kind) => {
-                assert!(!kind.is_empty(), "the io::ErrorKind name must be captured");
-                assert!(
-                    sample.elapsed_ms < budget_ms,
-                    "an error attributed to the peer must have arrived INSIDE the budget, \
-                     got {} ms against a {} ms budget",
-                    sample.elapsed_ms,
-                    budget_ms
-                );
+            match sample.outcome {
+                ProbeOutcome::Failed(ref kind) => {
+                    assert!(!kind.is_empty(), "the io::ErrorKind name must be captured");
+                    assert!(
+                        sample.elapsed_ms < budget_ms,
+                        "an error attributed to the peer must have arrived INSIDE the budget, \
+                         got {} ms against a {} ms budget",
+                        sample.elapsed_ms,
+                        budget_ms
+                    );
+                }
+                ProbeOutcome::TimedOut => {
+                    assert!(
+                        sample.elapsed_ms >= budget_ms,
+                        "a timeout must only be reported when the budget actually expired, \
+                         got {} ms against a {} ms budget",
+                        sample.elapsed_ms,
+                        budget_ms
+                    );
+                }
+                ProbeOutcome::Connected => panic!(
+                    "nothing can be listening on port 0, so a Connected here is the probe \
+                     reporting a connection it did not make"
+                ),
             }
-            ProbeOutcome::TimedOut => {
-                assert!(
-                    sample.elapsed_ms >= budget_ms,
-                    "a timeout must only be reported when the budget actually expired, \
-                     got {} ms against a {} ms budget",
-                    sample.elapsed_ms,
-                    budget_ms
-                );
-            }
-            ProbeOutcome::Connected => panic!("a closed port must not report Connected"),
         }
     }
 
@@ -1137,6 +1188,17 @@ mod diag01_tests {
     /// refusal. This is the case the degradation hypothesis lives on — a server that would have
     /// answered in 2.5 s under a 200 ms budget is a BUDGET problem, not a server problem, and the
     /// log must be able to say which.
+    ///
+    /// **This is the OTHER direction of the correspondence that
+    /// `outcome_label_always_matches_the_elapsed_time` pins**, and the only test that observes a
+    /// real budget expiry: a genuine timeout needs a peer that does not answer, which is why this
+    /// one still gambles on a freed loopback port while its sibling no longer does. It requires
+    /// the endpoint to be SLOW — the measured ~2037 ms a SYN-dropped port costs, far above this
+    /// 200 ms budget — so the port-0 endpoint that removed the race from #37 is unusable here: it
+    /// refuses in ≤ 1 ms and this test would then assert a timeout that never happened.
+    ///
+    /// KNOWN RACE, `WINDOWS.md` #38: if another parallel test takes the freed port, the connect
+    /// succeeds inside 200 ms and this reddens on `Connected`.
     #[tokio::test]
     async fn expired_budget_is_labelled_timeout_never_a_refusal() {
         let port = {
@@ -1191,14 +1253,20 @@ mod diag01_tests {
     /// exactly ONE probe, proving the two reals were skipped rather than silently failing.
     /// This is the assertion that would catch a future regression re-introducing the 3×
     /// timeout stall that F8 removed.
+    ///
+    /// Uses port 0 for the same reason as `outcome_label_always_matches_the_elapsed_time`, and it
+    /// costs this test nothing: what is counted is SAMPLES, not milliseconds, so an endpoint that
+    /// refuses in 0 ms exercises the `not_reachable => return` arm exactly as a 2 s one did — the
+    /// early return is about the warm-up's VERDICT, never its latency. The bind-drop-probe idiom
+    /// it replaced could hand the port to another parallel test, which would make the warm-up read
+    /// `Ok`, run the two reals, and redden the count for a reason that has nothing to do with F8
+    /// (`WINDOWS.md` #37).
     #[tokio::test]
     async fn unreachable_endpoint_records_exactly_one_probe() {
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
-        };
+        const NOBODY_CAN_LISTEN_HERE: u16 = 0;
 
-        let (verdict, samples) = probe_tcp_steady_state_sampled("127.0.0.1", port, 1500).await;
+        let (verdict, samples) =
+            probe_tcp_steady_state_sampled("127.0.0.1", NOBODY_CAN_LISTEN_HERE, 1500).await;
 
         assert_eq!(verdict, PingResult::Unreachable);
         assert_eq!(

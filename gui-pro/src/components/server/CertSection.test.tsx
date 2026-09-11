@@ -108,7 +108,7 @@ describe("CertSection summary card", () => {
     render(<CertSection state={ss} security={mockSecurity} />);
     await waitFor(() => {
       const card = screen.getByTestId("cert-summary-card");
-      expect(card).toHaveTextContent(/13\.143\.139\.141/); // the server IP
+      expect(card).toHaveTextContent(/203\.0\.113\.141/); // the server IP
       expect(card).not.toHaveTextContent(/internal\.local/); // NOT the fake CN
     });
   });

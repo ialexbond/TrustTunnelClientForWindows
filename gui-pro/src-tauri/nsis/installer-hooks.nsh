@@ -1545,7 +1545,7 @@ Var TT_LEGACY_SURVIVOR_SEEN
   ;
   ;    THE ANNOUNCEMENT BELOW IS GUARDED, AND UNTIL 32-FIX-18 IT WAS NOT. It stood
   ;    unconditionally, eight lines above the region that erases the data, so the
-  ;    owner's pass-4 log read, verbatim: "Keeping user data", then the removal of
+  ;    pass-4 log read, verbatim: "Keeping user data", then the removal of
   ;    the pid file, then "Removing the data folder of this installation: ...". The
   ;    behaviour was correct throughout; the SENTENCE was a lie, printed in the one
   ;    window a person reads to learn what just happened to their saved passwords.

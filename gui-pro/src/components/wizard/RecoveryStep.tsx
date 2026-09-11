@@ -106,7 +106,7 @@ export function RecoveryStep(w: WizardState) {
 
   // Standard recovery fork: Continue (safe default) / Start over (destructive),
   // side by side. The «Apply my settings» config-diverge action was removed at the
-  // owner's request (UAT) — recovery is now the two-way Continue / Start over fork.
+  // request (UAT) — recovery is now the two-way Continue / Start over fork.
   return (
     <>
       <StepBar step={w.step} />

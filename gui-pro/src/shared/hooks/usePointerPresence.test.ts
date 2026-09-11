@@ -639,7 +639,7 @@ describe("expiry instrumentation", () => {
  * G-32-20 — the marker a component holds up while it is placing focus itself.
  *
  * `Tooltip`'s end-to-end cases live in `TooltipFocusRestore.test.tsx` and are written as the
- * owner's sequence. These pin the primitive, including the two properties that no end-to-end case
+ * sequence. These pin the primitive, including the two properties that no end-to-end case
  * can reach: that the marker is down again after a focus handler throws, and that it survives
  * nesting.
  */

@@ -216,7 +216,7 @@ export function ConfigQr({ isOpen, config, onClose, fileMissing = false }: Confi
         <>
           {/* The link was built before the file was deleted and is still a valid bundle for the
               receiving device, so it stays — but the user is TOLD, rather than left to work out on
-              why the card behind this window disappeared. `warning`, not `error`: nothing
+              their own why the card behind this window disappeared. `warning`, not `error`: nothing
               here has failed, the link works. */}
           {fileMissing && (
             <div className="mt-[var(--space-4)]">

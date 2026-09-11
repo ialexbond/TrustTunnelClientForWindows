@@ -2079,7 +2079,7 @@ describe("App", () => {
   // does, which is a different claim: the effect's dependency is `config.configPath`, App resolves
   // that path during startup, and the one-shot latch is armed before the 1.5s timer that does the
   // work (filed separately as G-32-10). A fix that only worked in the hook harness would move the
-  // owner's failure one step later instead of removing it, and he tests this by rebooting.
+  // failure one step later instead of removing it, and he tests this by rebooting.
   //
   // Arranged exactly as a real machine is on the reboot AFTER a manual connect: `tt_config_path`
   // written, `tt_auto_connect` never touched — which is precisely the state his leveldb showed.

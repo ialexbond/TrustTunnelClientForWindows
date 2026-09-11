@@ -46,6 +46,27 @@ describe("release-notes-section.cjs ↔ parseReleaseNotes parity", () => {
     expect(result.stdout).toBe(parseReleaseNotes(realNotes, version));
   });
 
+  /*
+   * Byte parity makes the two texts the same SOURCE; this makes them the same PICTURE. The app
+   * renders with react-markdown (CommonMark), where a line break inside a paragraph is a space.
+   * GitHub renders a release description as a comment, where the same break is a hard <br> —
+   * measured through its /markdown API in gfm mode before 3.0.0 shipped. A section wrapped at 100
+   * columns therefore read as one paragraph in the app and as ragged half-sentences on GitHub.
+   */
+  it.each(versions)("%s writes every paragraph and list item on one line", (version) => {
+    const lines = (parseReleaseNotes(realNotes, version) ?? "").split(/\r?\n/);
+    const blockStart = /^([-*+]|\d+[.)])\s|^#{1,6}\s|^>|^\|/;
+    let inFence = false;
+    const wrapped = lines.filter((line, i) => {
+      if (/^```/.test(line)) inFence = !inFence;
+      if (inFence || i === 0 || line.trim() === "") return false;
+      const prev = lines[i - 1];
+      if (prev.trim() === "" || /^#{1,6}\s/.test(prev)) return false;
+      return !blockStart.test(line);
+    });
+    expect(wrapped, "these lines continue the line above — join them, or GitHub breaks the sentence there").toEqual([]);
+  });
+
   it("exits non-zero and writes nothing to stdout for a version with no section", () => {
     // Публикация обязана падать громко, а не создавать выпуск с пустым описанием.
     const result = runScript([SCRIPT, "9.9.9"]);

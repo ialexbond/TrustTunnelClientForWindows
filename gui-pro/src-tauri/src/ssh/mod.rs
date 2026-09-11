@@ -157,11 +157,35 @@ pub fn auth_plan(auth_method: Option<&str>, _has_key: bool, _has_password: bool)
 // ─── The application's data root ──────────────────────────────────────────────
 //
 // WHERE THE DATA LIVES
-//   `user_data_dir()` resolves to THE EXECUTABLE'S OWN DIRECTORY. On a normal install that is
-//   `%LOCALAPPDATA%\TrustTunnel Client Pro\` — the per-user folder the NSIS installer creates,
-//   named after the product. Every runtime artifact sits beside the binary that reads it: the
-//   client `.toml` configs, `configs.json`, `ssh_credentials.json`, `known_hosts.json`, the
-//   routing rules, the geodata, the logs and the WebView2 profile.
+//   `user_data_dir()` resolves to `%LOCALAPPDATA%\TrustTunnel Client Pro` — the per-user folder
+//   named after the product. Every runtime artifact lives there: the client `.toml` configs,
+//   `configs.json`, `ssh_credentials.json`, `known_hosts.json`, the routing rules, the geodata,
+//   the logs and the WebView2 profile.
+//
+// THE ROOT IS NAMED, NOT DERIVED — AND THAT IS A CONFIDENTIALITY REQUIREMENT
+//   The folder is spelled out: not built from `CARGO_PKG_NAME`, and above all not taken from the
+//   executable's own location. `resolve_data_root` is still HANDED the executable and
+//   deliberately IGNORES it (see its doc comment below for why the parameter survives).
+//
+//   The reason is an ACL, measured rather than assumed:
+//
+//       C:\Program Files
+//         S-1-5-32-545 (BUILTIN\Users) | ReadAndExecute, Synchronize | Allow | inherit=None
+//         S-1-5-32-545 (BUILTIN\Users) | 0xA0000000 (GENERIC_READ|GENERIC_EXECUTE)
+//                                      | Allow | inherit=ContainerInherit, ObjectInherit
+//                                              propagate=InheritOnly
+//       %LOCALAPPDATA%
+//         no S-1-5-32-545 ACE at all
+//
+//   Phase 32 moved the INSTALL into `Program Files` (`installMode: perMachine`, D-03). The second
+//   ACE above is inherit-only over BOTH child containers and child objects, so a data root
+//   derived from the executable now falls inside that inheritance — and the plaintext
+//   `ssh_credentials.json` would be readable by every account on the machine. A rule that follows
+//   the binary cannot be used once the binary lives somewhere the data must not.
+//
+//   The users' files did not have to move for this, which is the whole reason it was affordable:
+//   the pre-32 install directory and the data root are THE SAME PATH, so the binaries left the
+//   folder and the data stayed exactly where it was (D-05).
 //
 // WHY IT IS *NOT* A SEPARATE `%LOCALAPPDATA%\TrustTunnel\ClientPro`
 //   Phase 30.1 plan 08 moved it there. The move was REVERTED on 2026-08-28. Two independent
@@ -182,28 +206,12 @@ pub fn auth_plan(auth_method: Option<&str>, _has_key: bool, _has_password: bool)
 //      which the UI showed the dead twin. Diagnosed in full, 33 verified findings, in
 //      `.planning/phases/30.1-*/30.1-REGRESSION.md`.
 //
-// THE MOVE IS DEFERRED, NOT ABANDONED — AND THE REASON FOR IT STILL STANDS
-//   Plan 08's argument was measured, not assumed, and it has not been refuted:
-//
-//       C:\Program Files
-//         S-1-5-32-545 (BUILTIN\Users) | ReadAndExecute, Synchronize | Allow | inherit=None
-//         S-1-5-32-545 (BUILTIN\Users) | 0xA0000000 (GENERIC_READ|GENERIC_EXECUTE)
-//                                      | Allow | inherit=ContainerInherit, ObjectInherit
-//                                              propagate=InheritOnly
-//       %LOCALAPPDATA%
-//         no S-1-5-32-545 ACE at all
-//
-//   The second Program Files ACE is inherit-only over BOTH child containers and child objects,
-//   so once the install moves to Program Files (D-03), a data root beside the executable would
-//   be readable by every account on the machine — the plaintext credential store included.
-//   That is a real confidentiality problem and it is why the data root MUST move.
-//
-//   It must move WITH the install relocation, not before it. Phases 31/32 own both. Shipping
-//   the data move alone bought the regression above and none of the benefit, because the
-//   install has not moved and today's root — `%LOCALAPPDATA%\TrustTunnel Client Pro` — already
-//   has a per-user ACL. When it does move, the migration must REWRITE the absolute paths inside
-//   `configs.json` rather than copy it; that is the defect that made this revert necessary, and
-//   it is recorded here so the next attempt does not rediscover it in production.
+//      THE STANDING RULE THAT REGRESSION LEFT BEHIND, and it outlived the revert: any change to
+//      this helper's answer must bring the DATA with it and REWRITE the absolute paths inside
+//      `configs.json` rather than copy the file. Phase 32 escaped that cost only because its old
+//      and new answers name the same directory — it was a rule change, not a migration. A future
+//      change without that property inherits the entire defect, so it is recorded here rather
+//      than rediscovered in production.
 
 // RECORDED LIMITATION — WHOSE local-app-data location? (32-FIX-03)
 //

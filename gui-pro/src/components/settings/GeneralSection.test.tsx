@@ -334,7 +334,7 @@ describe("GeneralSection", () => {
     // The instrument gap G-32-15 turned up. `refresh` has logged `settings.autostart.read_failed`
     // since G-32-13; the mount read swallowed its failure with a bare `.catch`, so the very first
     // read of a session — the one that runs before any window focus — left no trace at all. The
-    // owner's activity.log for 17:08–17:09 is silent for exactly that reason.
+    // activity.log for 17:08–17:09 is silent for exactly that reason.
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "get_autostart") throw new Error("ITaskService::Connect failed");
       if (cmd === "get_start_minimized") return false;
@@ -438,7 +438,7 @@ describe("GeneralSection", () => {
 
   it("puts the code in the read_failed log line, so the next diagnosis is one grep", async () => {
     // `settings.autostart.read_failed trigger=tab-poll` on its own is what two minutes of the
-    // owner's activity.log says, twenty-four times, about a cause the program had already named in
+    // activity.log says, twenty-four times, about a cause the program had already named in
     // the other file. The line now carries the code, so the two files can be read as one.
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "get_autostart") return Promise.reject(SCHEDULER_DOWN);
@@ -610,6 +610,53 @@ describe("GeneralSection", () => {
       expect(screen.getByRole("switch", { name: AUTOSTART })).toHaveAttribute("aria-checked", "true")
     );
 
+    taskEnabled = false;
+    fireEvent.focus(window);
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("write_activity_log", {
+        tag: "STATE",
+        message: "settings.autostart.changed from=true to=false trigger=dom-focus",
+        details: "GeneralSection",
+      })
+    );
+  });
+
+  it("logs the disagreement even when the read lands before React flushes its effects", async () => {
+    // Root cause of the 2026-09-10 full-suite flake, pinned so it cannot come back silently.
+    //
+    // Change detection compares the backend's answer against `autostartRef` — «what is on screen
+    // right now». That mirror used to be written by a passive effect, and the two clocks involved
+    // are not the same one: a read resolves on a MICROTASK, React flushes passive effects in a
+    // SCHEDULED task after it. A read landing in that gap compares the operating system's new
+    // answer against a mirror still holding the row's mount default, finds no disagreement, and
+    // says nothing at all — the instrument goes silent exactly when it has something to report.
+    //
+    // Alone, this file always won that race and the test above passed 53/53; under the full suite
+    // (253 files) the flush lost it and the same test failed twice in a row, with a later `tab-poll`
+    // line in the log where the `dom-focus` one should have been. That is what a load-sensitive
+    // green looks like: not a slow test, a MISSED observation.
+    //
+    // Nothing here waits and nothing here is timed. The gap is entered on purpose: the mount read's
+    // promise chain is drained with bare microtasks, which gives React no scheduled task to flush
+    // in, and the focus arrives inside it. The `act(...)` warnings this prints are the point — the
+    // component is deliberately observed between a state update and its flush, which is precisely
+    // the state a loaded machine leaves it in.
+    let taskEnabled = true;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "get_autostart") return taskEnabled;
+      if (cmd === "get_start_minimized") return false;
+      if (cmd === "get_geodata_auto_update") return true;
+      return null;
+    });
+
+    render(<GeneralSection {...defaultProps} />);
+    // Let the mount read settle — microtasks only, no timers, no act flush.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The user disabled the task elsewhere and comes back to the window.
     taskEnabled = false;
     fireEvent.focus(window);
 

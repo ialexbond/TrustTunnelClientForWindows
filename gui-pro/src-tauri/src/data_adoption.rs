@@ -1190,7 +1190,7 @@ mod tests {
             out.entries[0].path,
             data.join("server-a.toml").to_string_lossy().to_string(),
             "the entry must name the CURRENT data root; carrying the legacy path is the blob-copy \
-             defect that refused every server on a real Windows install"
+             defect that refused every server on a real install"
         );
     }
 

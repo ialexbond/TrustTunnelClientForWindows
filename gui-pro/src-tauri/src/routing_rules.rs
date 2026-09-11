@@ -64,7 +64,7 @@ fn default_process_mode() -> String {
 /// side: `save_routing_rules` re-serializes the whole document from a struct that no longer has
 /// these fields, so without this the FIRST save after the upgrade — an unrelated rule edit, an
 /// auto-save, a connect — would silently delete a list of domains the user typed by hand. The
-/// owner's decision was «remove the feature, keep the data»: blocking may come back as a filtering
+/// decision was «remove the feature, keep the data»: blocking may come back as a filtering
 /// DNS on the server, and ignoring the data costs nothing while destroying it is irreversible.
 ///
 /// AN EXPLICIT ALLOW-LIST, not «carry every unknown key». A blanket carry-forward would resurrect
@@ -1784,7 +1784,7 @@ mod tests {
         // hand-edited rules file onto the log channel.
         let notice = unresolved_entries_notice(&[
             "geoip:ru".to_string(),
-            r"geosite:C:\Users\<user>\AppData\secret.toml".to_string(),
+            r"geosite:C:\Users\tester\AppData\secret.toml".to_string(),
             "iplist_group:games/../../etc/passwd".to_string(),
             "password=hunter2 \"quoted\"\nsecond line".to_string(),
         ])

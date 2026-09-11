@@ -1236,7 +1236,7 @@ function App() {
   //     disconnect wins; onExternalDisconnect resolves the park "external" + clears any notice).
   //   - connect@tray → ADOPT the pointer (setConfig + tt_config_path + refresh the list) so the hero
   //     follows the config the tray actually connected, instead of a stale/reverted FE pointer (the
-  //     owner's "tray icon green while the tab shows all «Подключить» / no active card" split).
+  //     "tray icon green while the tab shows all «Подключить» / no active card" split).
   //
   // Phase 28 (28-03, OQ-1): the SAME branch now also serves `origin: "failover"` — the Rust
   // queue walk recovering on a candidate that is not the origin server. It is the identical

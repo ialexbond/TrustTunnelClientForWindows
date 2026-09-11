@@ -729,7 +729,7 @@ function emittedScriptSubject(o) {
           ` WHAT THIS MEANS ON A USER'S DISK: nine files are removed while the program still has ` +
           `its image mapped, NSIS \`Delete\` fails silently on each of them, and three binaries ` +
           `survive in the folder that also holds the user's plaintext credential store — which ` +
-          `is precisely what happened on a real Windows install before this rule existed.`
+          `is precisely what happened on a real install before this rule existed.`
       );
       continue;
     }

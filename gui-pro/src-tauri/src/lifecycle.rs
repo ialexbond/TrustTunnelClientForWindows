@@ -3559,10 +3559,10 @@ pub(crate) mod tests {
         assert_eq!(
             names(&removed),
             announced_names,
-            "the set of artifacts REMOVED differs from the set ANNOUNCED. A reviewer approved a \
-             list of exactly nine artifacts after reading it on a real machine, and declined a \
-             tenth when it was offered; a removal that does not appear in the announcement is a \
-             deletion no human ever reviewed."
+            "the set of artifacts REMOVED differs from the set ANNOUNCED. A list of exactly nine \
+             artifacts was approved after being read against a real machine, and a tenth was \
+             declined; a removal that does not appear in the announcement is a deletion no human \
+             ever reviewed."
         );
         assert_eq!(
             names(&reported),
@@ -3682,8 +3682,8 @@ pub(crate) mod tests {
             "the pre-install hook schedules a deletion of something it never announced. A \
              deferred delete is executed at the next boot BY THE SESSION MANAGER, WITH SYSTEM \
              AUTHORITY, outside any user session, and cannot be recalled between the install and \
-             the restart — so a target outside the nine artifacts read and approved on \
-             a real machine is a system-authority deletion no human ever reviewed:\n  {}",
+             the restart — so a target outside the nine artifacts read and approved against a real \
+             machine is a system-authority deletion no human ever reviewed:\n  {}",
             strays.join("\n  ")
         );
 

@@ -3,7 +3,7 @@
  *
  * This exists because of the shape of the defect it closes, not because of the defect itself. A
  * tooltip that outlived its window was fixed three times, once per place it was noticed, and the
- * owner's complaint the fourth time was about exactly that:
+ * complaint the fourth time was about exactly that:
  *
  *   «а что, нельзя сразу во всех местах "починить" тултип? а то только на "закрыть" окно пофиксил»
  *

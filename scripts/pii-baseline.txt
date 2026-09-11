@@ -1,0 +1,253 @@
+# pii-baseline.txt — findings that were already in the tree when the PII gate was adopted.
+#
+# THIS FILE IS A DEBT REGISTER, NOT A SILENCER. Every line is a value the gate found and a human
+# accepted. Regenerate it deliberately with:
+#
+#     node scripts/pii-gate.cjs --write-baseline
+#
+# and then WRITE THE REASONS — a value whose reason still starts with "TODO" is refused, so a
+# blind regenerate cannot turn the gate green. The list must shrink over time: an entry the scan no
+# longer finds is reported as stale, and the gate stays red until the file is regenerated.
+#
+# What still FAILS even though a value is listed here:
+#   * the same value in a file that is not listed for it
+#   * one more occurrence of it in a file that is
+#   * any value not listed at all
+#
+# Format — two sections, both sorted, no line numbers anywhere (so a source edit never moves a
+# line here, and an added line is always an added exception):
+#
+#   [reasons]  value | why this value identifies nobody
+#   [entries]  class | file | value | occurrences
+
+
+[reasons]
+1.2.3.0 | the same ladder as a network: `1.2.3.0/24` in a doc comment showing the `from` field's shape
+1.2.3.4 | count-to-four placeholder — the generic «some IP» of this tree, in 51 files; no host is meant
+123.45.67.89 | counted-digit placeholder, and it is literally the SSH form's own placeholder= attribute
+5.5.5.5 | repeated-digit placeholder for a stored SSH host; readStoredCredentials never dials it
+5.6.7.8 | the counted ladder continued, used as a banned address in fail2ban fixtures
+6.0.0.0 | NOT an address: the Common-Controls assembly version in the Win32 application manifest
+9.10.11.12 | the counted ladder continued, one row in a fail2ban story
+99.99.99.99 | repeated-digit placeholder for «whatever the wizard was handed»
+HTTPS-from-github.com | prose, not a host — the matcher joined «HTTPS-from-» to the allowlisted github.com
+a.com | single-letter throwaway host for ordering and dedup assertions
+a.win | single-letter throwaway config host; `.win` only because the shape is realistic
+a@b.com | single-letter throwaway mailbox in wizard persistence tests
+abuse@hetzner.com | a hosting provider's own published abuse contact, quoted in a captured report; a role mailbox, not a person
+ample.com | a fragment of «ex ample.com» — the validator fixture for a domain with a space in it
+b.com | single-letter throwaway host, the second of a pair
+b.win | single-letter throwaway config host, the second of a pair
+clearme.com | self-describing benchmark-history key: the record that must be cleared
+de-fra.trusttunnel.net | invented demo endpoint under the product's own brand, Frankfurt region code, for the planned multi-server UI
+domain.com | the word «domain» as a placeholder, including the i18n hint the user reads
+dup.com | self-describing routing fixture: the duplicate that must be collapsed
+empty-arr.com | self-describing benchmark-history key: the record whose array is empty
+ends-with-dot.com | self-describing invalid input for the domain validator
+evil-githubusercontent.com | adversary host whose name PREFIXES an allowlisted one — the lookalike must still fail
+evil.com | the adversary host of the allowlist-bypass tests; the test exists to see it refused
+filter.com | self-describing benchmark-history key: the record that must be filtered out
+foo.com | the canonical metasyntactic placeholder
+foo@bar.com | foo and bar, the canonical metasyntactic pair
+frankfurt-de-01.relay.example-vpn-provider-network-eu-central.com | deliberately over-long invented name — the mock exists to prove long hosts do not break the layout
+getstarted.example.ru | `example.` under a ccTLD RFC 2606 does not reserve; documentation by intent, invented in fact
+getstarted.neuralslop.ru | invented MTProto tls_domain; «neuralslop» is a joke word and resolves to nothing
+github.com@evil.com | userinfo-in-authority attack: everything before the @ is decoration, the host is the evil one
+h.win | single-letter throwaway config host — `h` for host — in config and manifest tests
+imported.com | self-describing routing fixture: the rule that arrived by import
+iplist.opencck.org.evil.com | adversary host that embeds an allowlisted name as a LABEL — must still fail
+keep.com | self-describing routing fixture: the rule that must survive
+maxmind.co | adversary host one TLD character short of an allowlisted one
+migrate.com | self-describing benchmark-history key: the record that must be migrated
+migrate2.com | self-describing benchmark-history key, second of a pair
+move-me.com | self-describing routing fixture: the rule that must be reordered
+my.vpn.com | the words «my vpn» as the endpoint-step placeholder
+new-rule.com | self-describing routing fixture: the rule being added
+new.com | self-describing before/after pair in save-flow tests
+nl-ams.trusttunnel.net | invented demo endpoint under the product's own brand, Amsterdam region code
+nonexistent.com | self-describing benchmark-history key: the record that is absent
+notexist.com | self-describing routing fixture: the rule that is not there
+notmaxmind.com | adversary host that CONTAINS an allowlisted name — substring matching must not accept it
+old.com | self-describing before/after pair in save-flow tests
+overridden.com | self-describing fixture for the per-user config override
+overwrite.com | self-describing benchmark-history key: the record that must be replaced
+petrovich.ru | named in a comment as the magic default the code must NOT have; an example of a mistake
+proxy-site.com | self-describing routing fixture: a site that goes through the proxy
+remove.com | self-describing routing fixture: the rule that must go
+ru1.com | self-describing routing fixture: first of two geo-tagged rules
+ru2.com | self-describing routing fixture: second of two geo-tagged rules
+s.bg | not a host: `{s.bg}` is a property read in a Storybook swatch map, and .bg is Bulgaria
+secret | invented account name in `C:/Users/secret/...`, chosen to look alarming so a test can prove the backend's own words never reach the screen
+sni.com | the word «sni» as a throwaway host in dirty-tracking tests
+space.com | a fragment of «has space.com» — the SNI fixture that must be rejected for its space
+static.42.113.0.203.clients.your-server.de | a hosting provider's reverse-DNS pattern wrapped around 203.0.113.42 read backwards — the address inside it is RFC 5737 TEST-NET-3, so this capture was already sanitized
+test.com | the word «test» as a throwaway routing-rule value
+test.org | the word «test» as a throwaway routing-rule value
+test.ru | the word «test» under a ccTLD, a throwaway routing-rule value
+test@test.com | the word «test» twice — a placeholder mailbox in the wizard
+tok@evil.com | the same attack carrying a token, to prove the token is not sent to the attacker
+user@domain.com | the words «user» and «domain» as a placeholder mailbox
+user@ex.com | shortened placeholder mailbox in an injection-rejection fixture
+valid.com | self-describing: the host that must pass the hosts.toml validator
+valid@test.com | self-describing fixture: the mailbox that must pass validation
+words.com | the word «words» as a throwaway host in domain-scope tests
+
+[entries]
+account-name | gui-pro/src/components/settings/AutoModeSettings.test.tsx | secret | 1
+account-name | gui-pro/src/shared/hooks/__tests__/useConfigList.test.ts | secret | 1
+email | gui-pro/src-tauri/src/commands/updater.rs | github.com@evil.com | 4
+email | gui-pro/src-tauri/src/commands/updater.rs | tok@evil.com | 1
+email | gui-pro/src-tauri/src/geodata_v2ray.rs | github.com@evil.com | 2
+email | gui-pro/src-tauri/src/ssh/deploy.rs | user@domain.com | 1
+email | gui-pro/src-tauri/src/ssh/sanitize.rs | user@domain.com | 1
+email | gui-pro/src-tauri/src/ssh/sanitize.rs | user@ex.com | 1
+email | gui-pro/src-tauri/tests/fixtures/benchmark_sample.txt | abuse@hetzner.com | 1
+email | gui-pro/src/components/server/benchmark/history.test.ts | foo@bar.com | 1
+email | gui-pro/src/components/server/benchmark/history.ts | foo@bar.com | 1
+email | gui-pro/src/components/wizard/EndpointStep.test.tsx | test@test.com | 1
+email | gui-pro/src/components/wizard/EndpointStep.test.tsx | valid@test.com | 1
+email | gui-pro/src/components/wizard/persist.test.ts | a@b.com | 2
+email | gui-pro/src/components/wizard/useWizardState.test.ts | a@b.com | 3
+email | gui-pro/src/shared/utils/userValidators.ts | user@domain.com | 1
+hostname | gui-light/src/shared/i18n/locales/en.json | domain.com | 1
+hostname | gui-light/src/shared/i18n/locales/ru.json | domain.com | 1
+hostname | gui-pro/src-tauri/src/commands/config.rs | h.win | 17
+hostname | gui-pro/src-tauri/src/commands/manifest.rs | foo.com | 2
+hostname | gui-pro/src-tauri/src/commands/manifest.rs | getstarted.example.ru | 1
+hostname | gui-pro/src-tauri/src/commands/manifest.rs | h.win | 4
+hostname | gui-pro/src-tauri/src/commands/ping.rs | de-fra.trusttunnel.net | 1
+hostname | gui-pro/src-tauri/src/commands/updater.rs | evil.com | 3
+hostname | gui-pro/src-tauri/src/domain_scope.rs | words.com | 1
+hostname | gui-pro/src-tauri/src/geodata_v2ray.rs | evil.com | 1
+hostname | gui-pro/src-tauri/src/geodata.rs | evil-githubusercontent.com | 1
+hostname | gui-pro/src-tauri/src/geodata.rs | iplist.opencck.org.evil.com | 1
+hostname | gui-pro/src-tauri/src/notify.rs | de-fra.trusttunnel.net | 4
+hostname | gui-pro/src-tauri/src/routing_rules.rs | maxmind.co | 1
+hostname | gui-pro/src-tauri/src/routing_rules.rs | notmaxmind.com | 1
+hostname | gui-pro/src-tauri/src/ssh/sanitize.rs | a.com | 1
+hostname | gui-pro/src-tauri/src/ssh/sanitize.rs | ample.com | 2
+hostname | gui-pro/src-tauri/src/ssh/sanitize.rs | evil.com | 1
+hostname | gui-pro/src-tauri/src/ssh/server/server_config.rs | a.com | 1
+hostname | gui-pro/src-tauri/src/ssh/server/server_hosts.rs | new.com | 1
+hostname | gui-pro/src-tauri/src/ssh/server/server_hosts.rs | valid.com | 1
+hostname | gui-pro/src-tauri/src/ssh/server/server_install.rs | evil.com | 3
+hostname | gui-pro/src-tauri/src/ssh/server/server_mtproto.rs | getstarted.neuralslop.ru | 7
+hostname | gui-pro/src-tauri/src/ssh/server/server_mtproto.rs | HTTPS-from-github.com | 1
+hostname | gui-pro/src-tauri/src/ssh/server/server_mtproto.rs | petrovich.ru | 1
+hostname | gui-pro/src-tauri/src/ssh/server/users_advanced.rs | evil.com | 1
+hostname | gui-pro/src-tauri/tests/fixtures/benchmark_sample.txt | static.42.113.0.203.clients.your-server.de | 1
+hostname | gui-pro/src/components/connection/connectionMocks.ts | frankfurt-de-01.relay.example-vpn-provider-network-eu-central.com | 1
+hostname | gui-pro/src/components/connection/ImportModal.errorLog.test.tsx | a.win | 1
+hostname | gui-pro/src/components/connection/ImportModal.errorLog.test.tsx | b.win | 1
+hostname | gui-pro/src/components/connection/Notification.stories.tsx | de-fra.trusttunnel.net | 2
+hostname | gui-pro/src/components/connection/Notification.stories.tsx | nl-ams.trusttunnel.net | 1
+hostname | gui-pro/src/components/connection/plateDetails.test.tsx | de-fra.trusttunnel.net | 9
+hostname | gui-pro/src/components/routing/AddRuleInput.test.tsx | domain.com | 1
+hostname | gui-pro/src/components/routing/AddRuleInput.test.tsx | test.com | 1
+hostname | gui-pro/src/components/routing/RuleEntryRow.test.tsx | test.org | 2
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | a.com | 1
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | b.com | 1
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | dup.com | 3
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | imported.com | 2
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | keep.com | 1
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | move-me.com | 2
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | new-rule.com | 2
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | notexist.com | 1
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | remove.com | 1
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | ru1.com | 1
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | ru2.com | 1
+hostname | gui-pro/src/components/routing/useRoutingState.test.ts | test.com | 2
+hostname | gui-pro/src/components/RoutingPanel.test.tsx | proxy-site.com | 2
+hostname | gui-pro/src/components/RoutingPanel.test.tsx | test.ru | 2
+hostname | gui-pro/src/components/server/benchmark/history.test.ts | clearme.com | 4
+hostname | gui-pro/src/components/server/benchmark/history.test.ts | empty-arr.com | 1
+hostname | gui-pro/src/components/server/benchmark/history.test.ts | filter.com | 1
+hostname | gui-pro/src/components/server/benchmark/history.test.ts | migrate.com | 1
+hostname | gui-pro/src/components/server/benchmark/history.test.ts | migrate2.com | 1
+hostname | gui-pro/src/components/server/benchmark/history.test.ts | nonexistent.com | 1
+hostname | gui-pro/src/components/server/benchmark/history.test.ts | overwrite.com | 3
+hostname | gui-pro/src/components/server/config/fields/ArrayOfTablesBlock.test.tsx | a.com | 7
+hostname | gui-pro/src/components/server/config/fields/ArrayOfTablesBlock.test.tsx | b.com | 3
+hostname | gui-pro/src/components/server/config/SaveFlowDialog.test.tsx | new.com | 1
+hostname | gui-pro/src/components/server/config/SaveFlowDialog.test.tsx | old.com | 1
+hostname | gui-pro/src/components/server/config/useTomlConfigState.test.ts | b.com | 1
+hostname | gui-pro/src/components/server/UserConfigModal.test.tsx | overridden.com | 2
+hostname | gui-pro/src/components/server/UserModal.test.tsx | space.com | 1
+hostname | gui-pro/src/components/wizard/EndpointStep.test.tsx | my.vpn.com | 1
+hostname | gui-pro/src/notification.test.tsx | de-fra.trusttunnel.net | 3
+hostname | gui-pro/src/shared/hooks/useConfigPingSource.connectedActive.test.ts | a.win | 4
+hostname | gui-pro/src/shared/hooks/useConfigPingSource.connectedActive.test.ts | b.win | 4
+hostname | gui-pro/src/shared/hooks/useConfigPingSource.test.ts | a.win | 2
+hostname | gui-pro/src/shared/hooks/useConfigPingSource.test.ts | b.win | 2
+hostname | gui-pro/src/shared/i18n/locales/en.json | domain.com | 1
+hostname | gui-pro/src/shared/i18n/locales/ru.json | domain.com | 1
+hostname | gui-pro/src/shared/ui/Colors.stories.tsx | s.bg | 1
+hostname | gui-pro/src/shared/utils/dirtyTracker.test.ts | sni.com | 1
+hostname | gui-pro/src/shared/utils/validators.test.ts | ends-with-dot.com | 1
+hostname | gui-pro/src/test/fixtures/config.ts | a.com | 1
+ipv4 | gui-light/src-tauri/trusttunnel.exe.manifest | 6.0.0.0 | 1
+ipv4 | gui-pro/.storybook/tauri-mocks/api-core.ts | 1.2.3.4 | 1
+ipv4 | gui-pro/.storybook/tauri-mocks/api-core.ts | 5.6.7.8 | 1
+ipv4 | gui-pro/src-tauri/src/commands/deeplink_local.rs | 1.2.3.4 | 3
+ipv4 | gui-pro/src-tauri/src/commands/deeplink.rs | 1.2.3.4 | 1
+ipv4 | gui-pro/src-tauri/src/commands/manifest.rs | 1.2.3.4 | 3
+ipv4 | gui-pro/src-tauri/src/domain_scope.rs | 1.2.3.4 | 4
+ipv4 | gui-pro/src-tauri/src/geodata_scheduler.rs | 1.2.3.4 | 1
+ipv4 | gui-pro/src-tauri/src/logging.rs | 1.2.3.4 | 4
+ipv4 | gui-pro/src-tauri/src/routing_rules.rs | 1.2.3.4 | 3
+ipv4 | gui-pro/src-tauri/src/ssh/deploy.rs | 1.2.3.4 | 1
+ipv4 | gui-pro/src-tauri/src/ssh/mod.rs | 1.2.3.4 | 1
+ipv4 | gui-pro/src-tauri/src/ssh/sanitize.rs | 1.2.3.4 | 4
+ipv4 | gui-pro/src-tauri/src/ssh/server/server_config.rs | 1.2.3.4 | 3
+ipv4 | gui-pro/src-tauri/src/ssh/server/server_security.rs | 1.2.3.0 | 1
+ipv4 | gui-pro/src-tauri/src/ssh/server/server_security.rs | 1.2.3.4 | 3
+ipv4 | gui-pro/src-tauri/src/ssh/server/server_security.rs | 5.6.7.8 | 2
+ipv4 | gui-pro/src-tauri/src/ssh/server/tlv_encoder.rs | 1.2.3.4 | 1
+ipv4 | gui-pro/src-tauri/trusttunnel.exe.manifest | 6.0.0.0 | 1
+ipv4 | gui-pro/src/App.test.tsx | 1.2.3.4 | 3
+ipv4 | gui-pro/src/components/connection/plateDetails.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/ConnectionPanel.mocked.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/ConnectionPanel.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/ControlPanelPage.test.tsx | 1.2.3.4 | 2
+ipv4 | gui-pro/src/components/ControlPanelPage.test.tsx | 5.5.5.5 | 1
+ipv4 | gui-pro/src/components/dashboard/ServerStatsCard.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/dashboard/useDashboardState.test.ts | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/routing/RoutingBlockCard.test.tsx | 1.2.3.4 | 2
+ipv4 | gui-pro/src/components/routing/useRoutingState.test.ts | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/benchmark/__fixtures__/benchmark-sample.txt | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/BenchmarkModal.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/BenchmarkSection.stories.tsx | 1.2.3.4 | 2
+ipv4 | gui-pro/src/components/server/BenchmarkSection.test.tsx | 1.2.3.4 | 2
+ipv4 | gui-pro/src/components/server/Fail2banBannedTab.tsx | 1.2.3.4 | 3
+ipv4 | gui-pro/src/components/server/Fail2banModal.stories.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/Fail2banModal.stories.tsx | 5.6.7.8 | 1
+ipv4 | gui-pro/src/components/server/Fail2banModal.stories.tsx | 9.10.11.12 | 1
+ipv4 | gui-pro/src/components/server/Fail2banModal.test.tsx | 1.2.3.4 | 4
+ipv4 | gui-pro/src/components/server/Fail2banModal.test.tsx | 5.6.7.8 | 2
+ipv4 | gui-pro/src/components/server/Fail2banSection.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/FirewallModal.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/FirewallSection.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/FirewallSection.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/readStoredCredentials.test.ts | 5.5.5.5 | 5
+ipv4 | gui-pro/src/components/server/SecuritySection.stories.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/server/SecuritySection.stories.tsx | 5.6.7.8 | 1
+ipv4 | gui-pro/src/components/server/SshConnectForm.test.tsx | 123.45.67.89 | 8
+ipv4 | gui-pro/src/components/server/SshConnectForm.tsx | 123.45.67.89 | 1
+ipv4 | gui-pro/src/components/server/useControlPanelOrchestrator.test.ts | 1.2.3.4 | 3
+ipv4 | gui-pro/src/components/server/useControlPanelOrchestrator.test.ts | 5.5.5.5 | 2
+ipv4 | gui-pro/src/components/server/useMtProtoState.test.ts | 1.2.3.4 | 4
+ipv4 | gui-pro/src/components/server/useSecurityState.test.ts | 1.2.3.4 | 4
+ipv4 | gui-pro/src/components/server/useUserFormState.test.ts | 1.2.3.4 | 2
+ipv4 | gui-pro/src/components/settings/ConnectionSection.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/settings/NetworkSection.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/settings/SecuritySection.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/settings/TunnelSection.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/settings/useSettingsState.test.ts | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/update/UpdateProgressModal.stories.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/update/UpdateProgressModal.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/update/useUpdateProgress.test.ts | 1.2.3.4 | 2
+ipv4 | gui-pro/src/components/wizard/EndpointStep.test.tsx | 1.2.3.4 | 3
+ipv4 | gui-pro/src/components/wizard/FoundStep.test.tsx | 1.2.3.4 | 1
+ipv4 | gui-pro/src/components/wizard/persist.test.ts | 1.2.3.4 | 2
+ipv4 | gui-pro/src/components/wizard/useWizardState.test.ts | 1.2.3.4 | 3
+ipv4 | gui-pro/src/components/wizard/useWizardState.test.ts | 99.99.99.99 | 1

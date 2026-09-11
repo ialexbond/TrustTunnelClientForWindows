@@ -83,8 +83,10 @@ describe("parseReleaseNotes", () => {
 
     expect(realNotes).toContain(body);
     expect(realNotes.slice(realNotes.indexOf(body), realNotes.indexOf(body) + body.length)).toBe(body);
-    // «ё» and ««»» are the characters a broken encoding mangles first.
-    expect(body).toContain("Тёмная и светлая темы");
+    // «ё» and ««»» are the characters a broken encoding mangles first. The anchors are picked for
+    // those characters, not for their wording — when the notes are rewritten, repoint them at any
+    // surviving phrase that still carries «ё» and the guillemets.
+    expect(body).toContain("светлая и тёмная темы");
     expect(body).toContain("«подключено»");
   });
 
