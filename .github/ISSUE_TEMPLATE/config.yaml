@@ -1,6 +1,11 @@
 'blank_issues_enabled': true
 'contact_links':
-  - 'about': >
-        Please check TrustTunnel console client README for more useful information about our product
-    'name': 'README'
-    'url': 'https://github.com/TrustTunnel/TrustTunnelClient/blob/master/README.md'
+  - 'name': 'Выпуски и установщики'
+    'url': 'https://github.com/ialexbond/TrustTunnelClientForWindows/releases'
+    'about': >
+        Скачать последнюю версию для Windows и прочитать, что в ней изменилось.
+  - 'name': 'Протокол TrustTunnel и консольный клиент'
+    'url': 'https://github.com/TrustTunnel/TrustTunnelClient'
+    'about': >
+        Это приложение — только оболочка для Windows. Вопросы о самом протоколе, о сервере
+        и о консольном клиенте задавайте в исходном проекте, а не здесь.

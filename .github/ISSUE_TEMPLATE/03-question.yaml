@@ -1,24 +1,28 @@
-name: ❓ Question
-description: If the options above do not work for you
-labels: ["Question"]
+name: ❓ Задать вопрос
+description: Если непонятно, как что-то работает
+labels: ["question"]
 body:
   - type: markdown
     attributes:
-      value: Thanks for taking the time to fill out this form!
+      value: |
+        Прежде чем спрашивать, загляните в [описание последнего
+        выпуска](https://github.com/ialexbond/TrustTunnelClientForWindows/releases) — там написано,
+        что появилось и что изменилось.
 
-  - type: checkboxes
+  - type: dropdown
+    id: edition
     attributes:
-      label: Please answer the following questions for yourself before submitting a question.
+      label: Какое издание
       options:
-        - label: I am running the latest version
-          required: true
-        - label: I checked to make sure that this issue has not already been filed
-          required: true
+        - Pro
+        - Light
+        - Вопрос не про конкретное издание
+    validations:
+      required: true
 
   - type: textarea
     id: question
     attributes:
-      label: Ask a question
-      placeholder: If you want to know more about how the app works.
+      label: Вопрос
     validations:
       required: true

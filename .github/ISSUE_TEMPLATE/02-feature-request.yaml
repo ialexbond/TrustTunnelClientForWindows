@@ -1,34 +1,34 @@
-name: 🚀 Feature request
-description: If you know how TrustTunnel client can be improved
-labels: ["Feature request"]
+name: 🚀 Предложить улучшение
+description: Чего не хватает в приложении для Windows
+labels: ["enhancement"]
 body:
-  - type: textarea
-    id: what-happened
-    attributes:
-      label: Issue Details
-      description: What happened?
-      placeholder: Is your feature request related to a problem? Please add a clear and concise description of what the problem is.
-    validations:
-      required: true
-
-  - type: textarea
-    id: how_it_should_be
-    attributes:
-      label: Proposed solution
-      placeholder: Describe the solution you'd like in a clear and concise manner.
-    validations:
-      required: true
-
-  - type: textarea
-    id: additional
-    attributes:
-      label: Alternative solution
-      placeholder: A clear and concise description of any alternative solutions or features you've considered.
-    validations:
-      required: false
-
   - type: markdown
     attributes:
       value: |
-        ---
-        Upvote [important issues](https://github.com/TrustTunnel/TrustTunnelClient/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc+) with a :+1:
+        Это трекер **графического клиента TrustTunnel для Windows**. Предложения по самому протоколу
+        TrustTunnel — в [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решит
+      description: Опишите не саму доработку, а то, что сейчас неудобно или невозможно. Так понятнее, что именно чинить.
+      placeholder: 'например: чтобы понять, какой сервер сейчас работает быстрее, приходится подключаться к каждому по очереди'
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Как вы это видите
+      placeholder: Что должно появиться в приложении и где.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Как вы обходитесь сейчас
+      description: Если никак — так и напишите.
+    validations:
+      required: false
