@@ -151,15 +151,17 @@ Light — это Pro без раздела управления сервером
 
 ## Лицензия
 
-Файл [`LICENSE`](LICENSE) — Apache License 2.0, `Copyright 2020 Adguard Software Ltd`. Он достался
-вместе с форком и относится к коду VPN-ядра.
+**Apache License 2.0** — целиком, и ядро, и приложение. Текст лицензии в файле
+[`LICENSE`](LICENSE), он достался вместе с форком и не менялся.
 
-**Лицензия на само графическое приложение пока не объявлена.** В приложении указано
-«Протокол © AdGuard · Клиент © ialexbond», но отдельного файла лицензии у клиентской части нет.
+Кто чем владеет — в файле [`NOTICE`](NOTICE): C++-ядро и протокол `Copyright 2020 AdGuard Software
+Ltd`, графическое приложение `Copyright 2026 ialexbond`. В самом приложении то же самое написано
+короче: «Протокол © AdGuard · Клиент © ialexbond».
 
-В сборку входят сторонние компоненты со своими лицензиями — в частности `wintun.dll`
-(WireGuard LLC, Prebuilt Binaries License) и lwIP (BSD, Swedish Institute of Computer Science), а
-также библиотеки Rust и npm, перечисленные в файлах блокировки зависимостей.
+Сторонние компоненты в сборке под Apache 2.0 **не** подпадают и живут по своим условиям —
+`wintun.dll` (WireGuard LLC, Prebuilt Binaries License), lwIP (BSD, Swedish Institute of Computer
+Science), библиотеки времени выполнения Microsoft, а также пакеты Rust и npm, перечисленные в файлах
+блокировки зависимостей. Все они названы в `NOTICE`.
 
 ---
 
@@ -181,8 +183,11 @@ The C++ VPN core is upstream's and ships as a separate sidecar process (version 
 written here. Core sources live on the `release/tt-win-3.0.0` branch and in release tags, not on
 `master`. The root `CHANGELOG.md` is the **core's** changelog, not the app's.
 
-The root `LICENSE` is Apache-2.0, `Copyright 2020 Adguard Software Ltd`, covering the VPN core. The
-GUI's own licence is not declared yet.
+Everything here — core and application alike — is under the **Apache License 2.0** (`LICENSE`).
+`NOTICE` records who holds what: the C++ core and the protocol are `Copyright 2020 AdGuard Software
+Ltd`, the Windows application is `Copyright 2026 ialexbond`. Bundled third-party components
+(Wintun, lwIP, the Microsoft runtimes, the Rust and npm dependencies) keep their own terms and are
+listed there too.
 
 The user interface and the release notes are in Russian and English; this README is primarily in
 Russian because that is what the application's audience reads.
