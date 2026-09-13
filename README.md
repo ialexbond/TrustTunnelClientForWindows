@@ -2,11 +2,9 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/readme-header-dark.svg">
-    <img alt="TrustTunnel" src=".github/assets/readme-header-light.svg" width="460">
+    <img alt="TrustTunnel Client для Windows" src=".github/assets/readme-header-light.svg" width="460">
   </picture>
 </p>
-
-# TrustTunnel Client для Windows
 
 Настольное приложение для VPN-протокола **TrustTunnel**: окно с кнопками и настройками вместо
 командной строки. У официального проекта TrustTunnel оболочки для Windows нет, поэтому она сделана
