@@ -51,8 +51,11 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
 
   // The single source of the displayed version: the value the update check reported, falling back
   // to the frozen product version when it has not answered yet. `AboutHero` deliberately takes no
-  // default of its own, so this stays the one place the fallback is written.
-  const version = updateInfo.currentVersion || "3.0.0";
+  // default of its own, so this stays the one place the fallback is written. This literal MUST
+  // equal tauri.conf.json's "version" — AboutPanel.test.tsx enforces it by reading the config file
+  // directly. Importing the config into the bundle itself was not done because src-tauri sits
+  // outside the frontend tsconfig (kept minimal in a release phase); bump both by hand together.
+  const version = updateInfo.currentVersion || "3.1.0";
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">

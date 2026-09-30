@@ -201,7 +201,7 @@ describe("ProcessFilterSection", () => {
   // the OLD, defective hover-gated button too and would therefore prove nothing. What IS provable
   // in jsdom is the accessible name, keyboard reachability, and the absence of the zero-opacity
   // utility. The visual proof lives in the Storybook stories and in human UAT, and the repo-level
-  // machine check is .planning/phases/24-*/scripts/hover-reveal-guard.sh.
+  // machine check is .planning/milestones/v3.0-phases/24-*/scripts/hover-reveal-guard.sh.
 
   it("remove button calls onRemove when clicked", () => {
     renderSection();

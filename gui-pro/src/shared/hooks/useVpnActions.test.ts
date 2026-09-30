@@ -66,6 +66,10 @@ function renderReconnectHarness(
     // way as pushPendingConnectPing so a test can assert the teardown paths (handleReconnect + a real
     // switchTo) run it at the post-teardown/pre-connect point (honest, single probe, non-blocking).
     pushPendingConnectPingSeeded?: (path: string) => Promise<void>;
+    // WR-01 (03.1): App's arm for the pending «last used» stamp.
+    armLastUsedStamp?: (path: string) => void;
+    // IN-01 (03.1 round 4): App's drop for that stamp, called from handleConnect's catch.
+    dropLastUsedStamp?: (path: string) => void;
   },
 ) {
   const statusHistory: VpnStatus[] = [];
@@ -104,6 +108,8 @@ function renderReconnectHarness(
       manualReconnectActiveRef,
       pushPendingConnectPing: opts?.pushPendingConnectPing,
       pushPendingConnectPingSeeded: opts?.pushPendingConnectPingSeeded,
+      armLastUsedStamp: opts?.armLastUsedStamp,
+      dropLastUsedStamp: opts?.dropLastUsedStamp,
     });
 
     return { status, actions, reconnectResolve, manualReconnectActiveRef };
@@ -1135,5 +1141,136 @@ describe("useVpnActions.markLastUsed — the raw-path-comparison class (30.1, si
     });
 
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("set_last_used", expect.anything());
+  });
+});
+
+// WR-01 (03.1): `handleConnect` — the connect of the ACTIVE config behind the status-panel
+// «Подключить», Ctrl+Shift+C and the last leg of save-and-reconnect — arms the App's pending
+// «last used» stamp with the path it is about to connect. It arms when the connect STARTS (after
+// any teardown), so the teardown's own `disconnected` edge cannot drop the stamp; `switchTo` is
+// not part of this rule (a real switch stamps in the App's park, the revert leg on accept).
+describe("useVpnActions.handleConnect — arms the pending «last used» stamp (WR-01)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupListenMock();
+    i18n.changeLanguage("ru");
+    vi.mocked(invoke).mockResolvedValue(null);
+  });
+
+  it("arms with the active config's path, before vpn_connect is invoked", async () => {
+    const armLastUsedStamp = vi.fn();
+    const { hook } = renderReconnectHarness("disconnected", { armLastUsedStamp });
+
+    await act(async () => {
+      await hook.result.current.actions.handleConnect();
+    });
+
+    expect(armLastUsedStamp).toHaveBeenCalledTimes(1);
+    expect(armLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    const connectCall = vi.mocked(invoke).mock.calls.findIndex((c) => c[0] === "vpn_connect");
+    expect(connectCall).toBeGreaterThanOrEqual(0);
+    expect(armLastUsedStamp.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(invoke).mock.invocationCallOrder[connectCall],
+    );
+  });
+
+  it("save-and-reconnect arms only after the teardown, when the connect starts", async () => {
+    const armLastUsedStamp = vi.fn();
+    const { hook } = renderReconnectHarness("connected", { armLastUsedStamp });
+
+    let reconnect: Promise<void> | undefined;
+    await act(async () => {
+      reconnect = hook.result.current.actions.handleReconnect();
+      await Promise.resolve();
+    });
+    // The teardown is in flight: nothing is armed yet.
+    expect(armLastUsedStamp).not.toHaveBeenCalled();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+    });
+    await act(async () => {
+      await reconnect;
+    });
+
+    expect(armLastUsedStamp).toHaveBeenCalledTimes(1);
+    expect(armLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    const disconnectCall = vi.mocked(invoke).mock.calls.findIndex((c) => c[0] === "vpn_disconnect");
+    expect(armLastUsedStamp.mock.invocationCallOrder[0]).toBeGreaterThan(
+      vi.mocked(invoke).mock.invocationCallOrder[disconnectCall],
+    );
+  });
+
+  it("does not arm when there is no active config to connect", async () => {
+    const armLastUsedStamp = vi.fn();
+    const hook = renderHook(() => {
+      const [status, setStatus] = useState<VpnStatus>("disconnected");
+      const [, setError] = useState<string | null>(null);
+      const reconnectResolve = useRef<(() => void) | null>(null);
+      return useVpnActions({
+        config: { configPath: "", logLevel: "info" } as VpnConfig,
+        status,
+        setStatus,
+        setError,
+        i18n,
+        reconnectResolve,
+        armLastUsedStamp,
+      });
+    });
+
+    await act(async () => {
+      await hook.result.current.handleConnect();
+    });
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
+    expect(armLastUsedStamp).not.toHaveBeenCalled();
+  });
+
+  // IN-01 (03.1 round 4): a rejected connect started from `error` produces no status edge, so the
+  // App's status effect cannot drop the stamp. The catch drops it explicitly, naming the path it
+  // armed so the App can leave a newer connect's stamp alone.
+  it("IN-01: a rejected vpn_connect drops the stamp it armed, naming that path", async () => {
+    const armLastUsedStamp = vi.fn();
+    const dropLastUsedStamp = vi.fn();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_connect") throw new Error("connect failed");
+      return null;
+    });
+    const { hook } = renderReconnectHarness("error", { armLastUsedStamp, dropLastUsedStamp });
+
+    await act(async () => {
+      await hook.result.current.actions.handleConnect();
+    });
+
+    expect(armLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    expect(dropLastUsedStamp).toHaveBeenCalledTimes(1);
+    expect(dropLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    expect(armLastUsedStamp.mock.invocationCallOrder[0]).toBeLessThan(
+      dropLastUsedStamp.mock.invocationCallOrder[0],
+    );
+    expect(hook.result.current.status).toBe("error");
+  });
+
+  it("IN-01: an accepted vpn_connect does not drop the stamp", async () => {
+    const dropLastUsedStamp = vi.fn();
+    const { hook } = renderReconnectHarness("disconnected", { dropLastUsedStamp });
+
+    await act(async () => {
+      await hook.result.current.actions.handleConnect();
+    });
+
+    expect(dropLastUsedStamp).not.toHaveBeenCalled();
+  });
+
+  it("switchTo does not arm: a switch and the revert leg keep their own stamping", async () => {
+    const armLastUsedStamp = vi.fn();
+    const { hook } = renderReconnectHarness("disconnected", { armLastUsedStamp });
+
+    await act(async () => {
+      await hook.result.current.actions.switchTo("/other.json", { stampLastUsed: false });
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", expect.objectContaining({ configPath: "/other.json" }));
+    expect(armLastUsedStamp).not.toHaveBeenCalled();
   });
 });

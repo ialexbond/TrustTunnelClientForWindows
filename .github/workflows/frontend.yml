@@ -51,6 +51,16 @@ on:
       # red and adding one turns a red tree green, so it is as load-bearing as the
       # matchers — and an edit to it alone has to be able to start this run.
       - "scripts/pii-baseline.txt"
+      # The checksum gate and its suite. They decide whether the release's
+      # `.sha256` asset is trustworthy, so an edit to either can flip the
+      # verdict with no other file changing — it has to trigger its own run.
+      - "scripts/checksum-gate.cjs"
+      - "scripts/checksum-gate.test.cjs"
+      # The build label gate and its suite. They decide whether a test build's
+      # label reaches the release, so an edit to either can flip the verdict
+      # with no other file changing — it has to trigger its own run.
+      - "scripts/build-label-gate.cjs"
+      - "scripts/build-label-gate.test.cjs"
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
@@ -132,6 +142,19 @@ jobs:
       # release build (`npm run artifact:check`, CLAUDE.md); CI proves it can fail.
       - name: Artifact path gate self-tests
         run: npm run artifact:test
+
+      # The checksum gate proves it can fail here; the check itself only runs
+      # on the release build (`npm run checksum:check`, CLAUDE.md ritual),
+      # because it needs a built installer to hash.
+      - name: Checksum gate self-tests
+        run: npm run checksum:test
+
+      # The build label gate proves it can fail here on fixtures; the check
+      # itself (`npm run label:check`) needs a built installer and dist/ to
+      # read, so it only runs in `prerelease` and in the release ritual next
+      # to `artifact:check` (CLAUDE.md, D-09).
+      - name: Build label gate self-tests
+        run: npm run label:test
 
   # gui-light job removed 2026-05-23 — the Light edition is out of scope
   # until its dedicated redesign milestone. Last on-fork typecheck failed

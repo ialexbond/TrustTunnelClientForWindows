@@ -9,7 +9,17 @@ name: Tauri Rust (gui-pro)
 #
 # This workflow runs the two Rust gates the audit identified as
 # mandatory on every PR:
-#   1. cargo clippy --no-deps -- -D warnings
+#   1. cargo clippy --no-deps --all-targets -- -D warnings
+#      (--all-targets puts #[cfg(test)] code under clippy too — WIN-22-29 —
+#      so this CI step and the local `npm run rust:check` gate agree on
+#      --all-targets. They are NOT byte-for-byte identical, though: this
+#      step adds --no-deps to keep the CI job scoped to the `gui-pro`
+#      crate's own code, while `npm run rust:check` (gui-pro/package.json,
+#      CLAUDE.md) runs WITHOUT --no-deps and so also lints every crate in
+#      the dependency graph, including the path dependency
+#      trusttunnel/settings (Cargo.toml). That is intentional, not a gap:
+#      the local gate is the stricter, broader one — it is not meant to be
+#      narrowed to match CI, only guaranteed to catch everything CI does.
 #   2. cargo test --lib
 #
 # Runner choice: windows-latest is required, not preferred.
@@ -139,7 +149,7 @@ jobs:
           New-Item -ItemType File -Force -Path "vcruntime140_1.dll" | Out-Null
 
       - name: Clippy (-D warnings)
-        run: cargo clippy --no-deps -- -D warnings
+        run: cargo clippy --no-deps --all-targets -- -D warnings
 
       - name: Cargo test --lib
         run: cargo test --lib --quiet

@@ -103,6 +103,38 @@ describe("ConnectionPanel (production integration)", () => {
     expect(onSwitchTo).toHaveBeenCalledWith("C:/app/b.toml");
   });
 
+  // G-03.1-5 regression pin: the live card's controls follow the SAME path match as the list.
+  // A tray connect announces the extended-length (`\\?\`) spelling of the card's path; the live
+  // card must still read «Отключить» and disconnect — never «Переключиться» onto itself.
+  // Green on arrival (normalizePath already strips the prefix); it pins the symptom sites in the
+  // panel (isLiveActive / the primary action) against the real spelling pair.
+  it("a live card whose activeConfigPath is the verbatim spelling disconnects, it does not switch to itself", async () => {
+    const user = userEvent.setup();
+    const WIN: ConfigSummary[] = [
+      { ...TWO[0], path: "C:\\app\\a.toml" },
+      { ...TWO[1], path: "C:\\app\\b.toml" },
+    ];
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_configs") return Promise.resolve(WIN);
+      if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+      return Promise.resolve(null);
+    });
+    const { onDisconnect, onSwitchTo } = setup({
+      status: "connected",
+      activeConfigPath: "\\\\?\\C:\\app\\a.toml",
+    });
+
+    await screen.findByText("Нидерланды");
+    const cards = await screen.findAllByTestId("config-card");
+    expect(cards[0]).toHaveAttribute("data-lead", "true");
+    await user.click(
+      within(cards[0]).getByRole("button", { name: i18n.t("connection.card.disconnect") }),
+    );
+
+    await waitFor(() => expect(onDisconnect).toHaveBeenCalled());
+    expect(onSwitchTo).not.toHaveBeenCalled();
+  });
+
   // Truth: deleting the LAST config returns the list to empty-no-configs. delete_config →
   // reload (now returns the empty manifest) → ConfigList renders the empty state.
   it("deleting the last config returns the list to empty-no-configs", async () => {

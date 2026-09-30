@@ -1,6 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // G-03.1-10: this executable doubles as the one-shot helper that delivers a Ctrl+C to the VPN
+    // core's console (`console_ctrl.rs`: `<exe> --tt-send-ctrl-c <pid>`). It must finish before
+    // anything else runs; every normal launch gets `None` and continues untouched.
+    if let Some(code) = trusttunnel_lib::ctrl_c_helper_exit_code() {
+        std::process::exit(code);
+    }
+
     // The WebView2 profile is the application's ENTIRE browser-side storage: feature toggles,
     // failover exclusions, language, theme, tab memory. Nothing in the milestone review named it,
     // and that is exactly why it is dangerous — its failure mode is not an error dialog but

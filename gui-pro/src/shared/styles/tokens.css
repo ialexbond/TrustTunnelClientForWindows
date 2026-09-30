@@ -3,13 +3,9 @@
  * CSS Variables for consistent theming across Pro & Light versions
  */
 
-/* Outfit — display-face for the "TrustTunnel" wordmark (AboutPanel only).
-   Подключается через Google Fonts CDN — на desktop с интернетом грузится
-   сразу. Для offline fallback CSS-переменная `--font-family-display`
-   деградирует на `'Geist Sans', system-ui` (ниже в tokens).
-   NOTE: для production offline-safe режима следует переключиться на
-   self-host (woff2 в src/shared/styles/fonts/), аналогично Geist. */
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
+/* Outfit — display-face for the "TrustTunnel" wordmark only (TitleBar, AboutPanel, welcome
+   screen). Self-hosted as a variable WOFF2 next to Geist/GeistMono under the SIL Open Font
+   License (see fonts/Outfit-OFL.txt); the app makes no font requests to external hosts. */
 
 /* ── Geist Font ──────────────────────────────────── */
 @font-face {
@@ -23,6 +19,14 @@
 @font-face {
   font-family: 'Geist Mono';
   src: url('./fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Outfit';
+  src: url('./fonts/Outfit-Variable.woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;

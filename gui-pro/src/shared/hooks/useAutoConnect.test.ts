@@ -39,6 +39,11 @@ const seedConfigPing = vi.fn();
 // G-32-8: the in-window announcement channel (App wires it to the SnackBar push). Injected the
 // same way `seedConfigPing` is, so the hook keeps no coupling to a UI context.
 const notify = vi.fn();
+// WR-01 (03.1): App hands the hook a callback that arms the pending «last used» stamp, so the launch
+// connect settles the manifest marker on its own `connected` edge like every other window connect.
+const armLastUsedStamp = vi.fn();
+// IN-01 (03.1 round 4): the matching drop, called when the launch connect is refused.
+const dropLastUsedStamp = vi.fn();
 
 // AUDIT-2026-06-11 #15/#23: the harness now supports rerendering with a changed
 // `status` (the live value App passes every render — feeds the hook's statusRef)
@@ -58,6 +63,8 @@ const renderAutoConnect = (
         setError,
         seedConfigPing,
         notify,
+        armLastUsedStamp,
+        dropLastUsedStamp,
         i18n: testI18n,
       }),
     { initialProps },
@@ -734,6 +741,134 @@ describe("useAutoConnect — Phase 11 (P11-03 / D-05): targets the manifest last
       (c) => c[0] === "vpn_connect",
     ).length;
     expect(connectCallsAfterRerender).toBe(1);
+  });
+
+  // WR-01 (03.1): the launch connect arms the pending «last used» stamp with the config it is about
+  // to connect — the reconciled target, not the manifest marker — so App's status effect can stamp
+  // it on the `connected` edge. The arm comes right before `vpn_connect`, never on a stand-down.
+  it("WR-01: arms the pending stamp with the config it connects, right before vpn_connect", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") {
+        // The marker is on /stale.json; the app-level active config (/config.json) wins (WR-05).
+        return [
+          { id: "id-active", path: "/config.json", last_used: false },
+          { id: "id-stale", path: "/stale.json", last_used: true },
+        ];
+      }
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(armLastUsedStamp).toHaveBeenCalledTimes(1);
+    expect(armLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    const connectCallIndex = mockInvoke.mock.calls.findIndex((c) => c[0] === "vpn_connect");
+    expect(connectCallIndex).toBeGreaterThanOrEqual(0);
+    expect(armLastUsedStamp.mock.invocationCallOrder[0]).toBeLessThan(
+      mockInvoke.mock.invocationCallOrder[connectCallIndex],
+    );
+  });
+
+  it("WR-01: does not arm the pending stamp when there is no target to connect", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return [];
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
+    expect(armLastUsedStamp).not.toHaveBeenCalled();
+  });
+
+  // IN-01 (03.1 round 4): a launch connect that `vpn_connect` refuses drops the stamp it armed. The
+  // App's status effect needs a status edge to do that, and the cancelled path below never writes a
+  // status at all, so the hook drops it explicitly, naming the path it armed.
+  it("IN-01: a rejected vpn_connect drops the stamp it armed, naming that path", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "vpn_connect") throw new Error("connect failed");
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(armLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    expect(dropLastUsedStamp).toHaveBeenCalledTimes(1);
+    expect(dropLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    expect(setStatus).toHaveBeenCalledWith("error");
+  });
+
+  it("IN-01: a vpn_connect that rejects after the effect was cleaned up still drops the stamp", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    let rejectConnect: (e: Error) => void = () => {};
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "vpn_connect") {
+        return new Promise((_resolve, reject) => {
+          rejectConnect = reject;
+        });
+      }
+      return null;
+    });
+
+    const { rerender } = renderAutoConnect();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600);
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", expect.anything());
+    expect(dropLastUsedStamp).not.toHaveBeenCalled();
+    setStatus.mockClear();
+
+    // The active config changes while the connect is in flight: the effect is cleaned up.
+    rerender({
+      status: "connecting",
+      config: { configPath: "/other.json", logLevel: "info" } as VpnConfig,
+    });
+    await act(async () => {
+      rejectConnect(new Error("connect failed"));
+    });
+
+    expect(dropLastUsedStamp).toHaveBeenCalledTimes(1);
+    expect(dropLastUsedStamp).toHaveBeenCalledWith("/config.json");
+    // The cancelled path still writes no status of its own.
+    expect(setStatus).not.toHaveBeenCalledWith("error");
+  });
+
+  it("IN-01: an accepted vpn_connect does not drop the stamp", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(armLastUsedStamp).toHaveBeenCalledTimes(1);
+    expect(dropLastUsedStamp).not.toHaveBeenCalled();
+  });
+
+  it("WR-01: does not arm the pending stamp when the toggle is off", async () => {
+    localStorage.setItem("tt_auto_connect", "false");
+    mockInvoke.mockResolvedValue(null);
+
+    renderAutoConnect();
+    await flush();
+
+    expect(armLastUsedStamp).not.toHaveBeenCalled();
   });
 });
 

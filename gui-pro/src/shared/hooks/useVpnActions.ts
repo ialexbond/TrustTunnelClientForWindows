@@ -36,6 +36,20 @@ interface UseVpnActionsParams {
   // (previously the switch/save-and-reconnect active card fell to «● —»). Optional (test call sites that
   // don't wire it simply get no push/seed — the pre-fix behaviour).
   pushPendingConnectPingSeeded?: (path: string) => Promise<void>;
+  // WR-01 (03.1): App's arm for the pending «last used» stamp. `handleConnect` — the connect of the
+  // ACTIVE config, shared by the status-panel «Подключить», Ctrl+Shift+C and the last leg of
+  // save-and-reconnect — calls it with the path it is about to hand to `vpn_connect`. The App's
+  // status effect then stamps the manifest marker on the `connected` edge and drops it on
+  // `error` / `disconnected`. Optional so call sites and tests that do not wire it keep working
+  // (they simply never arm — the marker stays where it was).
+  armLastUsedStamp?: (path: string) => void;
+  // IN-01 (03.1): the matching drop. `handleConnect` calls it with the path it armed when
+  // `vpn_connect` rejects. The status effect settles a stamp only on a status EDGE, and a retry
+  // started from `error` batches `connecting` -> `error` into one render (`error` -> `error`, no
+  // edge), so without an explicit drop the stamp would wait for a later `connected`. The App drops
+  // it only while the stamp still names that path, so a newer connect's stamp is never cleared.
+  // Optional, like the arm.
+  dropLastUsedStamp?: (path: string) => void;
 }
 
 // AUDIT-2026-06-11 #8: upper bound on how long the manual-reconnect mark may stay
@@ -54,6 +68,8 @@ export function useVpnActions({
   manualReconnectActiveRef,
   pushPendingConnectPing,
   pushPendingConnectPingSeeded,
+  armLastUsedStamp,
+  dropLastUsedStamp,
 }: UseVpnActionsParams) {
   const handleConnect = useCallback(async () => {
     if (!config.configPath) {
@@ -64,6 +80,11 @@ export function useVpnActions({
     try {
       setError(null);
       setStatus("connecting");
+      // WR-01: the connect starts here, so this is where the pending «last used» stamp is armed —
+      // after any teardown the caller ran first (save-and-reconnect), so the teardown's own
+      // `disconnected` edge cannot drop it. A rejected connect drops it in the catch below, because
+      // the status effect only sees an edge, and a retry from `error` produces none.
+      armLastUsedStamp?.(config.configPath);
       // NIT-1 (Phase 17): vpn_connect resolves a typed ConnectOutcome { spawned, reason }.
       // The direct-connect path intentionally does NOT react to `spawned:false` (unlike
       // switchTo, which must release the switch lock): a supersede here means a genuine
@@ -75,10 +96,13 @@ export function useVpnActions({
         logLevel: config.logLevel,
       })) as ConnectOutcome | null | undefined;
     } catch (e) {
+      // IN-01: the connect was refused, so the stamp it armed has nothing to wait for. Dropped
+      // here rather than left to the status effect, which needs an edge (`error` -> `error` has none).
+      dropLastUsedStamp?.(config.configPath);
       setError(localizeVpnError(e, i18n));
       setStatus("error");
     }
-  }, [config, i18n, setError, setStatus]);
+  }, [config, i18n, setError, setStatus, armLastUsedStamp, dropLastUsedStamp]);
 
   const handleDisconnect = useCallback(async () => {
     try {
@@ -454,10 +478,12 @@ export function useVpnActions({
       //
       // Phase 14 (FAB-02): `stampLastUsed` gates this. A vpn_connect ACCEPT only means B's
       // process SPAWNED — B can still die never-connected (broken auth / connect-timeout). If we
-      // stamped last-used here, a failed B would become the next-boot auto-connect target even
-      // though it never connected. So `performSwitch` passes stampLastUsed:false and stamps only
-      // AFTER the terminal `connected` edge (via markLastUsed below). Direct callers and the revert
-      // leg keep the default (stamp on accept) — the revert's A is the server we WANT remembered.
+      // stamped last-used here, a failed B would move the manifest marker (list order, the tray's
+      // choice after a relaunch) even though it never connected. So `performSwitch` passes stampLastUsed:false for every connect
+      // it starts (a real switch and a fresh window connect alike) and the App stamps only AFTER the
+      // terminal `connected` edge, through `markLastUsed`. The default (stamp on accept) is kept for
+      // callers that do not go through `performSwitch`; today that is the App's revert leg, whose A is
+      // the server we WANT remembered.
       if (opts?.stampLastUsed !== false) {
         await markLastUsed(path);
       }

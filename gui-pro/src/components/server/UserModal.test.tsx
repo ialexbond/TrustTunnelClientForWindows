@@ -452,6 +452,36 @@ describe("UserModal — Add mode", () => {
   });
 
   // ══════════════════════════════════════════════════════
+  // T-40-REST (D-20): unmapped server errors show Russian via translateSshError;
+  // the activity log keeps the raw English code untouched.
+  // ══════════════════════════════════════════════════════
+
+  it("T-40-REST: Add — an unmapped SSH error code is shown in Russian via translateSshError, log keeps the English code", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("SSH_INVALID_HOST"));
+    render(<UserModal {...defaultAddProps} />);
+    fireEvent.change(screen.getByPlaceholderText(/имя пользователя/i), {
+      target: { value: "testuser" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/пароль/i), {
+      target: { value: "Pass123!" },
+    });
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t("sshErrors.invalidHost"))).toBeInTheDocument();
+    });
+    // The raw English code stays in the activity log unchanged.
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "ERROR",
+      expect.stringContaining("user.add_advanced.failed err=SSH_INVALID_HOST"),
+    );
+    // The Russian sentence never reaches the log.
+    expect(activityLogSpy).not.toHaveBeenCalledWith(
+      "ERROR",
+      expect.stringContaining(i18n.t("sshErrors.invalidHost")),
+    );
+  });
+
+  // ══════════════════════════════════════════════════════
   // GAP: CIDR disabled when anti-DPI is OFF (+ hint)
   // ══════════════════════════════════════════════════════
 
@@ -736,6 +766,31 @@ describe("UserModal — Edit mode", () => {
       );
     });
     expectNoSecretLogged(NEW_SECRET);
+  });
+
+  // ══════════════════════════════════════════════════════
+  // T-40-REST (D-20): unmapped server errors show Russian via translateSshError;
+  // the activity log keeps the raw English code untouched.
+  // ══════════════════════════════════════════════════════
+
+  it("T-40-REST: Save — an unmapped SSH error code is shown in Russian via translateSshError, log keeps the English code", async () => {
+    vi.mocked(invoke).mockRejectedValue(new Error("SSH_INVALID_HOST"));
+    render(<UserModal {...defaultEditProps} />);
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t("sshErrors.invalidHost"))).toBeInTheDocument();
+    });
+    // The raw English code stays in the activity log unchanged.
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "ERROR",
+      expect.stringContaining("user.update.failed err=SSH_INVALID_HOST"),
+    );
+    // The Russian sentence never reaches the log.
+    expect(activityLogSpy).not.toHaveBeenCalledWith(
+      "ERROR",
+      expect.stringContaining(i18n.t("sshErrors.invalidHost")),
+    );
   });
 
   // ══════════════════════════════════════════════════════

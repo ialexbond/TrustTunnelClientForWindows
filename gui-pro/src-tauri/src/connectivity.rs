@@ -934,15 +934,21 @@ pub fn give_up_reason(queue_exhausted: bool) -> &'static str {
 /// не ответил» would send somebody to check their servers when their servers are fine and their
 /// rule list is the thing that needs repairing.
 ///
-/// **THE ALLOWLIST IS NARROW ON PURPOSE, AND IT MUST STAY THAT WAY.** Only codes WE mint are
-/// preferred. The recorded cause also carries the C++ core's own fixed English phrases
-/// («Authorization failed», «VPN adapter creation failed»…) — see `lifecycle::is_terminal_reason`,
-/// which matches on exactly those strings. Preferring "any recorded cause" would put one of those
-/// English sentences into `set_vpn_status`, and the presentation boundary passes unmapped values
-/// through UNCHANGED by design (`vpnEventHelpers.ts`, the SAFETY-03 seam). The result would be raw
-/// English on a Russian screen — a localisation regression introduced by a truthfulness fix, which
-/// is a bad trade in both directions. Widening this list therefore means proving the new value has
-/// a row in `REASON_CODE_I18N` first.
+/// **THE ALLOWLIST IS NARROW ON PURPOSE, AND IT MUST STAY THAT WAY.** Only values with a
+/// presentation row are preferred. The recorded cause also carries the C++ core's own fixed English
+/// phrases («Authorization failed», «Failed to start VPN tunnel»…) — see
+/// `lifecycle::is_terminal_reason`, which matches on exactly those strings. Preferring "any
+/// recorded cause" would put one of those English sentences into `set_vpn_status`, and the
+/// presentation boundary passes unmapped values through UNCHANGED by design (`vpnEventHelpers.ts`,
+/// the SAFETY-03 seam). The result would be raw English on a Russian screen — a localisation
+/// regression introduced by a truthfulness fix, which is a bad trade in both directions. Widening
+/// this list therefore means proving the new value has a row in `REASON_CODE_I18N` /
+/// `CORE_MESSAGE_I18N` first.
+///
+/// The second preferred value is `ADAPTER_CREATION_FAILED_REASON` (WR-01, G-03.1-7): a fixed
+/// English phrase that DOES have such a row (`errors.wintun_missing`), and the honest diagnosis
+/// when the supervisor's bounded adapter retries ran out — «Windows did not create the adapter»
+/// sends the person to the adapter, «сервер не вернулся» would send them to a server that is fine.
 ///
 /// Pure, and its truth table is exhaustive, because the guard above is only worth what its test
 /// is worth.
@@ -950,6 +956,9 @@ pub fn terminal_reason_for_give_up(recorded: Option<&str>, queue_exhausted: bool
     match recorded {
         Some(c) if c == crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON => {
             crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON
+        }
+        Some(c) if c == crate::lifecycle::ADAPTER_CREATION_FAILED_REASON => {
+            crate::lifecycle::ADAPTER_CREATION_FAILED_REASON
         }
         _ => give_up_reason(queue_exhausted),
     }
@@ -1026,6 +1035,9 @@ where
     SL: FnMut() -> SLFut,
     SLFut: std::future::Future<Output = ()>,
 {
+    // WR-01: attempts of THIS call that ended on the WinTUN adapter reason (per candidate — a walk
+    // calls the loop once per server).
+    let mut adapter_failures: u32 = 0;
     for attempt in 1..=max_attempts {
         // D-04 + Codex HIGH: a user-initiated disconnect, or a generation that was
         // advanced by a manual reconnect / disconnect, means we no longer own this
@@ -1084,6 +1096,26 @@ where
                 "[reconnect] terminal failure reason — short-circuiting retries (02-10)",
             );
             return SupervisorOutcome::GaveUp;
+        }
+
+        // WR-01 (G-03.1-7): a respawn that died because Windows did not create the WinTUN adapter
+        // is transient, so it is retried — but with the SAME small number of core starts a first
+        // connect gets, not the whole reconnect budget. A persistent adapter fault (a driver
+        // blocked by policy or an antivirus) would otherwise keep the card on «Переподключение»
+        // for about three minutes per candidate and then end on a generic reason. Only attempts
+        // that landed the adapter reason count here; the final Error keeps it
+        // (`terminal_reason_for_give_up`).
+        if failure_reason.as_deref() == Some(crate::lifecycle::ADAPTER_CREATION_FAILED_REASON) {
+            adapter_failures += 1;
+            if crate::lifecycle::adapter_supervised_budget_spent(adapter_failures) {
+                log_app(
+                    "INFO",
+                    &format!(
+                        "[reconnect] WinTUN adapter not created in {adapter_failures} attempts — giving up with the adapter reason (G-03.1-7)"
+                    ),
+                );
+                return SupervisorOutcome::GaveUp;
+            }
         }
 
         // Failure. If the respawn died sooner than FAST_FAIL_GRACE it was an instant
@@ -1393,8 +1425,14 @@ pub(crate) fn build_failover_queue(reason_code: &str, origin_path: &str) -> Vec<
         };
 
     let queue = crate::lifecycle::failover_queue(&entries, &failover.excluded_ids, origin_path);
-    // `candidates_remaining` counts the servers AFTER the origin — the origin's own retry happens
-    // either way, so a queue of one is not something to fail over with.
+    // `candidates_remaining` counts the servers AFTER the origin, so a queue of one is not something
+    // to fail over with: there is nowhere to walk to, and that single entry then keeps the FULL
+    // reconnect budget (`per_candidate_attempt_budget`, `queue_len <= 1`).
+    //
+    // This comment used to say «the origin's own retry happens either way». That stopped being true
+    // when `FAILOVER_ORIGIN_ATTEMPTS` became 0: on a real walk caused by a `ServerDrop` the origin
+    // gets zero attempts and is left immediately. Two user-facing texts repeated the same stale
+    // promise («один раз попробует переподключиться к текущему серверу») until 2026-09-23.
     let remaining = queue.len().saturating_sub(1);
     if crate::lifecycle::should_failover(reason_code, failover.enabled, remaining) {
         queue
@@ -2489,7 +2527,18 @@ async fn respawn_and_wait(
     // storing the fresh child — a config switch's `vpn_connect(B)` that bumped the
     // generation mid-respawn makes this A-retry stale and it must not store a second
     // live sidecar.
-    crate::commands::vpn::respawn_sidecar(app, config_path, log_level, captured_generation).await;
+    //
+    // G-03.1-7: `Some(Reconnecting)` keeps the supervisor's status write byte-identical — its
+    // respawn is a RE-establish and must read «Переподключение». (The adapter retry of a first
+    // connect passes `None` so it keeps «Подключение...».)
+    crate::commands::vpn::respawn_sidecar(
+        app,
+        config_path,
+        log_level,
+        captured_generation,
+        Some(VpnStatus::Reconnecting),
+    )
+    .await;
 
     // 3.8 F-2 (Fable-5 review): the respawned child's `Connected` edge is now gated on real
     // traffic-readiness (up to ~45s on http3 — the 3.8 delay-green). The old flat 15s poll counted
@@ -3711,6 +3760,78 @@ mod reconnect_supervisor_tests {
     }
 
     #[tokio::test]
+    async fn a_supervised_adapter_failure_stops_the_loop_at_the_first_connect_budget() {
+        // G-03.1-7 / WR-01: Windows creates or releases the WinTUN adapter within seconds, so a
+        // respawn that died on the adapter is TRANSIENT and is retried (not short-circuited after
+        // one attempt) — but with the SAME small budget a first connect gets: 1 + retries starts.
+        // Before this bound the loop spent the whole 10-attempt budget (about 3 minutes of
+        // «Переподключение») on a fault that keeps failing, and then reported a generic reason.
+        let calls = Cell::new(0u32);
+        let outcome = run_reconnect_loop(
+            7,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+            |_attempt| {
+                calls.set(calls.get() + 1);
+                async {
+                    (
+                        false,
+                        crate::lifecycle::FAST_FAIL_GRACE + Duration::from_secs(1),
+                        Some(crate::lifecycle::ADAPTER_CREATION_FAILED_REASON.to_string()),
+                    )
+                }
+            },
+            || false,
+            || 7,
+            |_attempt| {},
+            || async {},
+        )
+        .await;
+
+        assert_eq!(outcome, SupervisorOutcome::GaveUp);
+        assert_eq!(
+            calls.get(),
+            crate::lifecycle::ADAPTER_RETRY_MAX_ATTEMPTS + 1,
+            "an adapter failure is retried, but only as often as a first connect retries it",
+        );
+        assert!(
+            calls.get() < crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+            "the adapter bound must be tighter than the general reconnect budget",
+        );
+    }
+
+    #[tokio::test]
+    async fn only_attempts_that_ended_on_the_adapter_reason_spend_the_adapter_budget() {
+        // WR-01: the adapter budget counts attempts that landed the adapter reason, not attempts
+        // in general — a server that also fails for other reasons in between keeps the ordinary
+        // 10-attempt budget for those.
+        let calls = Cell::new(0u32);
+        let outcome = run_reconnect_loop(
+            7,
+            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+            |attempt| {
+                calls.set(calls.get() + 1);
+                let reason = if attempt % 2 == 1 {
+                    Some(crate::lifecycle::ADAPTER_CREATION_FAILED_REASON.to_string())
+                } else {
+                    None
+                };
+                async move {
+                    (false, crate::lifecycle::FAST_FAIL_GRACE + Duration::from_secs(1), reason)
+                }
+            },
+            || false,
+            || 7,
+            |_attempt| {},
+            || async {},
+        )
+        .await;
+
+        assert_eq!(outcome, SupervisorOutcome::GaveUp);
+        // Attempts 1, 3 and 5 landed the adapter reason: the third of those is the budget.
+        assert_eq!(calls.get(), 2 * crate::lifecycle::ADAPTER_RETRY_MAX_ATTEMPTS + 1);
+    }
+
+    #[tokio::test]
     async fn an_unreadable_rules_file_stops_the_loop_after_one_attempt() {
         // D-02 (30.1 blocker 2), the budget half. `respawn_sidecar` records this cause in the
         // shared slot and bails; `try_connect` reads that slot; the loop short-circuits on a
@@ -3770,16 +3891,35 @@ mod reconnect_supervisor_tests {
             );
         }
 
-        // Column 2: EVERYTHING else falls back to the walk-shape answer. The first five rows are
+        // WR-01 (G-03.1-7): the WinTUN adapter reason is the second preferred value. It is a
+        // fixed English phrase, but unlike the core's other phrases it HAS a row in the frontend
+        // map (`CORE_MESSAGE_I18N` → `errors.wintun_missing`; `adapter_reason_is_byte_identical_
+        // to_the_frontend_key` holds the spelling), so it reaches the screen localized. Without
+        // this a supervised adapter fault that exhausts its budget lost its diagnosis and read as
+        // the generic «сервер не вернулся».
+        for exhausted in [false, true] {
+            assert_eq!(
+                terminal_reason_for_give_up(
+                    Some(crate::lifecycle::ADAPTER_CREATION_FAILED_REASON),
+                    exhausted,
+                ),
+                crate::lifecycle::ADAPTER_CREATION_FAILED_REASON,
+                "a recorded adapter failure must survive to the terminal write \
+                 (queue_exhausted={exhausted})",
+            );
+        }
+
+        // Column 2: EVERYTHING else falls back to the walk-shape answer. The first rows are
         // the C++ core's own fixed English phrases, and they are the reason this allowlist is
         // narrow: `vpnEventHelpers.ts` passes unmapped values through UNCHANGED (SAFETY-03), so
         // preferring one of these would print «Authorization failed» on a Russian screen. The
         // core's phrases already have their own localisation path via CORE_MESSAGE_I18N on the
         // status they were actually raised on — they must not be re-surfaced through this seam.
+        // (The adapter phrase above is the one exception, proven by its own frontend row.)
         let must_not_be_preferred = [
             None,
             Some("Authorization failed"),
-            Some("VPN adapter creation failed"),
+            Some("VPN adapter creation failed."),
             Some("Configuration parse error. Check your config file."),
             Some("Server refused the connection"),
             Some("Failed to start VPN tunnel"),

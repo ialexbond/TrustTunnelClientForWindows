@@ -458,6 +458,52 @@ function App() {
   // at the start of every fresh switch (so a stale supersede never mutes a later real failure).
   const switchSupersededRef = useRef(false);
 
+  // WR-01 / WR-02 (03.1 review): the config whose connect has been started or announced but has not
+  // yet reached a terminal status, waiting for the `connected` edge before it becomes the manifest's
+  // «last used». ONE rule for every path that starts a connect of config X without a live tunnel to
+  // switch from: arm this ref with X and let the status effect below settle it (stamp on
+  // `connected`, drop on `error` / `disconnected`). The arming paths are:
+  //   - a fresh connect from a card (performSwitch, below);
+  //   - the status-panel «Подключить» and Ctrl+Shift+C (handleConnectActive) and save-and-reconnect
+  //     (handleReconnectGuarded), both through `handleConnect` in useVpnActions, which arms at the
+  //     moment it starts connecting (for save-and-reconnect: after the teardown) and drops the stamp
+  //     again if `vpn_connect` is refused (`dropLastUsedStamp`, below);
+  //   - the launch auto-connect (useAutoConnect, through `armLastUsedStamp`; it drops the stamp
+  //     again, through `dropLastUsedStamp`, if `vpn_connect` is refused);
+  //   - a connect announced by the tray (the `vpn-flow` listener further down).
+  // Neither the accept of `vpn_connect` nor the tray's announcement says anything about the server:
+  // both come before routing resolve, spawn result and handshake, so stamping there would let an
+  // unreachable server become the manifest marker.
+  //
+  // What the marker governs, and so what this rule protects: the list order
+  // (`last_used DESC, order ASC`) and the tray's choice after a relaunch (its stored pointer starts
+  // empty, so the marker decides). It does NOT govern the launch auto-connect whenever the app-level
+  // pointer (`tt_config_path`) is set and still listed: useAutoConnect follows that pointer (WR-05),
+  // and a failed fresh connect leaves the pointer on the config it tried. So the edge-only stamp
+  // keeps a failed connect from moving the marker; it does not keep that config from being the
+  // next launch's auto-connect target.
+  //
+  // A ref (not state): the writers set it and the status effect reads it, with no render needed in
+  // between.
+  //
+  // Paths that stamp on their own, and why: a real switch stamps in performSwitch itself on its own
+  // terminal edge; the revert leg of a failed switch stamps on accept through `switchTo`'s default
+  // (its A is the server to remember); a failover announcement stamps at once (its candidate has
+  // already connected when Rust announces it).
+  const pendingLastUsedStampRef = useRef<string | null>(null);
+  const armLastUsedStamp = useCallback((path: string | null | undefined) => {
+    pendingLastUsedStampRef.current = path || null;
+  }, []);
+  // IN-01 (03.1): the explicit drop for a window connect whose `vpn_connect` was refused
+  // (`handleConnect`'s catch, the launch auto-connect's catch). The status effect below settles a
+  // stamp only on a status edge; a retry started from `error` batches `connecting` -> `error` into
+  // one render (no edge), and the launch auto-connect's cancelled path writes no status at all.
+  // Only while the stamp still names the path that connect armed: a newer connect (a tray connect, a
+  // card's fresh connect) that has since armed another config keeps its own stamp.
+  const dropLastUsedStamp = useCallback((path: string) => {
+    if (samePath(pendingLastUsedStampRef.current, path)) pendingLastUsedStampRef.current = null;
+  }, []);
+
   // BUG-A2 (17-uat, Fable F1): set by handleUserCancel when the user presses «Отмена» on an IN-FLIGHT
   // connect/recovery. The status reducer reads it (via useVpnEvents guards) to route «Подключение
   // отменено» on the terminal `disconnected` edge and CONSUMES it there (and on connected/error, so a
@@ -692,6 +738,10 @@ function App() {
     // BUG-B (17-uat) B1: the post-teardown probe+push+SEED for the switch + save-and-reconnect paths, so
     // the switched-to active card shows the same honest pre-connect number the notification shows.
     pushPendingConnectPingSeeded,
+    // WR-01: the shared connect (status-panel «Подключить», Ctrl+Shift+C, and the last leg of
+    // save-and-reconnect) arms the pending «last used» stamp at the moment it starts connecting.
+    armLastUsedStamp,
+    dropLastUsedStamp,
   });
 
   // Phase 14 (CR-02, FAB-05): the SWITCH-GATED disconnect wrapper. A switch (or revert) legitimately
@@ -792,6 +842,9 @@ function App() {
     setError,
     seedConfigPing: seedRetainedPing,
     notify: pushSuccess,
+    // WR-01: the launch connect arms the same pending stamp every other window connect uses.
+    armLastUsedStamp,
+    dropLastUsedStamp,
     i18n,
   });
 
@@ -837,6 +890,9 @@ function App() {
     switchSupersededRef.current = false;
     try {
       if (config.configPath) await pushPendingConnectPing(config.configPath);
+      // WR-01: `handleConnect` arms the pending «last used» stamp itself (see `armLastUsedStamp`
+      // in the useVpnActions call above), so this connect follows the same rule as a card's fresh
+      // connect without a second writer here.
       await handleConnect();
     } finally {
       connectInFlightRef.current = false;
@@ -867,6 +923,11 @@ function App() {
     // handleConnectActive — a leaked flag would mute this reconnect's own failure snackbar).
     switchSupersededRef.current = false;
     try {
+      // WR-01: save-and-reconnect ends in `handleConnect`, which arms the pending «last used» stamp
+      // AFTER the teardown, at the point the connect actually starts. Arming here instead would let
+      // the teardown's own `disconnected` edge drop the stamp before the reconnect begins: that
+      // edge is normally held back by the manual-reconnect guard, but the guard is read when the
+      // status updater runs, which can be after the reconnect flow has already released it.
       await handleReconnect();
     } finally {
       connectInFlightRef.current = false;
@@ -1008,6 +1069,8 @@ function App() {
   //       wrong-server / double-spawn). Read from the LIVE statusRef.
   //   (g) FAB-02: awaits switchTo(path) for the SPAWN-ACCEPT, then parks on the REAL terminal
   //       `vpn-status` edge (connected → success + stamp last-used; error/timeout → silent revert).
+  //       That is a REAL switch. A fresh connect has no park: it stamps on the same `connected`
+  //       edge through `pendingLastUsedStampRef` instead. No connect started here stamps on accept.
   //       switchTo resolving ok:true only means B's PROCESS spawned — a spawned B can still die
   //       never-connected, so the revert must fire on the terminal edge, not on switchTo's return.
   //   (h) clears connectInFlightRef + isSwitching in `finally` — atomically AFTER the whole
@@ -1044,6 +1107,9 @@ function App() {
       // revert-to-A, so its «…восстановлено» must never land on THIS (possibly different) server's
       // connected edge.
       pendingRevertNoticeRef.current = null;
+      // WR-02: likewise abandon a stamp still waiting from an earlier connect (a tray announcement, or
+      // a window connect that never settled) — this switch/connect owns the marker from here.
+      pendingLastUsedStampRef.current = null;
       // F-7: a fresh switch starts clean — never carry a stale supersede flag into it (which would
       // wrongly mute a real connect-failure snackbar on THIS switch).
       switchSupersededRef.current = false;
@@ -1078,17 +1144,23 @@ function App() {
         if (pushPing && path && !isRealSwitch) {
           await pushPendingConnectPing(path);
         }
-        // (g) FAB-02: run the switch for the SPAWN-ACCEPT. stampLastUsed:false — a vpn_connect accept
-        // only means B's PROCESS spawned; we must NOT stamp a not-yet-connected (possibly-failing) B
-        // as last-used, or the next-boot auto-connect would target a dead server. We stamp only after
-        // the terminal `connected` edge below.
-        // A real switch stamps last-used only AFTER the terminal `connected` edge (FAB-02, via the
-        // markLastUsed in the park below); a fresh connect stamps on accept like the pre-Phase-14
-        // plain connect (it has no terminal-edge park).
+        // (g) FAB-02: run the switch for the SPAWN-ACCEPT. stampLastUsed:false for EVERY connect this
+        // helper starts — a vpn_connect accept only means B's PROCESS spawned; we must NOT stamp a
+        // not-yet-connected (possibly-failing) B as last-used, or a failed connect would move the
+        // manifest marker (list order, the tray's choice after a relaunch). We stamp only after the
+        // terminal `connected` edge:
+        //   - a REAL switch, in the park below (markLastUsed on `connected`);
+        //   - a FRESH connect (no live tunnel to switch from, so no park and no revert), through
+        //     `pendingLastUsedStampRef`, which the status effect settles on `connected`. It is armed
+        //     BEFORE switchTo so a `connected` that lands before the invoke promise resolves still
+        //     finds it; a refused or superseded spawn clears it below.
+        // (Before WR-02 a fresh connect stamped on accept like the pre-Phase-14 plain connect; that
+        // left the window less strict than the tray connect and than a switch.)
         // BUG-B (17-uat) B1: seedAfterTeardown is passed for the MANUAL real switch (pushPing && a
         // teardown will run) so switchTo probes+pushes+seeds the destination once, post-teardown.
+        if (!isRealSwitch && path) pendingLastUsedStampRef.current = path;
         const result = await switchTo(path, {
-          stampLastUsed: !isRealSwitch,
+          stampLastUsed: false,
           seedAfterTeardown: pushPing && isRealSwitch,
         });
         // F28 (Fable NIT): clear the instant-feedback flag the moment switchTo returns — by now the live
@@ -1097,6 +1169,10 @@ function App() {
         // whole revert/reconnect leg (it becomes a resting card again on revert). The `finally` still
         // clears too (belt — covers a throw before this point).
         setPendingConnectPath(null);
+        if (result.superseded || !result.ok) {
+          // No spawn, so there is no attempt for a pending stamp to wait on (WR-02).
+          pendingLastUsedStampRef.current = null;
+        }
         if (result.superseded) {
           // F-7: a no-spawn supersede (Rust bailed vpn_connect → connecting→disconnected). Mark it
           // so the snack shows the neutral «VPN отключён», not red «Connection failed».
@@ -1117,8 +1193,9 @@ function App() {
         }
         if (!isRealSwitch) {
           // 3.7 F-SWITCHDEF (F3): a fresh connect is NOT a switch — no terminal-edge park, no revert.
-          // switchTo already marked last-used on accept; the status is driven by vpn-status events
-          // (Подключение → Подключено/Ошибка), exactly like the pre-Phase-14 plain connect.
+          // The status is driven by vpn-status events (Подключение → Подключено/Ошибка), exactly like
+          // the pre-Phase-14 plain connect. Last-used is NOT stamped here: `pendingLastUsedStampRef`
+          // (armed above) stamps it on the `connected` edge and drops it on `error`/`disconnected`.
           return { accepted: true };
         }
         // B's process spawned. Now park on the REAL terminal edge: the vpn-status listener resolves
@@ -1260,6 +1337,35 @@ function App() {
   const configsRef = useRef(configPingSource.configs);
   configsRef.current = configPingSource.configs;
 
+  // WR-02 (03.1 review): the pending «last used» stamp (`pendingLastUsedStampRef`, declared next to
+  // performSwitch) is written here for a TRAY connect. The tray emits `vpn-flow` before routing
+  // resolve, spawn and handshake, so the announcement proves nothing about the server; stamping it
+  // there would let an unreachable server, a routing refusal or a spawn error move the manifest
+  // marker, which drives the list order and the tray's choice after a relaunch. (Within the session
+  // the tray connects the pointer Rust committed at accept, so the marker is not its target there;
+  // the launch auto-connect follows the app-level pointer when one is set and usable — WR-05.)
+
+  // G-03.1-5: heal a `tt_config_path` written in the Windows extended-length spelling.
+  //
+  // 3.0.0's tray door persisted the canonical `\\?\C:\…` form as the active pointer. Comparisons
+  // already treat it as the same file as its card (normalizePath strips the prefix); this effect
+  // only stops the stale spelling from travelling further — into vpn_connect's stored pointer and
+  // back out through the tray — by rewriting it to the manifest entry's own spelling once the
+  // list has loaded.
+  //
+  // Deliberately narrow: only the verbatim prefix, checked on the RAW string, and only when a
+  // listed config matches. A pointer that differs merely in separators or case is left alone
+  // (useAutoConnect hands the app's own spelling to vpn_connect and that behaviour is pinned),
+  // and a pointer matching nothing is left as stored.
+  useEffect(() => {
+    const current = config.configPath;
+    if (!current || !(current.startsWith("\\\\?\\") || current.startsWith("//?/"))) return;
+    const match = configPingSource.configs.find((c) => samePath(c.path, current));
+    if (!match || match.path === current) return;
+    setConfig((prev) => (prev.configPath === current ? { ...prev, configPath: match.path } : prev));
+    localStorage.setItem("tt_config_path", match.path);
+  }, [configPingSource.configs, config.configPath]);
+
   useEffect(() => {
     const unlistenPromise = listen<VpnFlowEvent>(
       VPN_FLOW_EVENT,
@@ -1267,6 +1373,8 @@ function App() {
         const { action, origin, configPath } = event.payload || {};
         if (origin !== "tray" && origin !== "failover") return;
         if (action === "disconnect") {
+          // A tray disconnect ends the attempt the pending stamp belonged to (WR-02).
+          pendingLastUsedStampRef.current = null;
           onExternalDisconnect();
         } else if (action === "connect" && configPath) {
           setConfig((prev) => ({ ...prev, configPath }));
@@ -1289,16 +1397,28 @@ function App() {
           // Adopting a connect IS a use of that server, so the persisted marker moves with it.
           //
           // Deliberately inside the SHARED branch, so it covers `tray` as well as `failover`: a
-          // tray connect is just as much a use of that server, `performSwitch` already stamps the
-          // marker for a manual switch, and stamping only one origin is exactly how the two paths
-          // drift apart (the reason this branch is shared in the first place).
+          // tray connect is just as much a use of that server, `performSwitch` already moves the
+          // marker for a manual switch or a window connect (on the terminal edge), and stamping only
+          // one origin is exactly how the paths drift apart (the reason this branch is shared in the
+          // first place).
+          //
+          // WHEN it stamps differs by origin (WR-02). A failover candidate has ALREADY connected
+          // when Rust announces it, so it stamps at once. A tray connect is announced at the
+          // START of the attempt, so it only records the path here; the status effect below stamps
+          // it on the terminal `connected` edge (the same pending-stamp mechanism a fresh connect
+          // from the window uses, and the same edge a real switch stamps on) and drops it on
+          // `error`/`disconnected` so a failed attempt leaves the previous marker untouched.
           //
           // Fire-and-forget like every other caller: `markLastUsed` never rejects (best-effort —
-          // the tunnel is already up, the marker is bookkeeping) and no config content crosses,
-          // only a manifest id (D-29). The refresh below may therefore re-read the pre-stamp
-          // order; that is cosmetic and self-heals on the next list read, whereas awaiting here
-          // would hold the pointer adoption behind two IPC round-trips.
-          void markLastUsed(configPath);
+          // the marker is bookkeeping) and no config content crosses, only a manifest id (D-29).
+          // The refresh below may therefore re-read the pre-stamp order; that is cosmetic and
+          // self-heals on the next list read, whereas awaiting here would hold the pointer
+          // adoption behind two IPC round-trips.
+          if (origin === "tray") {
+            pendingLastUsedStampRef.current = configPath;
+          } else {
+            void markLastUsed(configPath);
+          }
           connectionPanelRef.current?.refresh();
           // FB-02 (D-04 conformance): announce an AUTOMATIC switch in the window too.
           //
@@ -1332,6 +1452,37 @@ function App() {
       unlistenPromise.then((unlisten) => unlisten());
     };
   }, [onExternalDisconnect, pushSuccess, i18n, markLastUsed]);
+
+  // WR-02: settle the pending «last used» stamp (a tray connect's, or a fresh window connect's) on
+  // the status it reaches.
+  //   - `connected`: the server really answered → stamp it, but only while it is still the active
+  //     config, so a stale announcement can never mark a config the window has since left.
+  //   - `error` / `disconnected`: the attempt failed or was cancelled → forget it; the previous
+  //     marker stays.
+  // The effect runs only when the status VALUE changes (`markLastUsed` is a stable callback), so it
+  // settles the stamp on the next edge that differs from the previous status; it does not depend on
+  // when the announcement or the connect start lands relative to a `connecting` status. If one
+  // render batches an attempt's whole `connecting` → `error` run and the previous status was already
+  // `error`, the effect never sees an edge. The window's own connects therefore drop their stamp
+  // explicitly when `vpn_connect` is refused (`dropLastUsedStamp`, called from `handleConnect` and
+  // the launch auto-connect, and `performSwitch` clears its own), so a refused window connect does
+  // not depend on an edge. What can still linger is a tray connect that ends in that same
+  // no-edge batch. That cannot mark a wrong server: a lingering stamp is used only at a later
+  // `connected` while its path is still the active config (that server did connect), and otherwise
+  // it is dropped by the active-path check, by the next `error`/`disconnected` edge, or by the next
+  // performSwitch, which clears it on entry.
+  // The opposite trade-off: an unrelated `disconnected` between the arm and `connected` drops the
+  // stamp; the marker then simply stays where it was.
+  useEffect(() => {
+    const pending = pendingLastUsedStampRef.current;
+    if (!pending) return;
+    if (status === "connected") {
+      pendingLastUsedStampRef.current = null;
+      if (samePath(pending, activeConfigPathRef.current)) void markLastUsed(pending);
+    } else if (status === "error" || status === "disconnected") {
+      pendingLastUsedStampRef.current = null;
+    }
+  }, [status, markLastUsed]);
 
   // ─── Log viewing ───
   // Logs are surfaced exclusively through the in-window LogPanel overlay

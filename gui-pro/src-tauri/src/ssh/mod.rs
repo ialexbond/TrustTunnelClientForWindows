@@ -20,7 +20,7 @@ pub use server::{
     check_server_installation, uninstall_server, UninstallSelection, fetch_server_config,
     add_server_user, server_restart_service, server_stop_service,
     server_start_service, server_reboot, server_get_logs, server_remove_user,
-    server_get_available_versions, server_upgrade, server_get_stats,
+    server_get_available_versions, server_get_stats,
     server_get_uptime,
     get_server_config, get_cert_info, renew_cert, export_config_deeplink,
     update_config_feature,
@@ -204,7 +204,7 @@ pub fn auth_plan(auth_method: Option<&str>, _has_key: bool, _has_password: bool)
 //      silence. The same migration also copied the `.toml` files, which the folder-as-truth
 //      reconciler adopted as brand-new servers: ten manifest rows for five real servers, of
 //      which the UI showed the dead twin. Diagnosed in full, 33 verified findings, in
-//      `.planning/phases/30.1-*/30.1-REGRESSION.md`.
+//      `.planning/milestones/v3.0-phases/30.1-*/30.1-REGRESSION.md`.
 //
 //      THE STANDING RULE THAT REGRESSION LEFT BEHIND, and it outlived the revert: any change to
 //      this helper's answer must bring the DATA with it and REWRITE the absolute paths inside

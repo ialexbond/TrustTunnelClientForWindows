@@ -218,6 +218,16 @@ pub struct AppState {
     /// decision point (including AFTER a successful respawn) to abort to a clean
     /// Disconnected instead of Connected. Starts at `false`.
     pub user_disconnect_requested: Arc<AtomicBool>,
+    /// G-03.1-7 — generation-keyed count of the automatic core restarts after Windows did not
+    /// create the WinTUN adapter: `(connection_generation, retries used)`.
+    ///
+    /// Written ONLY by the sidecar reader task's Terminated arm, just before it schedules
+    /// `start_adapter_retry`; read through `lifecycle::adapter_retries_used`, which counts a ledger
+    /// entry only for the live generation. The count therefore survives the respawns of ONE connect
+    /// (every restarted core keeps the generation it was started for) and is worth zero for the next
+    /// one — a fresh budget only comes with a new user connect, which bumps the generation, so the
+    /// retry can never loop. Starts at `(0, 0)`.
+    pub adapter_retry_ledger: Arc<Mutex<(u64, u32)>>,
     /// Phase 13 (D-06 / §C) — the master notifications gate, MIRRORED from the FE.
     ///
     /// The «Авто-режим» → «Уведомления» toggle lives in the main webview's localStorage
@@ -1236,7 +1246,7 @@ static LOGGED_CONFLICT_SET: Mutex<Option<BTreeSet<String>>> = Mutex::new(None);
 /// The measured defect: `emit_conflict_events` wrote the identical «detected active VPN
 /// adapters from other software: Radmin VPN» line 274 times inside 3h13m of one day's
 /// app.log — one per honored adapter-change wake of the connectivity monitor (298 such
-/// wakes in the same window, see `.planning/phases/32-…/32-G-32-17-ADAPTER-LOG-FLOOD.md`).
+/// wakes in the same window, see `.planning/milestones/v3.0-phases/32-…/32-G-32-17-ADAPTER-LOG-FLOOD.md`).
 /// Line 274 carries no information the first one did not; the cost is a log no human can
 /// read and a 500-entry in-app panel buffer whose real diagnostics get evicted by the
 /// repeats.
@@ -1300,11 +1310,17 @@ fn forget_logged_conflict_set() {
 /// where the process is dying and stale status is harmless. Do NOT reuse this
 /// mid-session: doing so would reintroduce the status drift this phase eliminates.
 /// Any in-session kill must go through `set_vpn_status` (see `vpn_disconnect`).
+///
+/// G-03.1-10: the core now gets the graceful Ctrl+C stop first (`stop_sidecar_on_exit`), so a
+/// quit removes its adapter, routes and killswitch itself instead of leaving them to Windows; the
+/// hard kill stays as the fallback. The slot lock is released before the bounded wait.
 pub fn kill_sidecar_from_state(state: &AppState) {
-    if let Ok(mut guard) = state.sidecar_child.lock() {
-        if let Some(child) = guard.take() {
-            child.child.kill().ok();
-        }
+    let child = match state.sidecar_child.lock() {
+        Ok(mut guard) => guard.take(),
+        Err(_) => None,
+    };
+    if let Some(child) = child {
+        sidecar::stop_sidecar_on_exit(child);
     }
 }
 
@@ -1407,20 +1423,50 @@ pub enum WatchdogDecision {
 /// `VpnStatus::Error` with a precise reason within the 60s window; if the watchdog
 /// then fired and overwrote it with `connect-timeout`, the user would lose the real
 /// diagnosis. When the status is already `Error`, the watchdog is a NoOp.
+///
+/// G-03.1-7: `owns_child` (`watchdog_owns_child`) is the fourth guard. A retried core has its own
+/// re-armed watchdog, so the window armed for the core that FAILED must not end the retried
+/// session — `Abort` requires that the child in the slot is still the one this watchdog was
+/// armed for.
 pub fn decide_timeout_action(
     is_connected: bool,
     disconnecting: bool,
     is_already_error: bool,
     captured_generation: u64,
     live_generation: u64,
+    owns_child: bool,
 ) -> WatchdogDecision {
     let still_owns_session =
         crate::lifecycle::is_current_generation(captured_generation, live_generation);
-    if !is_connected && !disconnecting && !is_already_error && still_owns_session {
+    if !is_connected
+        && !disconnecting
+        && !is_already_error
+        && still_owns_session
+        && owns_child
+    {
         WatchdogDecision::Abort
     } else {
         WatchdogDecision::NoOp
     }
+}
+
+/// Is the child now in the slot still the core a connect-timeout watchdog was armed for?
+/// (G-03.1-7, T-3.1-46)
+///
+/// `captured_pid` is the slot's child pid when the watchdog was armed, `live_pid` what the slot
+/// holds at the deadline.
+/// - `None` captured: armed with an empty slot (the degraded arm) — it owns nothing and stands down
+///   (IN-03). Every arming site arms right after storing the child, so an empty slot means the core
+///   already died, and a core that died has already written its own status; acting on a LATER core
+///   (a retried one) is exactly what this guard prevents.
+/// - `Some(p)` captured: it owns the child only while the slot still holds that very pid. A retried
+///   core (a different pid) has its own re-armed watchdog, and during the retry pause the failed
+///   core is gone and the next is not stored yet (`None`) — in both cases this watchdog stands down
+///   instead of killing a core it was never armed for.
+///
+/// Pure so the identity rule is tested without a process.
+pub fn watchdog_owns_child(captured_pid: Option<u32>, live_pid: Option<u32>) -> bool {
+    captured_pid.is_some_and(|captured| live_pid == Some(captured))
 }
 
 /// Resolve once the single `vpn_status` owner (D-01) reads `Connected`, OR once the
@@ -1488,6 +1534,15 @@ pub fn spawn_connect_timeout_watchdog(app: &tauri::AppHandle, captured_gen: u64)
     let disc_arc = Arc::clone(&state.disconnecting);
     let child_arc = Arc::clone(&state.sidecar_child);
     let gen_arc = Arc::clone(&state.connection_generation);
+    // G-03.1-7: remember WHICH core this watchdog is armed for. Every arming site (vpn_connect, the
+    // tray, `start_adapter_retry`) calls this right after storing the child, so the slot's pid now
+    // is the core the 60 s window belongs to. A retried core is a different pid and gets its own
+    // watchdog; at the deadline this one stands down unless the slot still holds ITS core.
+    let armed_pid = child_arc
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|c| c.child.pid());
 
     tauri::async_runtime::spawn(async move {
         // Wait up to CONNECT_TIMEOUT for `Connected`. If `wait_for_connected`
@@ -1519,6 +1574,13 @@ pub fn spawn_connect_timeout_watchdog(app: &tauri::AppHandle, captured_gen: u64)
         let is_already_error = current_status == VpnStatus::Error;
         let disconnecting = *disc_arc.lock().unwrap_or_else(|e| e.into_inner());
         let live_gen = gen_arc.load(Ordering::SeqCst);
+        // G-03.1-7: the slot must still hold the core this watchdog was armed for (re-checked under
+        // the child lock right before the kill below).
+        let live_pid = child_arc
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|c| c.child.pid());
 
         let decision = decide_timeout_action(
             is_connected,
@@ -1526,6 +1588,7 @@ pub fn spawn_connect_timeout_watchdog(app: &tauri::AppHandle, captured_gen: u64)
             is_already_error,
             captured_gen,
             live_gen,
+            watchdog_owns_child(armed_pid, live_pid),
         );
         if decision == WatchdogDecision::NoOp {
             return; // connected, user-disconnecting, or stale — leave it alone
@@ -1555,6 +1618,10 @@ pub fn spawn_connect_timeout_watchdog(app: &tauri::AppHandle, captured_gen: u64)
                 .eq(&VpnStatus::Connected);
             if connected_now {
                 return; // connected in the TOCTOU window — do NOT kill
+            }
+            // G-03.1-7: a retry may have stored a different core since the decision above.
+            if !watchdog_owns_child(armed_pid, guard.as_ref().map(|c| c.child.pid())) {
+                return; // not the core this window was armed for — leave it to its own watchdog
             }
             if let Some(child) = guard.take() {
                 child.child.kill().ok();
@@ -1960,9 +2027,11 @@ pub async fn vpn_connect(
     // allowing the VPN to establish — blocking here would wrongly refuse a
     // connection that would have worked (T-09-03, disposition: accept). So this is
     // a WARNING ONLY: it records a per-attempt flag (`last_preflight_offline`) the
-    // sidecar's Terminated arm reads to CLASSIFY a never-connected non-zero exit as
-    // `no-internet` vs the generic `sidecar-exit`, and emits a DEV-gated fixed-phrase
-    // marker. It NEVER returns early / blocks the spawn.
+    // sidecar's Terminated arm reads to CLASSIFY a never-connected exit
+    // (`lifecycle::never_connected_exit_reason` — «offline» only ever replaces "server
+    // unreachable" or no reason, never a cause the server answered with), and emits a
+    // DEV-gated fixed-phrase marker. It NEVER returns early / blocks the spawn. The tray
+    // door (`tray_vpn_connect`) measures and records the same flag for its own attempts.
     let preflight_offline = !crate::connectivity::check_adapter_online().await;
     state.last_preflight_offline.store(preflight_offline, Ordering::SeqCst);
     if preflight_offline {
@@ -2150,11 +2219,17 @@ pub async fn vpn_connect(
 /// All failures are logged + tolerated (the supervisor counts the attempt as failed
 /// when `wait_for_connected` times out); this fn never returns an error to keep the
 /// bounded loop simple.
+///
+/// G-03.1-7: `after_spawn_status` is what step 6 writes once the fresh child is stored. The
+/// reconnect supervisor passes `Some(Reconnecting)` (a re-establish, byte-identical to before).
+/// The adapter retry of a FIRST connect passes `None`: the session already shows «Подключение...»
+/// and must keep it, not be relabelled «Переподключение» by a restart the person never sees.
 pub async fn respawn_sidecar(
     app: &tauri::AppHandle,
     config_path: &str,
     log_level: &str,
     captured_generation: u64,
+    after_spawn_status: Option<VpnStatus>,
 ) {
     let state = match app.try_state::<AppState>() {
         Some(s) => s,
@@ -2192,7 +2267,8 @@ pub async fn respawn_sidecar(
     //          chance the core gets to remove its own WFP / killswitch filters before dying.
     //
     //      `vpn_disconnect` runs all three, which is exactly why the manual route never failed.
-    //      Doing the same here costs one bounded graceful wait (≤1.5s) on the first candidate.
+    //      Doing the same here costs one bounded graceful wait on the first candidate — as long as
+    //      the core needs for its own cleanup after the Ctrl+C (G-03.1-10), at most 5s for a stuck core.
     {
         let prior = state.sidecar_child.lock().ok().and_then(|mut g| g.take());
         if let Some(child) = prior {
@@ -2365,7 +2441,8 @@ pub async fn respawn_sidecar(
             "INFO",
             "[reconnect] disconnect observed after spawn — killing fresh child, not storing (T-10-05)",
         );
-        child.child.kill().ok();
+        // G-03.1-10: graceful first — a fresh core may already hold the adapter.
+        crate::sidecar::kill_sidecar(child).await.ok();
         return;
     }
 
@@ -2391,7 +2468,8 @@ pub async fn respawn_sidecar(
             "INFO",
             "[reconnect] generation advanced during respawn (a switch/manual connect took over) — killing stale A-retry child, not storing (FAB-R1)",
         );
-        child.child.kill().ok();
+        // G-03.1-10: graceful first — a fresh core may already hold the adapter.
+        crate::sidecar::kill_sidecar(child).await.ok();
         return;
     }
 
@@ -2424,7 +2502,136 @@ pub async fn respawn_sidecar(
     // server-silent supervisor already set the per-attempt Reconnecting+«Попытка N/N»
     // before calling us; this keeps the status on Reconnecting through the actual
     // sidecar (re)spawn rather than briefly flipping it to the first-connect label.
-    set_vpn_status(app, &state, VpnStatus::Reconnecting, None);
+    //
+    // G-03.1-7: only when the caller asked for a status. The adapter retry passes `None` and leaves
+    // the in-progress status the session already shows untouched (no status write at all).
+    if let Some(status) = after_spawn_status {
+        set_vpn_status(app, &state, status, None);
+    }
+}
+
+/// G-03.1-7 — restart the core after Windows did not create the WinTUN adapter, on a connect the
+/// person (or the launch auto-connect, save-and-reconnect, or the tray) started.
+///
+/// Scheduled by the sidecar reader task's Terminated arm once `lifecycle::adapter_failure_outcome`
+/// said `Retry`. After `ADAPTER_RETRY_PAUSE` it restarts the core through `respawn_sidecar(.., None)`
+/// and re-arms the connect-timeout watchdog for the fresh core (its own 60 s window). It writes NO
+/// status while it runs, so «Подключение...» holds; the only Error it can write is the restart
+/// itself failing.
+///
+/// **Why a sync function that spawns a task.** The caller is the reader task inside
+/// `spawn_trusttunnel`; calling an `async fn` that itself awaits `spawn_trusttunnel` from there
+/// would make that future's type recursive, which does not compile. Handing the work to
+/// `tauri::async_runtime::spawn` breaks the cycle — the same shape as
+/// `connectivity::start_reconnect_supervisor`.
+///
+/// **Why through `respawn_sidecar`.** It is the existing reconnect door: teardown of a leftover
+/// child, DNS restore, path confinement, routing rules, the egress guard, and the WR-05 / T-10-05 /
+/// FAB-R1 intent and generation re-checks all come with it, and no fourth spawn door appears (the
+/// door census in `tray.rs` stays at three). Ownership is also checked here, before scheduling
+/// (by the caller) and again after the pause (`adapter_retry_may_respawn`): a disconnect or a newer
+/// connect during the pause makes the retry stand down without touching the status — whoever moved
+/// the session owns it.
+///
+/// Placed AFTER `respawn_sidecar` on purpose: the D-02 source scan measures that function's body up
+/// to the next top-level `pub fn`.
+///
+/// `config_name` is the DISPLAY NAME of the config THIS session connected (captured by the reader
+/// task at spawn, D-29: a display name only, never a path or host). Both «could not restart» Errors
+/// stamp it into `pending_error_config_name` first (IN-02, G-19-6 v3), so the error plate names the
+/// config that FAILED even if `config_path` is repointed before `maybe_fire` reads it.
+pub fn start_adapter_retry(
+    app: tauri::AppHandle,
+    captured_generation: u64,
+    attempt: u32,
+    config_name: String,
+) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(crate::lifecycle::ADAPTER_RETRY_PAUSE).await;
+
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        // Everything the decision reads, in one place, so the before-spawn and after-spawn checks
+        // cannot drift apart.
+        let may_respawn = |state: &AppState| {
+            let status = *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner());
+            crate::lifecycle::adapter_retry_may_respawn(
+                captured_generation,
+                state.connection_generation.load(Ordering::SeqCst),
+                state.disconnecting.lock().map(|g| *g).unwrap_or(false),
+                state.user_disconnect_requested.load(Ordering::SeqCst),
+                status,
+            )
+        };
+        if !may_respawn(&state) {
+            crate::logging::log_app(
+                "INFO",
+                "[vpn] adapter retry stood down — the session was disconnected or replaced during the pause (G-03.1-7)",
+            );
+            return;
+        }
+
+        // The same saved config and log level the supervisor hand-off reads.
+        let config_path = state.config_path.lock().ok().and_then(|g| g.clone());
+        let log_level = state
+            .log_level
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| "info".to_string());
+        let Some(config_path) = config_path else {
+            crate::logging::log_app(
+                "WARN",
+                "[vpn] adapter retry has no saved config path — showing the error (G-03.1-7)",
+            );
+            if let Ok(mut g) = state.pending_error_config_name.lock() {
+                *g = Some(config_name.clone());
+            }
+            set_vpn_status(
+                &app,
+                &state,
+                VpnStatus::Error,
+                Some(crate::lifecycle::ADAPTER_CREATION_FAILED_REASON.to_string()),
+            );
+            return;
+        };
+
+        crate::logging::log_app(
+            "INFO",
+            &format!("[vpn] restarting the core after the WinTUN adapter failure, retry {attempt} (G-03.1-7)"),
+        );
+        respawn_sidecar(&app, &config_path, &log_level, captured_generation, None).await;
+
+        let stored = state
+            .sidecar_child
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+        if stored {
+            // The fresh core gets its own connect-timeout window. The window armed for the core
+            // that failed is bound to that core's pid and no longer applies (`watchdog_owns_child`).
+            spawn_connect_timeout_watchdog(&app, captured_generation);
+        } else if may_respawn(&state) {
+            // The restart itself could not be performed (config outside the data root, unreadable
+            // routing rules, spawn failure) and nobody else moved the session: end «Подключение...»
+            // honestly instead of leaving it hanging. An unreadable rules file recorded its own
+            // cause in `last_error`; keep that one, it sends the person to the right screen.
+            let rules_unreadable = state
+                .last_error
+                .lock()
+                .map(|g| g.as_deref() == Some(crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON))
+                .unwrap_or(false);
+            let reason = crate::lifecycle::adapter_restart_failure_reason(rules_unreadable);
+            crate::logging::log_app(
+                "WARN",
+                "[vpn] adapter retry could not restart the core — showing the error (G-03.1-7)",
+            );
+            if let Ok(mut g) = state.pending_error_config_name.lock() {
+                *g = Some(config_name.clone());
+            }
+            set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+        }
+    });
 }
 
 #[tauri::command]
@@ -3246,6 +3453,7 @@ mod tests {
                 /*is_already_error=*/ false,
                 captured,
                 live,
+                /*owns_child=*/ true,
             ),
             WatchdogDecision::Abort,
         );
@@ -3261,6 +3469,7 @@ mod tests {
                 /*is_already_error=*/ false,
                 5,
                 5,
+                /*owns_child=*/ true,
             ),
             WatchdogDecision::NoOp,
         );
@@ -3278,6 +3487,7 @@ mod tests {
                 /*is_already_error=*/ false,
                 5,
                 5,
+                /*owns_child=*/ true,
             ),
             WatchdogDecision::NoOp,
         );
@@ -3296,6 +3506,7 @@ mod tests {
                 /*is_already_error=*/ true,
                 5,
                 5,
+                /*owns_child=*/ true,
             ),
             WatchdogDecision::NoOp,
         );
@@ -3313,9 +3524,54 @@ mod tests {
                 /*is_already_error=*/ false,
                 /*captured=*/ 5,
                 /*live=*/ 6,
+                /*owns_child=*/ true,
             ),
             WatchdogDecision::NoOp,
         );
+    }
+
+    // ── G-03.1-7: the watchdog only kills the core it was armed for ─────────
+
+    #[test]
+    fn watchdog_owns_the_child_it_was_armed_for_and_nothing_else() {
+        // IN-03: armed with an empty slot (the degraded arm) it owns NOTHING, whatever is live
+        // later. Every arming site arms right after storing the child, so an empty slot means the
+        // core already died — and a core that died has already written its own status. Acting on
+        // a later core (a retried one) is exactly what this guard exists to prevent.
+        assert!(!watchdog_owns_child(None, None));
+        assert!(!watchdog_owns_child(None, Some(10)));
+        // Same core still stored: the watchdog's own.
+        assert!(watchdog_owns_child(Some(10), Some(10)));
+        // A retried core replaced it: the window armed for the failed one must not kill the new one.
+        assert!(!watchdog_owns_child(Some(10), Some(11)));
+        // The retry pause: the failed core is gone and the next one is not stored yet.
+        assert!(!watchdog_owns_child(Some(10), None));
+    }
+
+    #[test]
+    fn a_watchdog_that_does_not_own_the_child_never_aborts() {
+        // owns_child=false forces NoOp for EVERY combination of the other inputs, including the
+        // one that would otherwise abort (not connected, not disconnecting, no error, same generation).
+        for is_connected in [false, true] {
+            for disconnecting in [false, true] {
+                for is_already_error in [false, true] {
+                    for (captured, live) in [(5u64, 5u64), (5, 6)] {
+                        assert_eq!(
+                            decide_timeout_action(
+                                is_connected,
+                                disconnecting,
+                                is_already_error,
+                                captured,
+                                live,
+                                /*owns_child=*/ false,
+                            ),
+                            WatchdogDecision::NoOp,
+                            "connected={is_connected} disconnecting={disconnecting}                              error={is_already_error} gen={captured}/{live}",
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // ── Stale-sidecar kill is image-validated (02-10, T-10-01) ─────────────
@@ -3868,6 +4124,7 @@ mod tests {
             reconnect_in_progress: Arc::new(AtomicBool::new(false)),
             last_preflight_offline: Arc::new(AtomicBool::new(false)),
             user_disconnect_requested: Arc::new(AtomicBool::new(false)),
+            adapter_retry_ledger: Arc::new(Mutex::new((0, 0))),
             notifications_enabled: Arc::new(AtomicBool::new(true)),
             pending_connect_origin: Arc::new(Mutex::new(crate::notify::ConnectOrigin::Manual)),
             pending_connect_ping: Arc::new(Mutex::new(None)),
@@ -4639,6 +4896,78 @@ mod tests {
             "the one allowed defaulting read has moved OUT of `refresh_group_caches` — the count \
              above is now guarding something nobody has reasoned about",
         );
+    }
+
+    /// The body of `start_adapter_retry` (production source only, whole-line comments dropped), or
+    /// a panic explaining why it could not be measured. The needle is built at runtime and only the
+    /// text before the test module is searched, so this test's own literals cannot be the match.
+    fn adapter_retry_body() -> String {
+        let source = include_str!("./vpn.rs");
+        let production =
+            d02_strip_line_comments(source.split("\n#[cfg(test)]").next().unwrap_or(source));
+        let needle = format!("\npub fn {}(", "start_adapter_retry");
+        let hits = production.matches(needle.as_str()).count();
+        assert_eq!(
+            hits, 1,
+            "cannot measure `start_adapter_retry`: {hits} definitions, expected exactly 1 — renamed, \
+             removed or duplicated. This is a FAILURE, not a pass.",
+        );
+        let after = production.split(needle.as_str()).nth(1).unwrap_or("");
+        let end = after.find("\n#[tauri::command]").unwrap_or(after.len());
+        after[..end].to_string()
+    }
+
+    #[test]
+    fn the_adapter_retry_rechecks_ownership_around_the_restart_and_picks_its_reason_through_the_seam() {
+        // WR-02: `start_adapter_retry` needs a live AppHandle, so its wiring is pinned by reading
+        // the source. Each assertion is something a later edit can drop with every pure decision
+        // test still green.
+        let body = adapter_retry_body();
+        let before = body
+            .find("may_respawn(&state)")
+            .expect("the retry no longer checks ownership before the restart");
+        let restart = body
+            .find("respawn_sidecar(")
+            .expect("the retry no longer restarts through respawn_sidecar (the existing door)");
+        assert!(before < restart, "ownership must be checked BEFORE the restart");
+        assert!(
+            body[restart..].contains("may_respawn(&state)"),
+            "ownership must be checked AGAIN after the restart before an Error is written",
+        );
+        assert!(
+            body[restart..].contains("captured_generation, None)"),
+            "the retry restarts with `None`: the session must stay «Подключение...», not become \
+             «Переподключение»",
+        );
+        assert!(
+            body[restart..].contains("spawn_connect_timeout_watchdog("),
+            "a restarted core needs its own connect-timeout window",
+        );
+        assert!(
+            body.contains("adapter_restart_failure_reason("),
+            "the reason shown when the restart could not be performed must come from the pure seam",
+        );
+    }
+
+    #[test]
+    fn every_error_the_adapter_retry_writes_names_the_config_that_failed() {
+        // IN-02 (G-19-6 v3): the error plate names the config that FAILED, stamped in
+        // `pending_error_config_name` just before the Error is written, because `config_path` can
+        // be repointed between deciding the Error and `maybe_fire` reading it — and an unconsumed
+        // stamp is left free for a later, unrelated Error to inherit. The Terminated arm's
+        // exhausted branch and the generic path already stamp; the two «could not restart» Errors
+        // of `start_adapter_retry` must too.
+        let body = adapter_retry_body();
+        let writes: Vec<usize> = body.match_indices("set_vpn_status(").map(|(i, _)| i).collect();
+        assert_eq!(writes.len(), 2, "expected the two «could not restart» Error writes");
+        let mut previous = 0usize;
+        for at in writes {
+            assert!(
+                body[previous..at].contains("pending_error_config_name"),
+                "an Error written by the adapter retry must stamp `pending_error_config_name` first",
+            );
+            previous = at;
+        }
     }
 
     #[test]

@@ -9,6 +9,7 @@ import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
 import { sanitizeLogMessage } from "../../shared/utils/sanitizeLogMessage";
+import { translateSshError } from "../../shared/utils/translateSshError";
 import { toServerPayload as advancedToPayload } from "../../shared/utils/userAdvanced";
 // Phase 04 Plan 10 (PANEL-03, D-04): the «Учётные данные» credentials section
 // is now a props-only presentational sub-component (pure JSX move).
@@ -371,7 +372,11 @@ export function UserModal({
       // in the template via {{sni}}/{{detail}}, so skip the redundant raw
       // suffix — keeps the banner tight.
       const suffix = sniMatch || wasRolledBack ? "" : `\n\n${t("common.details")}: ${raw}`;
-      setSubmitError(mapped ? `${mapped}${suffix}` : raw);
+      // D-20/T-40-REST: no specific mapping matched — fall back to
+      // translateSshError instead of the raw English code/message, mirroring
+      // UserConfigModal.tsx. The activity-log line above is untouched (still
+      // logs the raw `raw` via sanitizeLogMessage), so diagnosis stays intact.
+      setSubmitError(mapped ? `${mapped}${suffix}` : translateSshError(raw, t));
     } finally {
       setIsSubmitting(false);
     }
@@ -590,7 +595,11 @@ export function UserModal({
         mapped = t("server.users.add_error_hostname_invalid");
       }
       const suffix = sniMatch ? "" : `\n\n${t("common.details")}: ${raw}`;
-      setSubmitError(mapped ? `${mapped}${suffix}` : raw);
+      // D-20/T-40-REST: no specific mapping matched — fall back to
+      // translateSshError instead of the raw English code/message, mirroring
+      // UserConfigModal.tsx. The activity-log line above is untouched (still
+      // logs the raw `raw` via sanitizeLogMessage), so diagnosis stays intact.
+      setSubmitError(mapped ? `${mapped}${suffix}` : translateSshError(raw, t));
     } finally {
       setIsSubmitting(false);
     }

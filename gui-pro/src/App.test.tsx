@@ -2566,11 +2566,42 @@ describe("App", () => {
   // tests assert the new contract: message yes, status-from-log no.
   const FATAL_LOG_MARKERS: Array<[string, string]> = [
     ["Authorization Required", "Authorization Required"],
-    ["WintunCreateAdapter", "WintunCreateAdapter cannot find module"],
-    ["Failed to create listener", "Failed to create listener on port 1080"],
     ["Connection refused", "Connection refused by remote host"],
+  ];
+
+  // G-03.1-7 (plan 03.1-11): these lines appear while the backend is still retrying a WinTUN
+  // adapter failure under «Подключение...», so they raise no message at all; the final reason
+  // comes only through vpn-status.
+  const SILENT_LOG_MARKERS: Array<[string, string]> = [
+    ["WintunCreateAdapter", "WintunCreateAdapter: The system cannot find the file specified"],
+    ["Failed to create listener", "Failed to create listener on port 1080"],
     ["adapter setup timeout", "Failed to setup adapter: Timed out"],
   ];
+
+  it.each(SILENT_LOG_MARKERS)(
+    "vpn-log %s raises no error message and does NOT set status (G-03.1-7)",
+    async (_name, line) => {
+      localStorage.setItem("tt_config_path", "/config.json");
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      await gotoSettings();
+
+      await act(async () => {
+        emitEvent("vpn-log", { message: line, source: "stderr" });
+      });
+
+      expect(statusPanelProps.error).toBeFalsy();
+      expect(statusPanelProps.status).toBe("disconnected");
+    },
+  );
 
   it.each(FATAL_LOG_MARKERS)(
     "vpn-log %s sets a friendly error message but does NOT set status (D-07)",
