@@ -17,6 +17,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::commands::vpn::VpnStatus;
+
 // ---------------------------------------------------------------------------
 // Named timing constants (D-02 / D-05).
 //
@@ -108,6 +110,37 @@ pub const NO_INTERNET_REASON: &str = "no-internet";
 /// `errors.sidecar_exit` on the frontend. D-09/D-29: FIXED ASCII, no exit code.
 pub const SIDECAR_EXIT_REASON: &str = "sidecar-exit";
 
+// ---------------------------------------------------------------------------
+// AUD-08 / D-04 — the core's own precise reason, parsed from its `Error: <code> <text>`
+// line (`sidecar::core_exit_error_reason`) by a FIXED set of `VpnErrorCode` values
+// (`core/include/vpn/vpn.h`). Each of the six codes below maps ONE numeric
+// `VpnErrorCode`; every other code (including 0/1/4/8, and any code this list does not
+// name) falls back to `SIDECAR_EXIT_REASON` — never a passthrough of the number or the
+// core's own text (D-09/D-29).
+// ---------------------------------------------------------------------------
+
+/// `VpnErrorCode::LOCATION_UNAVAILABLE` (6) and `VpnErrorCode::INITIAL_CONNECT_FAILED`
+/// (9) — both mean the server could not be reached. Maps to `errors.core_server_unreachable`.
+pub const CORE_SERVER_UNREACHABLE_REASON: &str = "core-server-unreachable";
+
+/// `VpnErrorCode::AUTH_REQUIRED` (5). Maps to `errors.auth_required` (reuses the
+/// existing auth text — same failure the user already knows this message for).
+pub const CORE_AUTH_FAILED_REASON: &str = "core-auth-failed";
+
+/// `VpnErrorCode::CERTIFICATE_VERIFICATION_FAILED` (7). Maps to
+/// `errors.core_certificate_failed`.
+pub const CORE_CERTIFICATE_FAILED_REASON: &str = "core-certificate-failed";
+
+/// `VpnErrorCode::INVALID_SETTINGS` (2). Maps to `errors.core_invalid_settings`.
+pub const CORE_INVALID_SETTINGS_REASON: &str = "core-invalid-settings";
+
+/// `VpnErrorCode::ADDR_IN_USE` (3). Maps to `errors.core_address_in_use`.
+pub const CORE_ADDRESS_IN_USE_REASON: &str = "core-address-in-use";
+
+/// `VpnErrorCode::FATAL_CONNECTIVITY_ERROR` (10) — the server refused and asked not to
+/// be retried (e.g. device-limit exceeded). Maps to `errors.core_fatal_connectivity`.
+pub const CORE_FATAL_CONNECTIVITY_REASON: &str = "core-fatal-connectivity";
+
 /// Stable, secret-free ASCII reason code emitted when the LOCAL network adapter does
 /// NOT return within the recovery-wait window (02-20 status-UX split). The
 /// connectivity monitor shows «Восстановление» (Recovering) and WAITS for the
@@ -141,6 +174,154 @@ pub const RECOVERY_TIMEOUT_REASON: &str = "recovery-timeout";
 ///
 /// TERMINAL (see `is_terminal_reason`): the file is byte-identical on every retry.
 pub const ROUTING_RULES_UNREADABLE_REASON: &str = "routing-rules-unreadable";
+
+/// The fixed English status reason written when Windows did not create the WinTUN adapter for the
+/// core and the automatic retries (`ADAPTER_RETRY_MAX_ATTEMPTS`) are used up.
+///
+/// Byte-identical to the key the frontend maps in `vpnEventHelpers.ts` `CORE_MESSAGE_I18N` (it
+/// renders `errors.wintun_missing`), so the phrase reaches the screen as localized text and never
+/// as raw English. The test `adapter_reason_is_byte_identical_to_the_frontend_key` reads that file
+/// and holds the two spellings together. D-29: a fixed phrase, never the core's own line.
+///
+/// NOT terminal (see `is_terminal_reason`): Windows finishes or releases the adapter within
+/// seconds, so the failure is retried instead of short-circuited. Under a live supervisor the
+/// retry is bounded by `adapter_supervised_budget_spent`, and the reason is recorded by the
+/// deferring Terminated arm and preferred by `connectivity::terminal_reason_for_give_up`, so the
+/// final Error keeps the diagnosis.
+pub const ADAPTER_CREATION_FAILED_REASON: &str = "VPN adapter creation failed";
+
+/// How many times the app restarts the core after Windows did not create the WinTUN adapter, per
+/// connect: two retries, that is three core starts in all.
+///
+/// Both recorded failures healed on the very next start 9-16 s later. The core's own adapter wait
+/// is about 15 s, so the worst case (three hangs in a row) ends in the honest error after roughly
+/// 50 s, inside the attention span of a person watching «Подключение...». Keyed by connection
+/// generation (`AppState.adapter_retry_ledger`), so a fresh budget only comes with a new user
+/// connect and the retry can never loop. Pinned to 1..=3 by `adapter_retry_budget_is_small_and_paced`.
+pub const ADAPTER_RETRY_MAX_ATTEMPTS: u32 = 2;
+
+/// Pause between a core exit on the adapter failure and the restart. Long enough for Windows to
+/// release the half-created adapter, short enough that «Подключение...» does not feel stuck.
+pub const ADAPTER_RETRY_PAUSE: Duration = Duration::from_secs(3);
+
+/// What the sidecar reader task does about a never-connected exit, once it knows whether the core
+/// reported the WinTUN adapter failure (G-03.1-7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdapterFailureOutcome {
+    /// Not an adapter failure, or the person asked to disconnect: the existing never-connected
+    /// classification (`never_connected_exit_reason`) decides.
+    NotAdapter,
+    /// Restart the core; `attempt` counts from 1 and never exceeds `ADAPTER_RETRY_MAX_ATTEMPTS`.
+    Retry { attempt: u32 },
+    /// The budget is used up: write the honest error once.
+    Exhausted,
+}
+
+/// Decide what a never-connected core exit means for the adapter retry.
+///
+/// Pure so the whole table is tested without a process. Either intent flag (the transient
+/// `disconnecting` one or the durable `user_disconnect_requested` one) means the person asked to be
+/// disconnected, and that wins over any retry (T-3.1-43).
+pub fn adapter_failure_outcome(
+    adapter_seen: bool,
+    transient_intent: bool,
+    durable_intent: bool,
+    retries_used: u32,
+) -> AdapterFailureOutcome {
+    if !adapter_seen || transient_intent || durable_intent {
+        AdapterFailureOutcome::NotAdapter
+    } else if retries_used >= ADAPTER_RETRY_MAX_ATTEMPTS {
+        AdapterFailureOutcome::Exhausted
+    } else {
+        AdapterFailureOutcome::Retry { attempt: retries_used + 1 }
+    }
+}
+
+/// The Terminated arm's whole adapter decision, including the guard that used to live beside it
+/// (WR-02): an `Error` that already stands on `vpn_status` (the connect-timeout watchdog, a
+/// supervisor give-up, a fatal marker) is authoritative — the first specific reason wins — so it
+/// beats the adapter decision outright and the arm's existing «keep the reason» path runs.
+/// Otherwise this is `adapter_failure_outcome`.
+///
+/// Pure, so the arm's decision is an assertion and the arm itself only maps the outcome to effects.
+pub fn adapter_arm_outcome(
+    already_error: bool,
+    adapter_seen: bool,
+    transient_intent: bool,
+    durable_intent: bool,
+    retries_used: u32,
+) -> AdapterFailureOutcome {
+    if already_error {
+        AdapterFailureOutcome::NotAdapter
+    } else {
+        adapter_failure_outcome(adapter_seen, transient_intent, durable_intent, retries_used)
+    }
+}
+
+/// The reason that ends «Подключение...» when the adapter retry could not even restart the core
+/// (no saved config, a config outside the data root, unreadable routing rules, a spawn failure)
+/// and nobody else moved the session (WR-02).
+///
+/// An unreadable rules file recorded its own cause in `last_error` (`rules_unreadable`); it sends
+/// the person to the Routing screen where the reset lives, so it is kept. Anything else is the
+/// generic core failure. Pure so the choice is an assertion.
+pub fn adapter_restart_failure_reason(rules_unreadable: bool) -> &'static str {
+    if rules_unreadable {
+        ROUTING_RULES_UNREADABLE_REASON
+    } else {
+        SIDECAR_EXIT_REASON
+    }
+}
+
+/// Retries already used for `live_generation`, read from the `(generation, count)` ledger.
+///
+/// A ledger written for an older connection counts as zero: the budget is per connect, and only a
+/// user connect (which bumps the generation) starts a new one.
+pub fn adapter_retries_used(ledger: (u64, u32), live_generation: u64) -> u32 {
+    if ledger.0 == live_generation { ledger.1 } else { 0 }
+}
+
+/// May the scheduled adapter retry restart the core right now? Checked before the retry is
+/// scheduled and again after the pause (T-3.1-43).
+///
+/// True only while the retry still owns the session: the captured generation is the live one, no
+/// intent flag is raised, and the status is still `Connecting` — a FIRST connect. Anything else
+/// means somebody else moved the session and owns its status now.
+///
+/// `Reconnecting` is deliberately NOT accepted (IN-01): it is the supervisor's status, the
+/// Terminated arm never schedules a retry while a supervisor is live (it defers, CR-02), and the
+/// supervisor tears its child down while still holding `reconnect_in_progress`. So no reachable path
+/// retries a `Reconnecting` session, and accepting it would only open a way to spawn a second core
+/// next to a live supervisor.
+pub fn adapter_retry_may_respawn(
+    captured_generation: u64,
+    live_generation: u64,
+    transient_intent: bool,
+    durable_intent: bool,
+    status: VpnStatus,
+) -> bool {
+    is_current_generation(captured_generation, live_generation)
+        && !transient_intent
+        && !durable_intent
+        && status == VpnStatus::Connecting
+}
+
+/// Has the reconnect supervisor's loop used up its share of core starts on the WinTUN adapter
+/// failure? (WR-01, G-03.1-7)
+///
+/// `adapter_failures` counts the attempts of ONE `run_reconnect_loop` call that ended on
+/// `ADAPTER_CREATION_FAILED_REASON`, the one just finished included. A first connect makes
+/// `1 + ADAPTER_RETRY_MAX_ATTEMPTS` core starts before it shows the adapter error; the supervised
+/// path gets exactly the same number, so a persistent adapter fault (a driver blocked by policy or
+/// an antivirus, a stuck adapter) ends in about a minute with the precise reason instead of
+/// spending the whole `RECONNECT_MAX_ATTEMPTS` budget (roughly three minutes of «Переподключение»
+/// per candidate) and then reporting a generic give-up.
+///
+/// Pure so the bound is an assertion. Attempts that ended on any other reason do not count here:
+/// they keep the ordinary budget.
+pub fn adapter_supervised_budget_spent(adapter_failures: u32) -> bool {
+    adapter_failures > ADAPTER_RETRY_MAX_ATTEMPTS
+}
 
 /// Stable, secret-free ASCII reason code emitted when the CA-2 path-confinement guard
 /// REFUSES a connect because the `.toml` it was handed does not live inside the app's data
@@ -349,6 +530,60 @@ pub fn should_reconnect(was_intentional: bool, was_connected: bool) -> bool {
     !was_intentional && was_connected
 }
 
+/// Classify a never-connected sidecar exit (AUD-08 / D-03).
+///
+/// The exit CODE is deliberately not an input. The C++ core exits `0` on a terminal
+/// failure (upstream `trusttunnel_client.cpp`, `VPN_SS_DISCONNECTED` branch — not
+/// changed by this fix), so a zero code says nothing about who ended the session; the
+/// old `sidecar.rs` condition (`was_intentional || exit_code == 0`) read that zero as
+/// "the person disconnected" on every never-connected startup failure, which is
+/// exactly the «VPN отключён» lie this function replaces.
+///
+/// Classification is by the program's own INTENT state instead: `transient_intent`
+/// (`AppState.disconnecting` — one process-wide flag, the same `Arc` every spawn door
+/// hands to `spawn_trusttunnel`, NOT a per-child one; it is safe to read here only
+/// because every deliberate kill of an older child also bumps the generation, so that
+/// child's exit is dropped before it reaches this function) OR `durable_intent`
+/// (`AppState.user_disconnect_requested`) — either one means the person asked, and the
+/// exit is `Disconnected` with no reason (`None`). This mirrors the existing
+/// transient-OR-durable shape `commands::vpn::connect_cancelled` already uses for the
+/// same two flags.
+///
+/// When nobody asked, the offline verdict of the pre-flight probe wins ONLY over the
+/// reasons an offline machine can actually produce: "server unreachable" (core codes
+/// 6/9) and no parsed reason at all. The probe is a heuristic — `vpn_connect` says at
+/// the call that hotel, corporate and captive networks routinely fail it while the VPN
+/// still connects — so it must never replace a reason that proves otherwise: a code the
+/// SERVER answered with (auth 5, certificate 7, device limit 10) means the machine
+/// reached the server, and a LOCAL code (settings 2, address in use 3) has nothing to do
+/// with the network. Those are surfaced as-is (D-04). The first version let the offline
+/// verdict win over everything, which told a person with a wrong password to go check
+/// their Wi-Fi (deep review of AUD-08, H-1). With no core reason parsed and the probe
+/// online, the exit falls back to the generic `SIDECAR_EXIT_REASON` — still an honest
+/// `Error`, never `Disconnected`.
+///
+/// D-05: this function only NARROWS when `Disconnected` is returned (both intent flags
+/// false) — it never widens it, so the normal disconnect path (`transient_intent`
+/// true) is unaffected, and a never-connected failure is never handed to the reconnect
+/// supervisor (`should_reconnect` above is unaffected — it is gated on `was_connected`,
+/// which is always `false` on the path that calls this function).
+pub fn never_connected_exit_reason(
+    transient_intent: bool,
+    durable_intent: bool,
+    preflight_offline: bool,
+    core_reason: Option<&'static str>,
+) -> Option<&'static str> {
+    if transient_intent || durable_intent {
+        return None;
+    }
+    match core_reason {
+        Some(reason) if reason != CORE_SERVER_UNREACHABLE_REASON => Some(reason),
+        _ if preflight_offline => Some(NO_INTERNET_REASON),
+        Some(reason) => Some(reason),
+        None => Some(SIDECAR_EXIT_REASON),
+    }
+}
+
 /// Has the supervisor exhausted its bounded budget? (D-02)
 ///
 /// `attempt` is 1-based (the first try is attempt 1). Returns true once we have
@@ -379,11 +614,16 @@ pub fn is_current_generation(captured: u64, live: u64) -> bool {
 /// Is this failure reason TERMINAL — i.e. never recoverable by simply retrying the
 /// same connect? (02-10, Tier-3, T-10-03)
 ///
-/// The reconnect supervisor's bounded loop should NOT burn all three attempts on a
-/// failure that a retry cannot fix: wrong credentials, an invalid config, or a
-/// missing/unusable VPN adapter will fail identically every time. Short-circuiting on
-/// these surfaces the honest error to the user IMMEDIATELY instead of after ~45s of
-/// pointless retries (a worse UX and a DoS-ish waste).
+/// The reconnect supervisor's bounded loop should NOT burn its attempts on a
+/// failure that a retry cannot fix: wrong credentials or an invalid config will fail
+/// identically every time. Short-circuiting on these surfaces the honest error to the
+/// user IMMEDIATELY instead of after minutes of pointless retries (a worse UX and a
+/// DoS-ish waste).
+///
+/// A failed WinTUN adapter creation is deliberately NOT in this set (G-03.1-7): Windows
+/// finishes or releases the adapter within seconds, so the failure is transient and the
+/// loop retries it with its own bounded budget (`ADAPTER_CREATION_FAILED_REASON`, bounded to
+/// the starts a first connect gets by `adapter_supervised_budget_spent`).
 ///
 /// This is the SINGLE source of the terminal set — both editions match on the exact
 /// derived error strings the sidecar fatal-marker path sets (`sidecar.rs`
@@ -401,9 +641,6 @@ pub fn is_terminal_reason(reason: &str) -> bool {
         reason,
         // Auth failure — same credentials will fail identically on every retry.
         "Authorization failed"
-        // WinTUN adapter could not be created — a missing/blocked adapter does not
-        // heal between two back-to-back respawns.
-        | "VPN adapter creation failed"
         // Malformed config — the file is the same on every attempt.
         | "Configuration parse error. Check your config file."
         // D-02 (30.1 blocker 2): the ROUTING RULES file could not be parsed, so the app does
@@ -618,12 +855,30 @@ pub struct FailoverCandidate {
 /// exactly what `failover_connect_origin(0) → None` exists to prevent, defeated by a string form.
 ///
 /// Deliberately byte-identical in behaviour to the frontend's `normalizePath`
-/// (`gui-pro/src/shared/utils/samePath.ts`): trim, `\` → `/`, lowercase. Both ends of the IPC must
-/// answer «same file?» the same way or the desync just moves. Like its frontend twin this is a
-/// PRESENTATION-layer identity key, never a security boundary — confinement to the portable data
-/// dir stays with `validate_app_path_canonical` (V12), which is unaffected.
+/// (`gui-pro/src/shared/utils/samePath.ts`): trim, `\` → `/`, lowercase, then drop the Windows
+/// extended-length (verbatim) prefix (`//?/unc/` becomes `//`, a bare `//?/` is removed). Both ends
+/// of the IPC must answer «same file?» the same way or the desync just moves.
+///
+/// The parity is a tested contract, not a comment: `gui-pro/src/shared/utils/pathIdentityCases.json`
+/// is read by the vitest suite for `normalizePath` AND by this module's tests for this function, so
+/// the two cannot drift silently.
+///
+/// Why the prefix matters: `std::fs::canonicalize` returns `\\?\C:\…` for an ordinary path, and a
+/// pointer persisted in that spelling used to make the failover queue list the origin twice and
+/// announce a switch to the server the user is already on (the CR-02 class, by another spelling).
+///
+/// Like its frontend twin this is a PRESENTATION-layer identity key, never a security boundary —
+/// confinement to the portable data dir stays with `validate_app_path_canonical` (V12), which is
+/// unaffected.
 pub fn canonical_path_key(path: &str) -> String {
-    path.trim().replace('\\', "/").to_lowercase()
+    let unified = path.trim().replace('\\', "/").to_lowercase();
+    if let Some(rest) = unified.strip_prefix("//?/unc/") {
+        return format!("//{rest}");
+    }
+    if let Some(rest) = unified.strip_prefix("//?/") {
+        return rest.to_string();
+    }
+    unified
 }
 
 /// Which KIND of drop is this: the server went silent, or the user's own uplink is gone? (owner
@@ -885,6 +1140,74 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn never_connected_exit_is_an_error_unless_the_person_asked() {
+        // AUD-08 / D-03: a never-connected sidecar exit is classified by the
+        // program's own INTENT state, never by the exit code (the core exits 0 on
+        // a terminal failure — see trusttunnel_client.cpp — so a zero code says
+        // nothing about who ended the session).
+
+        // Row 1: the transient `disconnecting` flag (process-wide) alone means the
+        // person asked — Disconnected, no reason, regardless of any core reason.
+        assert_eq!(
+            never_connected_exit_reason(true, false, false, Some("core-server-unreachable")),
+            None
+        );
+
+        // Row 2: the durable `AppState.user_disconnect_requested` flag alone also
+        // means the person asked — it WINS over any core reason (durable intent is
+        // authoritative, mirroring `connect_cancelled`'s transient-OR-durable shape).
+        assert_eq!(
+            never_connected_exit_reason(false, true, false, Some("core-server-unreachable")),
+            None
+        );
+
+        // Row 3: nobody asked, and the pre-flight connectivity check saw the
+        // machine as offline — "no internet" beats "server unreachable" (an offline
+        // machine makes every server look unreachable) and beats no reason at all.
+        assert_eq!(
+            never_connected_exit_reason(false, false, true, Some(CORE_SERVER_UNREACHABLE_REASON)),
+            Some(NO_INTERNET_REASON)
+        );
+        assert_eq!(never_connected_exit_reason(false, false, true, None), Some(NO_INTERNET_REASON));
+
+        // Row 3b (deep review of AUD-08, H-1): the pre-flight probe is a heuristic that
+        // routinely reads a working hotel / corporate / captive network as offline
+        // (commands/vpn.rs says so at the probe). A reason the SERVER answered with
+        // (auth 5, certificate 7, device limit 10) proves the machine reached the
+        // server, and a LOCAL reason (settings 2, address in use 3) has nothing to do
+        // with the network — the probe's guess must never replace either with
+        // «Нет подключения к интернету».
+        for reason in [
+            CORE_AUTH_FAILED_REASON,
+            CORE_CERTIFICATE_FAILED_REASON,
+            CORE_FATAL_CONNECTIVITY_REASON,
+            CORE_INVALID_SETTINGS_REASON,
+            CORE_ADDRESS_IN_USE_REASON,
+        ] {
+            assert_eq!(
+                never_connected_exit_reason(false, false, true, Some(reason)),
+                Some(reason),
+                "an offline pre-flight verdict must not mask `{reason}`"
+            );
+        }
+
+        // Row 4: nobody asked, online, and the core reported a precise reason —
+        // that reason is surfaced verbatim (D-04).
+        assert_eq!(
+            never_connected_exit_reason(false, false, false, Some("core-server-unreachable")),
+            Some("core-server-unreachable")
+        );
+
+        // Row 5: nobody asked, online, no core reason parsed — the old
+        // exit-code-0 lie case (a terminal failure with no `Error:` line the
+        // parser recognized) — now honestly `sidecar-exit`, never Disconnected.
+        assert_eq!(
+            never_connected_exit_reason(false, false, false, None),
+            Some(SIDECAR_EXIT_REASON)
+        );
+    }
+
+    #[test]
     fn attempts_bounded_to_max() {
         // D-02: gave_up(attempt, budget) is the give-up boundary (used to skip the sleep after
         // the last attempt) — true AT and beyond the budget, false before it. The real loop runs
@@ -995,8 +1318,11 @@ pub(crate) mod tests {
         // supervisor stops after attempt 1; everything a retry COULD fix returns false.
         // Terminal — match the exact derived strings sidecar.rs fatal markers set.
         assert!(is_terminal_reason("Authorization failed"));
-        assert!(is_terminal_reason("VPN adapter creation failed"));
         assert!(is_terminal_reason("Configuration parse error. Check your config file."));
+        // G-03.1-7: Windows finishes or releases the WinTUN adapter within seconds, so a failed
+        // adapter creation is retried like any other transient failure — not short-circuited.
+        assert!(!is_terminal_reason("VPN adapter creation failed"));
+        assert!(!is_terminal_reason(ADAPTER_CREATION_FAILED_REASON));
         // Transient — a later attempt may succeed, so the loop must keep retrying.
         assert!(!is_terminal_reason("tunnel-lost"));
         assert!(!is_terminal_reason("internet-lost"));
@@ -1011,6 +1337,156 @@ pub(crate) mod tests {
         // on something we do not recognize).
         assert!(!is_terminal_reason(""));
         assert!(!is_terminal_reason("some unrecognized failure"));
+    }
+
+    // ── G-03.1-7: WinTUN adapter-creation failure is retried, bounded ────────
+
+    #[test]
+    fn adapter_reason_is_byte_identical_to_the_frontend_key() {
+        // The status reason is the fixed English phrase the frontend maps through
+        // CORE_MESSAGE_I18N; a one-byte drift would put raw English on a Russian screen.
+        assert_eq!(ADAPTER_CREATION_FAILED_REASON, "VPN adapter creation failed");
+        let helpers = include_str!("../../src/shared/hooks/vpnEventHelpers.ts");
+        assert!(
+            helpers.contains(&format!("\"{ADAPTER_CREATION_FAILED_REASON}\"")),
+            "the frontend reason map must carry the exact phrase",
+        );
+    }
+
+    #[test]
+    fn adapter_retry_budget_is_small_and_paced() {
+        // T-3.1-42: the budget is test-pinned so a retune cannot turn a bounded retry into a loop.
+        assert!((1..=3).contains(&ADAPTER_RETRY_MAX_ATTEMPTS));
+        assert!(ADAPTER_RETRY_PAUSE >= Duration::from_secs(1));
+        assert!(ADAPTER_RETRY_PAUSE <= Duration::from_secs(5));
+    }
+
+    #[test]
+    fn an_adapter_failure_retries_within_the_budget_then_reports_exhausted() {
+        // Not an adapter failure at all → the existing never-connected path.
+        assert_eq!(adapter_failure_outcome(false, false, false, 0), AdapterFailureOutcome::NotAdapter);
+        // The person asked to disconnect (either intent flag) beats any retry.
+        assert_eq!(adapter_failure_outcome(true, true, false, 0), AdapterFailureOutcome::NotAdapter);
+        assert_eq!(adapter_failure_outcome(true, false, true, 0), AdapterFailureOutcome::NotAdapter);
+        assert_eq!(adapter_failure_outcome(true, true, true, 0), AdapterFailureOutcome::NotAdapter);
+        // Within the budget: attempt numbers count from 1.
+        assert_eq!(adapter_failure_outcome(true, false, false, 0), AdapterFailureOutcome::Retry { attempt: 1 });
+        assert_eq!(adapter_failure_outcome(true, false, false, 1), AdapterFailureOutcome::Retry { attempt: 2 });
+        // At and past the budget: the honest error, never one more start.
+        assert_eq!(
+            adapter_failure_outcome(true, false, false, ADAPTER_RETRY_MAX_ATTEMPTS),
+            AdapterFailureOutcome::Exhausted,
+        );
+        assert_eq!(
+            adapter_failure_outcome(true, false, false, ADAPTER_RETRY_MAX_ATTEMPTS + 5),
+            AdapterFailureOutcome::Exhausted,
+        );
+    }
+
+    #[test]
+    fn a_terminal_error_already_standing_beats_the_adapter_decision() {
+        // WR-02: the Terminated arm's whole adapter decision is this one function. An `Error` that
+        // already stands (the 60 s watchdog, a supervisor give-up, a fatal marker) is
+        // authoritative — the FIRST specific reason wins — so whatever the adapter latch and the
+        // ledger say, the outcome is NotAdapter and the existing «keep the reason» path runs.
+        for seen in [false, true] {
+            for transient in [false, true] {
+                for durable in [false, true] {
+                    for used in 0..=ADAPTER_RETRY_MAX_ATTEMPTS + 1 {
+                        assert_eq!(
+                            adapter_arm_outcome(true, seen, transient, durable, used),
+                            AdapterFailureOutcome::NotAdapter,
+                            "already_error must win (seen={seen} transient={transient} \
+                             durable={durable} used={used})",
+                        );
+                    }
+                }
+            }
+        }
+        // With no Error standing it is exactly the intent/budget table.
+        for seen in [false, true] {
+            for transient in [false, true] {
+                for durable in [false, true] {
+                    for used in 0..=ADAPTER_RETRY_MAX_ATTEMPTS + 1 {
+                        assert_eq!(
+                            adapter_arm_outcome(false, seen, transient, durable, used),
+                            adapter_failure_outcome(seen, transient, durable, used),
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            adapter_arm_outcome(false, true, false, false, 0),
+            AdapterFailureOutcome::Retry { attempt: 1 },
+        );
+        assert_eq!(
+            adapter_arm_outcome(false, true, false, false, ADAPTER_RETRY_MAX_ATTEMPTS),
+            AdapterFailureOutcome::Exhausted,
+        );
+    }
+
+    #[test]
+    fn a_failed_adapter_restart_keeps_the_routing_cause_and_otherwise_says_sidecar_exit() {
+        // WR-02: which reason ends «Подключение...» when the restart itself could not be performed.
+        // An unreadable rules file recorded its own cause and sends the person to the Routing
+        // screen; anything else is the generic core failure.
+        assert_eq!(adapter_restart_failure_reason(true), ROUTING_RULES_UNREADABLE_REASON);
+        assert_eq!(adapter_restart_failure_reason(false), SIDECAR_EXIT_REASON);
+    }
+
+    #[test]
+    fn a_supervised_adapter_failure_gets_the_same_starts_as_a_first_connect() {
+        // WR-01: a first connect makes 1 + ADAPTER_RETRY_MAX_ATTEMPTS core starts before it shows
+        // the adapter error; the supervisor's loop counts the attempts that ended on the adapter
+        // reason against the SAME number of starts, so a persistent fault costs about a minute
+        // there too, not the whole 10-attempt reconnect budget.
+        for failures in 0..=ADAPTER_RETRY_MAX_ATTEMPTS {
+            assert!(
+                !adapter_supervised_budget_spent(failures),
+                "{failures} adapter failure(s) is still within the starts a first connect gets",
+            );
+        }
+        assert!(adapter_supervised_budget_spent(ADAPTER_RETRY_MAX_ATTEMPTS + 1));
+        assert!(adapter_supervised_budget_spent(ADAPTER_RETRY_MAX_ATTEMPTS + 10));
+        // Compile-time on purpose: both are constants, and the adapter bound only means something
+        // while it is tighter than the general reconnect budget.
+        const { assert!(ADAPTER_RETRY_MAX_ATTEMPTS + 1 < RECONNECT_MAX_ATTEMPTS) };
+    }
+
+    #[test]
+    fn adapter_retry_ledger_only_counts_for_its_own_generation() {
+        // A ledger written for an older connection never carries into a newer one.
+        assert_eq!(adapter_retries_used((7, 2), 8), 0);
+        assert_eq!(adapter_retries_used((7, 1), 7), 1);
+        assert_eq!(adapter_retries_used((0, 0), 0), 0);
+    }
+
+    #[test]
+    fn adapter_retry_may_respawn_only_for_the_live_unwanted_in_progress_session() {
+        use crate::commands::vpn::VpnStatus;
+        // IN-01: only a FIRST connect is retried. `Reconnecting` is the supervisor's status, and the
+        // Terminated arm defers to a live supervisor instead of scheduling a retry, so no reachable
+        // path retries a `Reconnecting` session — and if one ever did it would spawn a second core
+        // next to the supervisor's (the CR-02 race).
+        assert!(
+            adapter_retry_may_respawn(5, 5, false, false, VpnStatus::Connecting),
+            "a first connect must be retried",
+        );
+        for stop in [
+            VpnStatus::Reconnecting,
+            VpnStatus::Connected,
+            VpnStatus::Disconnected,
+            VpnStatus::Error,
+            VpnStatus::Recovering,
+            VpnStatus::Disconnecting,
+        ] {
+            assert!(!adapter_retry_may_respawn(5, 5, false, false, stop), "{stop:?} must not be retried");
+        }
+        // A bumped generation (a newer connect or a disconnect) or either intent flag stands it down.
+        assert!(!adapter_retry_may_respawn(5, 6, false, false, VpnStatus::Connecting));
+        assert!(!adapter_retry_may_respawn(5, 5, true, false, VpnStatus::Connecting));
+        assert!(!adapter_retry_may_respawn(5, 5, false, true, VpnStatus::Connecting));
     }
 
     // ── FAB-R1 (Fable-5 review of Phase 14): respawn store guard ────────────
@@ -3674,7 +4150,7 @@ pub(crate) mod tests {
         let announced: Vec<&String> = groups.iter().map(|g| &g.subject).collect();
         let strays: Vec<String> = deferred
             .iter()
-            .filter(|(_, s)| !announced.iter().any(|a| *a == s))
+            .filter(|(_, s)| !announced.contains(&s))
             .map(|(i, s)| format!("{s}   <- statement {i}: {}", body[*i]))
             .collect();
         assert!(
@@ -3994,11 +4470,11 @@ pub(crate) mod tests {
 
         let is_termination = |l: &str| {
             let mut tokens = l.split_whitespace();
-            match (tokens.next(), tokens.next()) {
-                (Some("!insertmacro"), Some("CheckIfAppIsRunning")) => true,
-                (Some("nsis_tauri_utils::FindProcess"), _) => true,
-                _ => false,
-            }
+            matches!(
+                (tokens.next(), tokens.next()),
+                (Some("!insertmacro"), Some("CheckIfAppIsRunning"))
+                    | (Some("nsis_tauri_utils::FindProcess"), _)
+            )
         };
 
         let first_removal = body
@@ -4393,6 +4869,49 @@ pub(crate) mod tests {
             .filter(|p| canonical_path_key(p) == canonical_path_key("C:\\cfg\\A.toml"))
             .count();
         assert_eq!(origin_hits, 1);
+    }
+
+    // The parity contract with the frontend: `normalizePath` (samePath.ts) is tested against this
+    // very file, so the two "same file?" keys cannot drift apart silently. It includes the Windows
+    // extended-length spellings that `std::fs::canonicalize` produces (gap G-03.1-5).
+    const PATH_IDENTITY_CASES: &str =
+        include_str!("../../src/shared/utils/pathIdentityCases.json");
+
+    #[test]
+    fn canonical_path_key_agrees_with_the_shared_path_identity_table() {
+        let rows: serde_json::Value =
+            serde_json::from_str(PATH_IDENTITY_CASES).expect("pathIdentityCases.json is valid JSON");
+        let rows = rows.as_array().expect("the table is a JSON array");
+        assert!(rows.len() >= 8, "the shared table lost rows: {}", rows.len());
+        let mut wrong = Vec::new();
+        for row in rows {
+            let input = row["input"].as_str().expect("row.input is a string");
+            let key = row["key"].as_str().expect("row.key is a string");
+            let got = canonical_path_key(input);
+            if got != key {
+                wrong.push(format!("{input:?}: expected {key:?}, got {got:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "canonical_path_key disagrees with normalizePath on: {wrong:#?}");
+    }
+
+    #[test]
+    fn failover_queue_does_not_list_a_verbatim_spelled_origin_twice() {
+        // The origin arrives from a persisted pointer in the extended-length spelling
+        // (`\\?\C:\…`); the manifest holds the plain one. The origin must lead exactly once and
+        // never come back from the manifest, or the walk spends two attempts on one dead server
+        // and announces a «switch» to the server the user is already on (CR-02 class).
+        let manifest = vec![
+            candidate("a", "C:\\cfg\\A.toml", 0),
+            candidate("b", "C:\\cfg\\B.toml", 1),
+        ];
+        let queue = failover_queue(&manifest, &[], "\\\\?\\C:\\cfg\\A.toml");
+        assert_eq!(queue, ["\\\\?\\C:\\cfg\\A.toml", "C:\\cfg\\B.toml"]);
+
+        let mut keys: Vec<String> = queue.iter().map(|p| canonical_path_key(p)).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), queue.len(), "no server may be queued twice");
     }
 
     #[test]

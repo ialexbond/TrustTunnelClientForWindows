@@ -606,6 +606,29 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_masks_password_with_semicolon_and_comma() {
+        // D-09 (MR3-04 companion): ssh::sanitize::validate_vpn_password permits `;`
+        // and `,` in a VPN password, so a real password can contain them. Unlike the
+        // FE `sanitizeLogMessage` bug (D-07, a bare-token stop-character class), this
+        // Rust path redacts by replacing the WHOLE remainder of the line after the
+        // key+separator (`redact_assignment_line`), so it was never bounded by a
+        // per-character stop set — this is a regression guard, not a fix.
+        let result = sanitize("password = Ab;cd,ef!");
+        assert!(!result.contains("Ab"), "password value must be fully redacted: {result}");
+        assert!(!result.contains(";cd"), "no fragment after ';' may survive: {result}");
+        assert!(!result.contains(",ef!"), "no fragment after ',' may survive: {result}");
+
+        // `vpn_password:` (prefixed key) does not match SENSITIVE_KEYS' exact-prefix
+        // `starts_with("password")` check — that is a SEPARATE key-matching concern
+        // from D-07/D-09 (which is about the VALUE's stop-character set), and no
+        // production log line uses this shape (real writes are `password = "..."`,
+        // see routing_rules.rs/config.rs tests). This assertion only pins that an
+        // unrelated line on a following line is never swallowed by the redactor.
+        let multiline = sanitize("vpn_password: Ab;cd,ef!\nnext line kept");
+        assert!(multiline.contains("next line kept"), "unrelated lines must survive: {multiline}");
+    }
+
+    #[test]
     fn sanitize_preserves_prose_without_key_block() {
         // Regression guard: a normal log line that merely mentions "key" (no PEM
         // markers) is untouched — only real PEM/OpenSSH key blocks are redacted.

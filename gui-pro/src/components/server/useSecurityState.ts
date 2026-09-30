@@ -409,7 +409,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess)
   // Tauri-команда и backend-функция. Владелец выпилил контроль осознанно — менять порт
   // SSH из приложения нормально не получалось. Живой backend с живыми тестами, но без
   // единой точки рендера, читался как случайная поломка и уже стоил одного код-ревью и
-  // мис-скоупленной фазы; см. .planning/phases/26-control-panel-restore-ssh-port-change/26-CONTEXT.md.
+  // мис-скоупленной фазы; см. .planning/milestones/v3.0-phases/26-control-panel-restore-ssh-port-change/26-CONTEXT.md.
 
   // P UAT 2026-05-04 — SSH-key actions УДАЛЕНЫ из hook surface вместе с UI
   // (generateSshKey/exportSshKeyBackup/disablePasswordAuth/enablePasswordAuth/

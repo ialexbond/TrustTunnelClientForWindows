@@ -79,12 +79,12 @@ OpenAI, инструменту Microsoft APM, установщику MakeMKV, м
 ## Скачать и установить
 
 Установщик выложен на [странице выпусков](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
-Сейчас там есть только **Pro 3.0.0**: файлы всех прежних выпусков, включая установщики Light,
-удалены. Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по ней видно, что файл
-скачался целиком:
+Там лежат установщики **Pro начиная с версии 3.0.0**: файлы всех более ранних выпусков, включая
+установщики Light, удалены. Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по
+ней видно, что файл скачался целиком:
 
 ```powershell
-Get-FileHash .\TrustTunnel.Client.Pro_3.0.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\TrustTunnel.Client.Pro_3.1.0_x64-setup.exe -Algorithm SHA256
 ```
 
 Сравните результат с содержимым `.sha256`. Подлинность издателя эта сумма не подтверждает: она
@@ -138,7 +138,7 @@ VPN-серверу лежит в его `.toml`-конфиге открытым 
 | | Pro | Light |
 |---|---|---|
 | Можно скачать | да | **нет**, файлы прежних выпусков удалены |
-| Последняя версия | `3.0.0` | `2.7.0` |
+| Последняя версия | `3.1.0` | `2.7.0` |
 | Подключение к VPN | да | да |
 | Маршрутизация (что идёт через VPN, что напрямую) | да | да |
 | Управление своим сервером по SSH | да | нет |
@@ -222,19 +222,22 @@ VPN, где достаточно установленного в системе 
 отключение интернета. Графическое приложение написано с нуля здесь, в исходном проекте его нет.
 
 Ядро работает отдельным процессом и закрывается вместе с приложением. Сейчас поставляется версия
-ядра `1.1.5`; с номерами версий изданий она никак не связана.
+ядра upstream `1.1.7` с нашими правками (список — в начале `CHANGELOG.md`); с номерами версий изданий
+она никак не связана.
 
 Приложение — Tauri 2, интерфейс на React 19 и TypeScript, нативная часть на Rust.
 
 ### Ветки репозитория
 
 На `master` лежит только само приложение и его проверки. Исходники C++-ядра и сборочная система
-лежат на `release/tt-win-3.0.0` и в тегах выпусков; полное дерево берите оттуда. Собранный бинарник
-ядра в репозитории не хранится, его нужно собрать.
+каждой версии лежат на её собственной ветке `release/tt-win-X.Y.Z` (для текущего ядра —
+`release/tt-win-3.1.0`) и в тегах выпусков; полное дерево берите оттуда. Собранный бинарник ядра в
+репозитории не хранится, его нужно собрать.
 
 `CHANGELOG.md` в корне — это журнал изменений C++-ядра, а не приложения (записи с `0.90.4` за август
-2022 по `1.1.5` за сентябрь 2026). Что изменилось в самом приложении, написано в описании каждого
-выпуска и в окне «Что нового».
+2022 по `1.1.7` за сентябрь 2026), скопированный из апстрима как есть: изменения самого форка в эти
+записи не попадают, они перечислены отдельно в начале файла. Что изменилось в самом приложении,
+написано в описании каждого выпуска и в окне «Что нового».
 
 ## Лицензия
 
@@ -284,10 +287,11 @@ If the core process is killed hard or crashes, its firewall filters can outlive 
 machine with no internet at all. Killing `trusttunnel_client.exe` or rebooting clears it.
 
 This is a fork of [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
-The C++ VPN core comes from upstream and ships as a separate sidecar process, version `1.1.5`; the
-GUI is written here. Core sources live on the `release/tt-win-3.0.0` branch and in the release tags,
-not on `master`. The root `CHANGELOG.md` is the core's changelog, not the application's; the
-application has its own release notes.
+The C++ VPN core comes from upstream and ships as a separate sidecar process, version upstream
+`1.1.7` plus our changes (listed at the top of `CHANGELOG.md`); the GUI is written here. Core sources
+for the current release live on the `release/tt-win-3.1.0` branch and in the release tags, not on
+`master`. The root `CHANGELOG.md` is the core's changelog, not the application's — its release
+entries are upstream's; the application has its own release notes.
 
 Everything here, core and application alike, is under the Apache License 2.0 (`LICENSE`). `NOTICE`
 records who holds what: the C++ core and the protocol are `Copyright 2020 AdGuard Software Ltd`, the

@@ -106,7 +106,7 @@ describe("GroupChip", () => {
   // in jsdom is the accessible name, keyboard reachability, and the absence of the zero-opacity
   // utility on the arrow and on every element wrapping it. The appearance itself is shown by the
   // Storybook story `Removable` and confirmed by human UAT in dark and light theme; the repo-level
-  // machine check is .planning/phases/24-*/scripts/hover-reveal-guard.sh.
+  // machine check is .planning/milestones/v3.0-phases/24-*/scripts/hover-reveal-guard.sh.
 
   it("exposes every move arrow by role and accessible name", () => {
     renderChip({ currentAction: "proxy" });

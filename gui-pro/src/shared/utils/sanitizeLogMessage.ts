@@ -35,7 +35,10 @@ const REDACTED = "[redacted]";
  * Matches a credential key (password, with optional prefix like vpn/new and an
  * optional camelCase boundary) followed by an assignment (`=`, `:`) and a value
  * that is either quoted (`"..."` / `'...'`) or a bare run of non-space,
- * non-delimiter characters. The KEY (group 1) + separator (group 2) are kept;
+ * non-brace, non-quote characters (MR3-04, D-07: `,` and `;` are part of the
+ * secret — ssh/sanitize.rs::validate_vpn_password allows both in a VPN
+ * password, so the value ends at whitespace, a closing brace, or a quote, not
+ * at those two characters). The KEY (group 1) + separator (group 2) are kept;
  * the VALUE is dropped.
  *
  * Built as a single source-string so we can recompile per call (regex /g state
@@ -50,8 +53,20 @@ const CREDENTIAL_KEY = "(?:[a-z]*_?)?password";
 //     allow at most two short lowercase words so a long sentence can't pull an
 //     unrelated trailing token in as a "secret".
 const SEPARATOR = "[\"']?(?:\\s+[a-z]+){0,2}\\s*[:=]\\s*";
-// quoted value (double or single) OR a bare token up to a delimiter/whitespace
-const VALUE = `(?:"[^"]*"|'[^']*'|[^\\s,;}"']+)`;
+// quoted value (double or single) OR a bare token up to a delimiter/whitespace.
+// MR3-04 (D-07): `,` and `;` were previously stop characters here, but
+// `ssh/sanitize.rs::validate_vpn_password` PERMITS both in a VPN password —
+// so a password like `Ab;cd,ef!` only had its leading `Ab` fragment redacted
+// and the rest (`;cd,ef!`) leaked verbatim into the activity log. The bare
+// value now ends only at whitespace, a closing brace, or a quote — the
+// CREDENTIAL_KEY + SEPARATOR prefix (unchanged) is what keeps prose without a
+// credential key out of the capture (D-08), not this class.
+// WR-01 (03-REVIEW.md): accepted trade-off — a log line that glues the NEXT
+// key=value pair directly onto the password with no separating whitespace
+// (e.g. `password=Ab;cd,ef!,port=22`) now has that adjacent field swallowed
+// into the redacted span too; over-redaction, never leakage, is the intended
+// failure mode (see the `D-07 trade-off` test in sanitizeLogMessage.test.ts).
+const VALUE = `(?:"[^"]*"|'[^']*'|[^\\s}"']+)`;
 
 function buildRedactor(): RegExp {
   // `i` → mixed-case keys (Password, VpnPassword); `g` → every occurrence.

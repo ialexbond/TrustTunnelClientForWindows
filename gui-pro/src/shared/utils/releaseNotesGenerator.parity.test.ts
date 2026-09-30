@@ -4,6 +4,9 @@ import { parseReleaseNotes } from "./parseReleaseNotes";
 
 // Vite raw import — loaded at bundle time, no Node.js fs required. The same bytes the app renders.
 import realNotes from "../release-notes/RELEASE_NOTES.ru.md?raw";
+// Same import style as shellOpenScope.test.ts: the real config file, as text, parsed by hand — no
+// build-time transform stands between this assertion and the version the build itself will read.
+import tauriConfSource from "../../../src-tauri/tauri.conf.json?raw";
 
 /**
  * Сторож намеренного дублирования.
@@ -86,8 +89,11 @@ describe("release-notes-section.cjs ↔ parseReleaseNotes parity", () => {
   });
 
   it("defaults to the version in tauri.conf.json when called with no argument", () => {
-    // Так скрипт и сборка не могут разойтись: обе берут номер версии из одного места.
-    const withArgument = runScript([SCRIPT, "3.0.0"]);
+    // Так скрипт и сборка не могут разойтись: обе берут номер версии из одного места. A literal
+    // here went stale at the very first version bump (3.0.0 -> 3.1.0) and stayed green by
+    // accident — read the real config instead so a future bump without a notes section is red.
+    const installedVersion = (JSON.parse(tauriConfSource) as { version: string }).version;
+    const withArgument = runScript([SCRIPT, installedVersion]);
     const withoutArgument = runScript([SCRIPT]);
 
     expect(withoutArgument.status).toBe(0);

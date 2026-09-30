@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { isValidCidr, parseCidr, formatCidr, describeCidr } from "./cidr";
+import {
+  isValidCidr,
+  parseCidr,
+  formatCidr,
+  describeCidr,
+  isValidIpv4,
+  isValidIpv6,
+  isValidIpv6Cidr,
+  isValidRouteAddress,
+} from "./cidr";
 
 describe("isValidCidr", () => {
   it("accepts empty (no restriction)", () => {
@@ -123,5 +132,74 @@ describe("describeCidr", () => {
 
   it("returns empty string for invalid", () => {
     expect(describeCidr("not.valid")).toBe("");
+  });
+});
+
+// MR3-06 (D-17/D-19): the routing-rule address field must reject impossible IPv4 addresses and
+// accept an IPv6 subnet written with a slash. These helpers back AddRuleInput.validateEntry.
+describe("isValidIpv4", () => {
+  it("accepts 0.0.0.0", () => {
+    expect(isValidIpv4("0.0.0.0")).toBe(true);
+  });
+
+  it("accepts 255.255.255.255", () => {
+    expect(isValidIpv4("255.255.255.255")).toBe(true);
+  });
+
+  it("rejects octet 256", () => {
+    expect(isValidIpv4("256.1.1.1")).toBe(false);
+  });
+
+  it("rejects too few octets", () => {
+    expect(isValidIpv4("1.2.3")).toBe(false);
+  });
+
+  it("rejects too many octets", () => {
+    expect(isValidIpv4("01.2.3.4.5")).toBe(false);
+  });
+});
+
+describe("isValidIpv6", () => {
+  it.each([
+    ["::1", true],
+    ["2001:db8::", true],
+    ["fe80::1", true],
+    ["2001:0db8:0000:0000:0000:ff00:0042:8329", true],
+    [":::::", false],
+    ["2001:db8:::1", false],
+    ["1:2:3:4:5:6:7:8:9", false],
+    ["gggg::1", false],
+    ["12345::1", false],
+  ])("isValidIpv6(%s) === %s", (input, expected) => {
+    expect(isValidIpv6(input)).toBe(expected);
+  });
+});
+
+describe("isValidIpv6Cidr", () => {
+  it.each([
+    ["2001:db8::/32", true],
+    ["::/0", true],
+    ["2001:db8::/128", true],
+    ["2001:db8::/129", false],
+    ["2001:db8::/", false],
+    ["/32", false],
+  ])("isValidIpv6Cidr(%s) === %s", (input, expected) => {
+    expect(isValidIpv6Cidr(input)).toBe(expected);
+  });
+});
+
+describe("isValidRouteAddress (D-19: the five-input contract)", () => {
+  it.each([
+    ["999.999.999.999", false],
+    ["192.168.1.1", true],
+    ["10.0.0.0/24", true],
+    ["2001:db8::/32", true],
+    ["999.999.999.999/99", false],
+  ])("isValidRouteAddress(%s) === %s", (input, expected) => {
+    expect(isValidRouteAddress(input)).toBe(expected);
+  });
+
+  it("still accepts empty via isValidCidr semantics (no restriction)", () => {
+    expect(isValidCidr("")).toBe(true);
   });
 });

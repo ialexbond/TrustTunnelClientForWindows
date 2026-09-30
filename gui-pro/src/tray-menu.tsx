@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { usePointerContextLoss } from "./shared/hooks/usePointerPresence";
+import { stampDocumentLang } from "./shared/utils/documentLang";
 import "./shared/styles/tokens.css";
 import "./index.css";
 
@@ -91,6 +92,15 @@ function TrayMenu() {
       if (resolvedUnlisten) resolvedUnlisten();
     };
   }, []);
+
+  // MR3-03 (D-16): this window has the same defect notification.tsx/index.html
+  // had — tray-menu.html declares a static lang="ru" while these labels switch
+  // to English the moment `locale` resolves "en" (from tray_menu_current_locale
+  // above, or a live language switch while the tray menu is open). Same shared
+  // helper the main window uses (documentLang.ts) — one mapping, three windows.
+  useEffect(() => {
+    stampDocumentLang(locale);
+  }, [locale]);
 
   // Re-check config каждый раз когда окно получает focus (пользователь
   // мог импортировать config пока tray menu было hidden).

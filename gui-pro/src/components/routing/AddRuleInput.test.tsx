@@ -257,6 +257,75 @@ describe("AddRuleInput", () => {
     });
   });
 
+  // ── MR3-06 (D-17/D-19): the five-input honest-validation contract through the real field ──
+  describe("MR3-06: honest address validation", () => {
+    it("rejects 999.999.999.999 with the invalidIp message and does not call onAdd", async () => {
+      renderInput();
+      const input = screen.getByPlaceholderText(/domain\.com/);
+      await userEvent.type(input, "999.999.999.999{Enter}");
+      expect(onAdd).not.toHaveBeenCalled();
+      expect(screen.getByText("Некорректный IP-адрес или подсеть. Примеры: 192.168.1.1, 10.0.0.0/24, 2001:db8::/32")).toBeInTheDocument();
+    });
+
+    it("accepts a valid IPv4 address", async () => {
+      renderInput();
+      const input = screen.getByPlaceholderText(/domain\.com/);
+      await userEvent.type(input, "192.168.1.1{Enter}");
+      expect(onAdd).toHaveBeenCalledWith("proxy", "192.168.1.1");
+    });
+
+    it("accepts a valid IPv4 CIDR", async () => {
+      renderInput();
+      const input = screen.getByPlaceholderText(/domain\.com/);
+      await userEvent.type(input, "10.0.0.0/24{Enter}");
+      expect(onAdd).toHaveBeenCalledWith("proxy", "10.0.0.0/24");
+    });
+
+    it("accepts an IPv6 subnet written with a slash", async () => {
+      renderInput();
+      const input = screen.getByPlaceholderText(/domain\.com/);
+      await userEvent.type(input, "2001:db8::/32{Enter}");
+      expect(onAdd).toHaveBeenCalledWith("proxy", "2001:db8::/32");
+    });
+
+    it("rejects a malformed IPv4 CIDR (bad octets + bad prefix)", async () => {
+      renderInput();
+      const input = screen.getByPlaceholderText(/domain\.com/);
+      await userEvent.type(input, "999.999.999.999/99{Enter}");
+      expect(onAdd).not.toHaveBeenCalled();
+      expect(screen.getByText("Некорректный IP-адрес или подсеть. Примеры: 192.168.1.1, 10.0.0.0/24, 2001:db8::/32")).toBeInTheDocument();
+    });
+
+    // D-17: digits-and-dots that is not a valid IPv4 must no longer fall through to the Latin
+    // domain branch (it has a dot, so the old regex silently accepted it as a "domain").
+    it("rejects 1.2.3 as an invalid IP, not as a domain", async () => {
+      renderInput();
+      const input = screen.getByPlaceholderText(/domain\.com/);
+      await userEvent.type(input, "1.2.3{Enter}");
+      expect(onAdd).not.toHaveBeenCalled();
+      expect(screen.getByText("Некорректный IP-адрес или подсеть. Примеры: 192.168.1.1, 10.0.0.0/24, 2001:db8::/32")).toBeInTheDocument();
+    });
+
+    it("still accepts example.com, *.example.com, сайт.рф and geoip:ru", async () => {
+      renderInput();
+      const input = screen.getByPlaceholderText(/domain\.com/) as HTMLInputElement;
+
+      await userEvent.type(input, "example.com{Enter}");
+      expect(onAdd).toHaveBeenLastCalledWith("proxy", "example.com");
+
+      await userEvent.type(input, "*.example.com{Enter}");
+      expect(onAdd).toHaveBeenLastCalledWith("proxy", "*.example.com");
+
+      await userEvent.type(input, "сайт.рф{Enter}");
+      expect(onAdd).toHaveBeenLastCalledWith("proxy", "сайт.рф");
+
+      fireEvent.change(input, { target: { value: "geoip:ru" } });
+      const buttons = screen.getAllByRole("button");
+      fireEvent.click(buttons[buttons.length - 1]);
+      expect(onAdd).toHaveBeenLastCalledWith("proxy", "geoip:ru");
+    });
+  });
+
   // ── Phase 22 UAT fixes — regression guards for the two defects the owner found live ──
   describe("suggestions dropdown (Phase 22 UAT fixes)", () => {
     /** Open the geo dropdown and return the portal element it renders into. */

@@ -211,6 +211,31 @@ describe("ConfigList", () => {
     ).toBeInTheDocument();
   });
 
+  // G-03.1-5: a tray connect hands the window the Windows extended-length spelling of the
+  // config path (`\\?\C:\…`, what std::fs::canonicalize returns) while the manifest card holds
+  // the plain `C:\…`. The two must name ONE card — the real pair, not one shared constant.
+  it("marks the connected card when activeConfigPath is the verbatim (`\\\\?\\`) spelling of the card path", () => {
+    const cfgA: ConfigSummary = { ...cfgDe, id: "cfg-a", name: "A", path: "C:\\cfg\\a.toml", last_used: true };
+    const cfgB: ConfigSummary = { ...cfgNl, id: "cfg-b", name: "B", path: "C:\\cfg\\b.toml", last_used: false };
+    renderWithProviders(
+      <ConfigList
+        configs={[cfgA, cfgB]}
+        loading={false}
+        onImport={vi.fn()}
+        status="connected"
+        activeConfigPath={"\\\\?\\C:\\cfg\\b.toml"}
+        onConnect={vi.fn()}
+      />,
+    );
+    const cards = screen.getAllByTestId("config-card");
+    // B is hoisted to the lead and carries «Отключить».
+    expect(cards[0]).toHaveAttribute("data-lead", "true");
+    expect(cards[0]).toHaveTextContent("B");
+    expect(
+      within(cards[0]).getByRole("button", { name: i18n.t("connection.card.disconnect") }),
+    ).toBeInTheDocument();
+  });
+
   // Truth: with nothing connected, every card reads «Подключить» — no card shows
   // «Переключиться» (a switch only makes sense while a tunnel is up elsewhere).
   it("shows «Подключить» on every card when nothing is connected", () => {

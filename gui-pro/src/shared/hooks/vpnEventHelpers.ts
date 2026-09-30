@@ -19,7 +19,9 @@ import { formatError } from "../utils/formatError";
 //
 // Keep this list in sync with the backend reason codes (status-lifecycle.md §Reason-коды):
 // connect-timeout / reconnect-gave-up / recovery-timeout / no-internet / sidecar-exit /
-// disconnect-failed / failover-exhausted.
+// disconnect-failed / failover-exhausted / core-server-unreachable / core-auth-failed /
+// core-certificate-failed / core-invalid-settings / core-address-in-use /
+// core-fatal-connectivity.
 export const REASON_CODE_I18N: Record<string, string> = {
   "connect-timeout": "errors.connect_timeout",
   "reconnect-gave-up": "errors.reconnect_gave_up",
@@ -52,6 +54,21 @@ export const REASON_CODE_I18N: Record<string, string> = {
   // one thing that fixes it (add the server again), because there is no control that can move a
   // file the app is forbidden to touch.
   "config-outside-data-dir": "errors.config_outside_data_dir",
+  // AUD-08 / D-04: the core's own precise reason for a failed FIRST connect, parsed by
+  // `sidecar::core_exit_error_reason` from the core's `Error: <code> <text>` log line
+  // (D-29: only the fixed code crosses this boundary, never the `text`). Six of the
+  // eleven `VpnErrorCode` values (`core/include/vpn/vpn.h`) get their own sentence;
+  // every other code falls back to `sidecar-exit` above. None of these six render
+  // «отключён» — a never-connected failure is always an Error, never a Disconnected.
+  "core-server-unreachable": "errors.core_server_unreachable",
+  // Reuses the existing auth text (`errors.auth_required`) — the same failure the user
+  // already knows this message for, whether caught by the `fatal_marker_error` string
+  // match or by this later, exit-line-based parse.
+  "core-auth-failed": "errors.auth_required",
+  "core-certificate-failed": "errors.core_certificate_failed",
+  "core-invalid-settings": "errors.core_invalid_settings",
+  "core-address-in-use": "errors.core_address_in_use",
+  "core-fatal-connectivity": "errors.core_fatal_connectivity",
 };
 
 // F16 (14-UAT round 2): the C++ sidecar emits a handful of FIXED English phrases on the

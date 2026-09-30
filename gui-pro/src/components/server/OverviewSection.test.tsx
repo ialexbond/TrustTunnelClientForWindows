@@ -10,7 +10,7 @@ import type { ServerState } from "./useServerState";
 // (default null) which the Security card's TLS sub-tile reads; makeCertRaw
 // builds a JSON cert payload whose notAfter is N days out so we can pin the
 // TLS day-band labels (ok / warning / expired / no-cert). See
-// gui-pro/src/test/fixtures/index.ts + .planning/phases/03-…/03-RESEARCH.md §3.
+// gui-pro/src/test/fixtures/index.ts + .planning/milestones/v3.0-phases/03-…/03-RESEARCH.md §3.
 import { makeState, makeCertRaw } from "../../test/fixtures";
 
 // OverviewSection was redesigned in Phase 11 to a 10-card flex-wrap layout.

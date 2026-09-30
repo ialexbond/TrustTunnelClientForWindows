@@ -3,7 +3,21 @@
 > **Scope:** this is the changelog of the **C++ VPN-core** (the prebuilt `trusttunnel_client` sidecar /
 > VPN library), **not** the GUI app. It tracks the tunnelling core's API, protocol and bug-fix history.
 > The GUI desktop app (Pro / Light) is versioned separately and its user-facing release notes live with
-> the app, not here. Entries below `1.1.0` predate the fork's sync to upstream v1.1.5.
+> the app, not here. The release entries below are upstream's own changelog (TrustTunnel /
+> TrustTunnelClient), copied as they are; the fork's own core changes are not recorded in them. The
+> core that ships with the application is upstream `v1.1.7` plus the fork changes listed in the section
+> right below.
+
+## Fork changes on top of upstream v1.1.7 (not in the entries below)
+
+The core sources carrying these changes are on the `release/tt-win-3.1.0` branch and in the release
+tags such as `v3.1.0-pro`, not on `master`.
+
+- `exclusions_file` (`trusttunnel/src/config.cpp:314`, plus the matching field in `trusttunnel/include/vpn/trusttunnel/config.h`) — exclusions read from a file and appended to `exclusions`.
+- `process_direct_file`, `process_proxy_file`, `process_block_file` (`trusttunnel/src/config.cpp:352-354`, plus the matching fields in `trusttunnel/include/vpn/trusttunnel/config.h`) — per-program rule lists (direct / proxy / block) loaded from files.
+- Per-process routing in `trusttunnel/src/client.cpp` (~223 changed lines, plus the matching members and `#include`s in `trusttunnel/include/vpn/trusttunnel/client.h`) — including copying the application name into the task context instead of holding a pointer into event memory.
+- `trusttunnel/CMakeLists.txt` links `iphlpapi` and `ws2_32` on Windows.
+- The remainder: a settings re-export in `trusttunnel/settings/src/lib.rs`, setup-wizard lint fixes and a Windows-only build dependency under `trusttunnel/setup_wizard/`, and a comment in `conanfile.py`.
 
 All notable changes to this project will be documented in this file.
 
@@ -22,6 +36,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 ### Security
+
+## [1.1.7] - 2026-09-24
+
+### Changed
+
+- Update `dns-libs` to 2.10.2 and `native-libs-common` to 8.1.52
+
+## [1.1.6] - 2026-09-18
+
+### Fixed
+
+- Fixed a crash in the location pinger when an in-progress HTTP/3 ping connection is torn down while the network is unavailable.
 
 ## [1.1.5] - 2026-09-02
 
@@ -433,7 +459,9 @@ For this purpose, new event `VPN_EVENT_CONNECTION_INFO` was introduced in `VpnEv
 
 - VpnLibs is now open-source.
 
-[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5...HEAD
+[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.7...HEAD
+[1.1.7]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.6...v1.1.7
+[1.1.6]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.3...v1.1.4
 [1.0.63]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.62...v1.0.63

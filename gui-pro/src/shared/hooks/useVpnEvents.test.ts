@@ -65,13 +65,21 @@ function makeParams() {
   };
 }
 
-// The 4 fatal markers the backend now emits VpnStatus::Error for (plan 01-01).
-// The frontend must NO LONGER infer status from these log lines (D-07).
-const FATAL_LOG_LINES = [
+// Fatal markers whose log line still enriches the user-facing message (plan 01-01 made the
+// backend the status owner, so the frontend must NEVER infer status from them — D-07).
+const MESSAGE_LOG_LINES = [
   "Authorization Required",
-  "WintunCreateAdapter cannot find module",
-  "Failed to create listener on port 1080",
   "Connection refused by remote host",
+];
+
+// G-03.1-7 (plan 03.1-11): the adapter / listener / adapter-timeout lines also appear while the
+// backend is still honestly retrying a WinTUN adapter failure (plan 03.1-10) under «Подключение...».
+// They must raise neither a message nor a status — the final reason arrives only through
+// vpn-status (CORE_MESSAGE_I18N).
+const SILENT_LOG_LINES = [
+  "OS_TUNNEL_WIN create_wintun_adapter: WintunCreateAdapter: The system cannot find the file specified",
+  "Failed to create listener on port 1080",
+  "Failed to setup adapter: Timed out",
 ];
 
 describe("useVpnEvents", () => {
@@ -85,7 +93,7 @@ describe("useVpnEvents", () => {
   // Status source of truth: status comes ONLY from vpn-status (D-07)
   // ──────────────────────────────────────────────────────────
 
-  it.each(FATAL_LOG_LINES)(
+  it.each(MESSAGE_LOG_LINES)(
     "fatal vpn-log line %s sets error message but NEVER status",
     async (line) => {
       const { setStatus, setError, params } = makeParams();
@@ -111,21 +119,25 @@ describe("useVpnEvents", () => {
     },
   );
 
-  it("the 'Failed to setup adapter: Timed out' line no longer sets status", async () => {
-    const { setStatus, setError, params } = makeParams();
+  it.each(SILENT_LOG_LINES)(
+    "adapter / listener vpn-log line %s raises neither message nor status",
+    async (line) => {
+      const { setStatus, setError, params } = makeParams();
 
-    await act(async () => {
-      renderHook(() => useVpnEvents(params));
-    });
-    setStatus.mockClear();
+      await act(async () => {
+        renderHook(() => useVpnEvents(params));
+      });
+      setStatus.mockClear();
+      setError.mockClear();
 
-    await act(async () => {
-      emitEvent("vpn-log", { message: "Failed to setup adapter: Timed out", level: "error" });
-    });
+      await act(async () => {
+        emitEvent("vpn-log", { message: line, level: "error" });
+      });
 
-    expect(setError).toHaveBeenCalled();
-    expect(setStatus).not.toHaveBeenCalled();
-  });
+      expect(setError).not.toHaveBeenCalled();
+      expect(setStatus).not.toHaveBeenCalled();
+    },
+  );
 
   it("vpn-log fatal line still appends to the log buffer", async () => {
     const { setVpnLogs, params } = makeParams();

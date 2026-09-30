@@ -166,4 +166,71 @@ describe("vpnEventHelpers — reason-code localization", () => {
       expect(localize(phrase)).not.toBe(phrase);
     }
   });
+
+  // ─── AUD-08 / D-04: the core's own precise reason, six new `core-*` codes ───
+  //
+  // A failed first connect used to render «VPN отключён» (D-03, fixed in sidecar.rs/
+  // lifecycle.rs) and, once honestly an Error, a generic timeout instead of the exact
+  // reason the core reported in its first `Error: <code> <text>` log line. These six
+  // codes are the localization half of that fix.
+
+  const CORE_CODES: Record<string, string> = {
+    "core-server-unreachable": "errors.core_server_unreachable",
+    "core-auth-failed": "errors.auth_required",
+    "core-certificate-failed": "errors.core_certificate_failed",
+    "core-invalid-settings": "errors.core_invalid_settings",
+    "core-address-in-use": "errors.core_address_in_use",
+    "core-fatal-connectivity": "errors.core_fatal_connectivity",
+  };
+
+  it("maps each of the six core-* reason codes to its own i18n key", () => {
+    for (const [code, key] of Object.entries(CORE_CODES)) {
+      expect(REASON_CODE_I18N[code]).toBe(key);
+    }
+  });
+
+  it("renders every core-* code as a Russian sentence, never the raw token", () => {
+    i18n.changeLanguage("ru");
+    const localize = makeLocalizeError(i18n);
+    for (const code of Object.keys(CORE_CODES)) {
+      const text = localize(code);
+      expect(text).not.toBe(code);
+      expect(text).toBeTruthy();
+      expect(text).toMatch(/[а-яё]/i);
+    }
+  });
+
+  it("mirrors every core-* code in English", () => {
+    i18n.changeLanguage("en");
+    const localize = makeLocalizeError(i18n);
+    for (const code of Object.keys(CORE_CODES)) {
+      const text = localize(code);
+      expect(text).not.toBe(code);
+      expect(text).toBeTruthy();
+    }
+    i18n.changeLanguage("ru");
+  });
+
+  it("never renders a core-* failure as a disconnect — no new ru.json value contains «отключ»", () => {
+    // D-04: neither the status card nor the notification may say «отключён» for a
+    // failed first connect. Walking the ACTUAL rendered ru text (not just the key
+    // names) is what a passing test proves; the raw JSON is also checked by a
+    // Node-level acceptance command outside vitest (see PLAN.md acceptance criteria).
+    i18n.changeLanguage("ru");
+    const localize = makeLocalizeError(i18n);
+    for (const code of Object.keys(CORE_CODES)) {
+      const text = localize(code) ?? "";
+      expect(text).not.toMatch(/отключ/i);
+    }
+  });
+
+  it("does not swallow the core's own text — code 9 and code 6 collapse to the same sentence, never the parser's raw line", () => {
+    // D-29/D-10: `core_exit_error_reason` (sidecar.rs) already strips the raw line down
+    // to a fixed code before it ever reaches this map — this test guards the FE half of
+    // that contract: the localized sentence never contains anything that looks like the
+    // core's own log shape.
+    const localize = makeLocalizeError(i18n);
+    const text = localize("core-server-unreachable");
+    expect(text).not.toMatch(/Error:\s*\d/);
+  });
 });

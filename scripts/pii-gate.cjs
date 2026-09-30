@@ -186,6 +186,7 @@ const ALLOWED_DOMAINS = new Set([
   "x.com", "telegram.org", "t.me", "llvm.org", "keepachangelog.com", "semver.org", "hetzner.com",
   "wintun.net",                        // WireGuard's WinTUN driver — bundled, and linked in docs
   "react.dev", "apple.com", "jsdelivr.net", "serverfault.com", "openpgp.org", "ytimg.com",
+  "openfontlicense.org",               // SIL OFL steward — named by the bundled font licences, verbatim
 ]);
 
 /*
@@ -445,6 +446,17 @@ function findIPv6(line) {
     if (!value.includes("::") && groups.every((g) => g.length <= 2)) continue;
     const lower = value.toLowerCase();
     if (ALLOWED_IPV6_PREFIXES.some((p) => lower === p || lower.startsWith(p))) continue;
+    /*
+     * P2c — the same address with leading zeros: `2001:0db8:…` is RFC 3849's block exactly as
+     * `2001:db8:…` is, and a validator test of the uncompressed form has to spell it that way.
+     * Compared only against prefixes whose first group is a full four digits, so zero-stripping can
+     * never turn `00fd:` into the one-group `fd` (unique-local) prefix and widen the allowlist.
+     */
+    const unpadded = lower
+      .split(":")
+      .map((g) => (g === "" ? g : g.replace(/^0+(?=[0-9a-f])/, "")))
+      .join(":");
+    if (ALLOWED_IPV6_PREFIXES.some((p) => /^[0-9a-f]{4}:/.test(p) && unpadded.startsWith(p))) continue;
     out.push({ cls: "ipv6", value, column: m.index + 1, rule: "P2:routable-ipv6" });
   }
   return out;

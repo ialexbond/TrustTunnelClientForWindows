@@ -1,0 +1,10 @@
+[
+  { "input": "C:\\cfg\\A.toml", "key": "c:/cfg/a.toml" },
+  { "input": "  c:/CFG/a.TOML  ", "key": "c:/cfg/a.toml" },
+  { "input": "\\\\?\\C:\\cfg\\A.toml", "key": "c:/cfg/a.toml" },
+  { "input": "\\\\?\\c:\\cfg\\a.toml", "key": "c:/cfg/a.toml" },
+  { "input": "//?/C:/cfg/A.toml", "key": "c:/cfg/a.toml" },
+  { "input": "\\\\?\\UNC\\srv\\share\\A.toml", "key": "//srv/share/a.toml" },
+  { "input": "\\\\srv\\share\\A.toml", "key": "//srv/share/a.toml" },
+  { "input": "C:\\cfg\\B.toml", "key": "c:/cfg/b.toml" }
+]

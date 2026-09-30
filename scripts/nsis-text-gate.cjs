@@ -24,11 +24,15 @@
  *   reporting all-clear. Three separate drafts of this gate died of exactly that defect.
  *
  * Invoked as: node scripts/nsis-text-gate.cjs [--post-build[=<app>]] [repo-root]
- *   default      — source files, plus rules 10 and 13 WHENEVER a current emitted script happens to
- *                  be on disk. Runs anywhere; on a tree that has never built, those two say
- *                  «CANNOT MEASURE» through the warning channel and are not counted as passing
- *                  rules. Rule 12 needs no build at all and always runs.
- *   --post-build — additionally asserts what the bundler actually emitted (rules 9, 10 and 13).
+ *   default      — source files, plus rules 10, 13 and 14's EMITTED-SCRIPT half WHENEVER a
+ *                  current emitted script happens to be on disk. Runs anywhere; on a tree that
+ *                  has never built, those say «CANNOT MEASURE» through the warning channel and
+ *                  are not counted as passing rules. Rule 12 needs no build at all and always
+ *                  runs — and so does rule 14's SOURCE half (bundle.copyright in
+ *                  tauri.conf.json): that half is checked and reported every invocation,
+ *                  independent of whether an installer.nsi exists, so a rule 14 PASS never
+ *                  implies the emitted branding line was read when it was not (CR-01).
+ *   --post-build — additionally asserts what the bundler actually emitted (rules 9, 10, 13 and 14).
  *                  Hard-fails when the artifact is absent or stale, so it can never be a silent
  *                  no-op. Run it after `npx tauri build --bundles nsis`, before handing anyone an
  *                  installer — `npm run nsis:check:post` is that invocation, and rule 11 is what
@@ -1575,6 +1579,324 @@ const FIXTURE_HOOK = `!define TT_INSTALL_DIR "$INSTDIR"
         `insertion points. ${totals.data} removal(s) that can reach the user's own files, each ` +
         `inside a block conditioned on this not being an update; ${totals.exempt} removal(s) of ` +
         `the installer's own files and scratch. Rule 12 proves this analyser still rejects.`
+    );
+  }
+}
+
+// ─── RULE 14 — the installer's bottom line names the program ──────────────────────────────────
+//
+// WHY THIS RULE EXISTS. `bundle.copyright` feeds two places through the Tauri NSIS template: the
+// `BrandingText` printed at the bottom of EVERY installer page, and the `LegalCopyright` version
+// resource baked into the installed executable (the "Авторские права" file property). With no
+// value configured, `!define COPYRIGHT ""` renders empty and NSIS falls back to the build
+// toolkit's own default — every person who installs the program sees somebody else's name on the
+// one line that stays on screen through the whole install. Nothing in this gate had ever looked
+// at that line at all, so the owner's stated acceptance for WIN-09 — the first installer screen
+// shows the program's name — could pass over an installer that never gained one.
+//
+// copyrightProblems() is the pure SOURCE-half validator: an absent or empty value; a value that
+// does not name the program first; a value that names the program but never becomes a genuine
+// legal line after it; and any character that would break the rendered NSIS string literal
+// (`!define COPYRIGHT "<value>"`) or trigger NSIS variable expansion once Tauri's template drops
+// the value in, unescaped. The emitted-script half — asserting the rendered `!define COPYRIGHT`
+// and `BrandingText` actually carry this value into the build — is added alongside it below.
+function copyrightProblems(value, productName) {
+  const problems = [];
+  if (typeof value !== "string") {
+    problems.push(
+      `bundle.copyright is missing — the installer's bottom line and the "Авторские права" file ` +
+        `property both fall back to the build toolkit's own default instead of naming the program.`
+    );
+    return problems;
+  }
+  if (!value.trim()) {
+    problems.push(`bundle.copyright is empty — same effect as missing: NSIS prints its own default.`);
+    return problems;
+  }
+  if (typeof productName !== "string" || !productName) {
+    problems.push(`productName is missing, so bundle.copyright "${value}" cannot be checked against it.`);
+    return problems;
+  }
+  if (!value.startsWith(productName)) {
+    problems.push(
+      `bundle.copyright "${value}" does not start with productName "${productName}" — the owner's ` +
+        `acceptance for WIN-09 is that the program's name is the first thing this line shows.`
+    );
+    return problems;
+  }
+  const rest = value.slice(productName.length).replace(/^[.\s]+/, "");
+  if (!/^Copyright\s+\d{4}\s+\S/.test(rest)) {
+    problems.push(
+      `bundle.copyright "${value}" names the program but carries no genuine legal line after it ` +
+        `(expected "Copyright <year> <holder>") — this same string becomes the "Авторские права" ` +
+        `file property, where a bare product name is not a copyright line.`
+    );
+  }
+  const BAD_CHARS = [
+    ['"', "closes the NSIS string literal early"],
+    ["$", "triggers NSIS variable expansion"],
+    ["`", "an unusual NSIS string delimiter, refused outright"],
+    ["\\", "an NSIS escape character"],
+    ["<", "the template renderer's own token delimiter"],
+    [">", "the template renderer's own token delimiter"],
+    ["&", "an entity opener some renderers interpret"],
+    ["'", "can close an alternate NSIS string literal"],
+    ["=", "has special meaning in some NSIS directive contexts"],
+    ["\r", "would break the single-line NSIS string literal"],
+    ["\n", "would break the single-line NSIS string literal"],
+  ];
+  for (const [ch, why] of BAD_CHARS) {
+    if (value.includes(ch)) {
+      problems.push(`bundle.copyright "${value}" contains ${JSON.stringify(ch)} — ${why}.`);
+    }
+  }
+  return problems;
+}
+
+// Fixtures, not faith — same principle as rule 0 and rule 12. Run on every invocation; a
+// validator broken into accepting everything must turn this gate RED (exit 2 via die()), never
+// print PASS over a check that no longer checks anything.
+const COPYRIGHT_FIXTURES = [
+  {
+    what: "product name followed by a genuine legal line",
+    value: "TrustTunnel Client Pro. Copyright 2026 ialexbond",
+    productName: "TrustTunnel Client Pro",
+    expectProblems: false,
+  },
+  { what: "value absent", value: undefined, productName: "TrustTunnel Client Pro", expectProblems: true },
+  { what: "value empty", value: "", productName: "TrustTunnel Client Pro", expectProblems: true },
+  {
+    what: "legal line with no product name first",
+    value: "Copyright 2026 ialexbond",
+    productName: "TrustTunnel Client Pro",
+    expectProblems: true,
+  },
+  {
+    what: "product name with no legal line after it",
+    value: "TrustTunnel Client Pro",
+    productName: "TrustTunnel Client Pro",
+    expectProblems: true,
+  },
+  {
+    what: "double quote breaks the NSIS string literal",
+    value: 'TrustTunnel Client Pro. Copyright 2026 a"b',
+    productName: "TrustTunnel Client Pro",
+    expectProblems: true,
+  },
+  {
+    what: "dollar sign triggers NSIS variable expansion",
+    value: "TrustTunnel Client Pro. Copyright 2026 $x",
+    productName: "TrustTunnel Client Pro",
+    expectProblems: true,
+  },
+];
+for (const f of COPYRIGHT_FIXTURES) {
+  const got = copyrightProblems(f.value, f.productName);
+  if (got.length > 0 !== f.expectProblems) {
+    die(
+      `rule 14 fixture "${f.what}" misjudged: expected ${f.expectProblems ? "problems" : "no problems"}, ` +
+        `got ${JSON.stringify(got)}`
+    );
+  }
+}
+
+/**
+ * The emitted-script half: does the rendered script actually carry `value` into BrandingText?
+ * Two facts, over the composite text the compiler was actually handed — never assumed from the
+ * source key alone, because the source key existing proves nothing about what the template did
+ * with it.
+ *   (1) `!define COPYRIGHT "<text>"` is present, non-empty, and equal to `value`.
+ *   (2) a `BrandingText` statement exists whose argument is either the define reference
+ *       (`${COPYRIGHT}`, quoted or not) or `value` spelled out literally — anything else means the
+ *       template stopped routing the key to the installer's bottom line, and adding the key would
+ *       no longer be enough.
+ * @returns {string[]}
+ */
+function emittedCopyrightProblems(genText, value, genLabel) {
+  const problems = [];
+  const lines = genText.split(/\r?\n/);
+
+  const defineLine = lines.find((l) => /^\s*!define\s+COPYRIGHT\s+"/.test(l));
+  const defineMatch = defineLine && /^\s*!define\s+COPYRIGHT\s+"([^"]*)"/.exec(defineLine);
+  const definedValue = defineMatch ? defineMatch[1] : null;
+  if (definedValue === null) {
+    problems.push(`${genLabel} declares no \`!define COPYRIGHT "..."\` at all.`);
+  } else if (!definedValue) {
+    problems.push(
+      `${genLabel} defines \`!define COPYRIGHT ""\` — empty, so NSIS shows its own default on ` +
+        `every page regardless of what tauri.conf.json says.`
+    );
+  } else if (definedValue !== value) {
+    problems.push(
+      `${genLabel} defines \`!define COPYRIGHT "${definedValue}"\`, which does not match the ` +
+        `configured value "${value}" — the render is stale, or something rewrote it.`
+    );
+  }
+
+  const brandingLine = lines.find((l) => /^\s*BrandingText\b/.test(l));
+  if (!brandingLine) {
+    problems.push(
+      `${genLabel} has no \`BrandingText\` statement at all — the template no longer routes ` +
+        `bundle.copyright to the installer's bottom line, so the key alone is no longer enough.`
+    );
+  } else {
+    const argMatch = /^\s*BrandingText\s+(.+?)\s*$/.exec(brandingLine);
+    const arg = argMatch ? argMatch[1] : "";
+    const isDefineRef = arg === "${COPYRIGHT}" || arg === '"${COPYRIGHT}"';
+    const isLiteral = arg === `"${value}"`;
+    if (!isDefineRef && !isLiteral) {
+      problems.push(
+        `${genLabel}'s \`BrandingText ${arg}\` neither references \${COPYRIGHT} nor carries the ` +
+          `configured value literally — the bottom line is wired to something else.`
+      );
+    }
+  }
+  return problems;
+}
+
+// Emitted-script fixtures — same contract as COPYRIGHT_FIXTURES above: run on every invocation,
+// die() on a misjudged verdict, no build required.
+const EMITTED_COPYRIGHT_FIXTURES = [
+  {
+    what: "define and BrandingText both carry the configured value",
+    genText:
+      '!define COPYRIGHT "TrustTunnel Client Pro. Copyright 2026 ialexbond"\nBrandingText "${COPYRIGHT}"\n',
+    value: "TrustTunnel Client Pro. Copyright 2026 ialexbond",
+    expectProblems: false,
+  },
+  {
+    what: "!define COPYRIGHT is empty — the toolkit default would show",
+    genText: '!define COPYRIGHT ""\nBrandingText "${COPYRIGHT}"\n',
+    value: "TrustTunnel Client Pro. Copyright 2026 ialexbond",
+    expectProblems: true,
+  },
+  {
+    what: "!define COPYRIGHT differs from the configured value",
+    genText: '!define COPYRIGHT "Something Else"\nBrandingText "${COPYRIGHT}"\n',
+    value: "TrustTunnel Client Pro. Copyright 2026 ialexbond",
+    expectProblems: true,
+  },
+  {
+    what: "no BrandingText statement at all",
+    genText: '!define COPYRIGHT "TrustTunnel Client Pro. Copyright 2026 ialexbond"\n',
+    value: "TrustTunnel Client Pro. Copyright 2026 ialexbond",
+    expectProblems: true,
+  },
+];
+for (const f of EMITTED_COPYRIGHT_FIXTURES) {
+  const got = emittedCopyrightProblems(f.genText, f.value, "fixture.nsi");
+  if (got.length > 0 !== f.expectProblems) {
+    die(
+      `rule 14 emitted fixture "${f.what}" misjudged: expected ` +
+        `${f.expectProblems ? "problems" : "no problems"}, got ${JSON.stringify(got)}`
+    );
+  }
+}
+
+{
+  const COPYRIGHT_APPS = (POST_BUILD ? BUILT_APPS : [DEFAULT_BUILT_APP]).filter(
+    (v, i, all) => all.indexOf(v) === i
+  );
+  // Two separate problem buckets, and — below — two separate `rule()` calls, because the two
+  // halves have different availability contracts and a shared bucket is what let CR-01 happen:
+  // a single `rule(14, …)` fired unconditionally, so a tree that had never built printed PASS on
+  // a title about "the installer's bottom line" (the EMITTED script) while having read zero bytes
+  // of it — the exact "green tick over nothing" failure mode this file's own header forbids.
+  //   sourceProblems — bundle.copyright in tauri.conf.json. Needs no build at all, same contract
+  //   as rule 12, and MUST keep reporting every invocation (design intent recorded in
+  //   04-01-PLAN.md: "Keep the behaviour that rule 14 always reports").
+  //   emittedProblems — the rendered installer.nsi. Same availability contract as rules 10/13:
+  //   only counted as a passing/failing rule when something was actually measured, or a real
+  //   problem was found — never a PASS printed over zero emitted scripts.
+  const sourceProblems = [];
+  const emittedProblems = [];
+  let checked = 0;
+  let measured = 0;
+  for (const relApp of COPYRIGHT_APPS) {
+    const app = path.join(ROOT, relApp);
+    if (!APPS.includes(app)) {
+      sourceProblems.push(`rule 14 names ${relApp}, which has no tauri.conf.json`);
+      continue;
+    }
+    const confPath = path.join(app, "tauri.conf.json");
+    let conf;
+    try {
+      conf = JSON.parse(fs.readFileSync(confPath, "utf8").replace(/^﻿/, ""));
+    } catch (e) {
+      sourceProblems.push(`${rel(confPath)} cannot be parsed: ${e.message}`);
+      continue;
+    }
+    checked++;
+    const configuredValue = conf.bundle && conf.bundle.copyright;
+    for (const p of copyrightProblems(configuredValue, conf.productName)) {
+      sourceProblems.push(`${rel(confPath)}: ${p}`);
+    }
+
+    // ── emitted-script half ──────────────────────────────────────────────────────────────────
+    const hooks = subjects.find((s) => s.app === app && s.role === "hooks");
+    if (!hooks) {
+      emittedProblems.push(
+        `${rel(app)}/tauri.conf.json configures no nsis.installerHooks, so there is no emitted ` +
+          `script whose branding line could be measured.`
+      );
+      continue;
+    }
+    const subject = emittedScriptSubject({
+      ruleId: 14,
+      app,
+      hooks,
+      cannotRead: "the branding line of the emitted script",
+      staleClause: "its branding line is not this tree's",
+      problems: emittedProblems,
+    });
+    if (subject.state !== "ready") continue;
+
+    // A second staleness check `emittedScriptSubject` does not make: it compares the artifact
+    // only against the HOOK file, because rules 10 and 13 have no other subject. Rule 14's subject
+    // is bundle.copyright, which lives in tauri.conf.json — an artifact newer than the hook but
+    // older than the CONFIG was rendered before the current copyright value existed, and measuring
+    // it would judge a render that predates the value under test.
+    const genTime = fs.statSync(subject.gen).mtime;
+    const confTime = fs.statSync(confPath).mtime;
+    if (genTime < confTime) {
+      const why =
+        `${rel(subject.gen)} (${genTime.toISOString()}) is OLDER than ${rel(confPath)} ` +
+        `(${confTime.toISOString()}) — the render predates the current bundle.copyright value.`;
+      if (POST_BUILD) {
+        emittedProblems.push(`${why} --post-build was asked for, so this is a FAILURE.`);
+      } else {
+        warn(`rule 14 — CANNOT MEASURE: ${why} Rebuild before measuring.`);
+      }
+      continue;
+    }
+
+    for (const p of emittedCopyrightProblems(subject.genText, configuredValue, rel(subject.gen))) {
+      emittedProblems.push(p);
+    }
+    measured++;
+  }
+
+  // Source half: unconditional, exactly as before this fix — a tree with no build at all still
+  // gets a verdict on bundle.copyright, because that half needs no artifact to check.
+  rule(
+    14,
+    "tauri.conf.json's bundle.copyright names the program, not the build toolkit",
+    sourceProblems,
+    `${checked} config(s) checked`
+  );
+
+  // Emitted half: gated like rules 10 and 13 (see the identical comment at line ~742). A
+  // `rule()` call with an empty problem list PRINTS PASS and counts toward «n/n passed»; doing
+  // that over an artifact nobody opened is CR-01. This still fires as FAIL whenever
+  // emittedProblems is non-empty — including the "no installerHooks configured" and
+  // "--post-build asked for a stale/absent artifact" cases above, which are real problems, not a
+  // skip.
+  if (measured > 0 || emittedProblems.length) {
+    rule(
+      14,
+      "the installer's bottom line names the program, not the build toolkit",
+      emittedProblems,
+      `${measured} emitted script(s) measured`
     );
   }
 }
