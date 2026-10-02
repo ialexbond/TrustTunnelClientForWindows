@@ -79,12 +79,12 @@ OpenAI, инструменту Microsoft APM, установщику MakeMKV, м
 ## Скачать и установить
 
 Установщик выложен на [странице выпусков](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
-Сейчас там есть только **Pro 3.0.0**: файлы всех прежних выпусков, включая установщики Light,
+Сейчас там есть только **Pro 3.1.0**: файлы всех прежних выпусков, включая установщики Light,
 удалены. Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по ней видно, что файл
 скачался целиком:
 
 ```powershell
-Get-FileHash .\TrustTunnel.Client.Pro_3.0.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\TrustTunnel.Client.Pro_3.1.0_x64-setup.exe -Algorithm SHA256
 ```
 
 Сравните результат с содержимым `.sha256`. Подлинность издателя эта сумма не подтверждает: она
