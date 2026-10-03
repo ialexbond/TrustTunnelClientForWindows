@@ -1,187 +1,298 @@
-<!-- markdownlint-disable MD041 MD033 -->
+<!-- markdownlint-disable-next-line MD041 -->
 <p align="center">
-<picture>
-<source media="(prefers-color-scheme: dark)" srcset="https://cdn.adguardcdn.com/website/github.com/TrustTunnel/logo_dark.svg" width="300px" alt="TrustTunnel" />
-<img src="https://cdn.adguardcdn.com/website/github.com/TrustTunnel/logo_light.svg" width="300px" alt="TrustTunnel" />
-</picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/readme-header-dark.svg">
+    <img alt="TrustTunnel Client для Windows" src=".github/assets/readme-header-light.svg" width="460">
+  </picture>
 </p>
 
-<h2 align="center">TrustTunnel Client for Windows v2.6.0</h2>
+Настольное приложение для VPN-протокола **TrustTunnel**: окно с кнопками и настройками вместо
+командной строки. У официального проекта TrustTunnel оболочки для Windows нет, поэтому она сделана
+здесь.
 
-<p align="center">
-Графический клиент для безопасного сетевого соединения по протоколу TrustTunnel.<br>
-Две редакции: <b>Pro</b> (управление сервером + подключение) и <b>Light</b> (только подключение).
-</p>
+Два издания в одном репозитории: **Pro** — подключение, маршрутизация и полное управление своим
+сервером, **Light** — то же самое без управления сервером.
 
-<p align="center">
-  <a href="https://github.com/ialexbond/TrustTunnelClientForWindows/releases">Скачать</a>
-  · <a href="https://github.com/TrustTunnel/TrustTunnel">TrustTunnel Endpoint</a>
-  · <a href="#быстрый-старт">Быстрый старт</a>
-</p>
+**Light сейчас скачать негде.** Она выходила вместе с Pro вплоть до версии `2.7.0`, но файлы старых
+выпусков удалены, а в третьей версии Light не переделывали. Пользуйтесь Pro: она умеет всё то же
+самое, просто с лишним разделом, в который можно не заходить.
 
----
-
-## Две редакции
-
-### TrustTunnel Pro
-
-Полноценный клиент для администраторов: развёртывание сервера через SSH,
-управление пользователями, дашборд, логи, расширенные сетевые настройки.
-
-### TrustTunnel Light
-
-Упрощённый клиент для обычных пользователей: импорт конфига,
-подключение одной кнопкой, маршрутизация. Без серверных настроек.
-
-| Функция | Pro | Light |
-|---|:---:|:---:|
-| Безопасное подключение | + | + |
-| Импорт конфигурации (файл / ссылка / deeplink) | + | + |
-| Маршрутизация (GeoIP, GeoSite, домены, IP) | + | + |
-| Тема (тёмная / светлая), язык (RU / EN) | + | + |
-| Автозапуск, автоподключение, системный трей | + | + |
-| Проверка обновлений и автообновление | + | + |
-| Контроль соединения (мониторинг, реконнект) | + | + |
-| Генератор учётных данных | + | + |
-| Управление сервером (SSH) | + | — |
-| Установка протокола на сервер | + | — |
-| Управление пользователями | + | — |
-| Дашборд (пинг, статистика сервера) | + | — |
-| Безопасность сервера (fail2ban, firewall) | + | — |
-| Просмотр логов | + | — |
-| Настройки соединения (протокол, MTU, Kill Switch, DNS) | + | — |
-| QR-код конфигурации | + | — |
+[Скачать последнюю версию](https://github.com/ialexbond/TrustTunnelClientForWindows/releases/latest)
 
 ---
 
-## Что такое TrustTunnel
+## Прочитайте перед установкой
 
-**TrustTunnel** — протокол адаптивного сетевого взаимодействия, работающий
-поверх стандартных транспортных протоколов (HTTP/2, QUIC).
+### У программы нет цифровой подписи
 
-- Туннелирование TCP, UDP и ICMP трафика
-- Системный сетевой адаптер (TUN) и SOCKS5-прокси
-- Раздельная маршрутизация трафика (split tunneling)
-- Пользовательские DNS-серверы через туннель
-- Post-Quantum криптография (X25519MLKEM768)
+Windows не может подтвердить, кто её выпустил, и при установке покажет предупреждение о неизвестном
+издателе. Сертификат подписи стоит денег и требует проверки личности владельца; он пока не куплен.
+Дешёвых способов получить его у удостоверяющих центров больше нет, так что рассчитывать на подпись
+в обозримом будущем не стоит.
+
+### Защитник Windows дважды помечал программу как вредоносную
+
+`Trojan:Win32/Bearfoos.A!ml` и `Bearfoos.B!ml`. Оба раза срабатывание ложное. Вердикт приходит из
+облака Microsoft по хэшу файла, и прилететь он может не сразу: в одном из случаев файл спокойно
+проработал под Защитником четверо суток и только потом попал в карантин. В карантине файл остаётся
+на диске, вернуть его можно через «Безопасность Windows» → «Журнал защиты» → «Разрешить на
+устройстве». Каждая новая сборка — новый файл с нулевой репутацией, так что снять это раз и навсегда
+нельзя: срабатывание может повториться на любой следующей версии. Проверяли только Защитника; как
+себя поведут другие антивирусы — никто не смотрел.
+
+### Почему антивирусы срабатывают
+
+Оба раза помечали один и тот же файл: `trusttunnel.exe`, нашу графическую оболочку. VPN-ядро лежит
+в той же папке, подписи у него тоже нет, и его Защитник не тронул ни разу. Претензия у антивируса
+именно к оболочке, которую мы собрали вокруг ядра.
+
+Классификатор смотрит на форму файла, а не на то, чем программа занимается. У нашего совпало сразу
+несколько примет: подписи нет; сборка Rust идёт со `strip` и `LTO`, так что символов почти не
+осталось; внутрь 18 МБ упакован сжатый веб-интерфейс, и для автоматики это выглядит как упаковщик;
+программа требует прав администратора и запускает дочерний процесс, который ставит сетевой драйвер.
+Вдобавок у каждой сборки свой хэш, то есть репутации нет вовсе.
+
+Тот же вердикт регулярно прилетает программам, которые к VPN отношения не имеют: Codex CLI от
+OpenAI, инструменту Microsoft APM, установщику MakeMKV, множеству проектов на Rust. Общее у них
+одно: неподписанный сжатый бинарник, который антивирус видит впервые.
+
+Подпись убрала бы самый весомый пункт этого списка.
+
+### Если интернет пропал совсем
+
+Аварийное отключение интернета (killswitch) принадлежит процессу-ядру, а не приложению: пока ядро
+живо, оно держит сетевые фильтры. При обычном закрытии приложение сперва просит ядро завершиться
+само и ждёт полторы секунды, чтобы то успело снять свои фильтры и маршруты, и только потом убивает
+процесс жёстко.
+
+Если ядро упало или его пришлось добить жёстко, фильтры могут остаться висеть. Выглядит это так:
+приложения закрыто, а интернета нет вообще, ни в браузере, ни где-либо ещё. Лечится снятием процесса
+`trusttunnel_client.exe` в Диспетчере задач или перезагрузкой. Чтобы ядро само снимало фильтры при
+жёстком убийстве, нужна доработка в C++-ядре; она отложена.
+
+### Автор один, тестировщиков нет
+
+Часть функций проверена только автотестами и ни разу не работала на живой машине.
 
 ---
 
-## Быстрый старт
+## Скачать и установить
 
-### Требования
+Установщик выложен на [странице выпусков](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
+Сейчас там есть только **Pro 3.1.0**: файлы всех прежних выпусков, включая установщики Light,
+удалены. Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по ней видно, что файл
+скачался целиком:
 
-- **Windows 10/11** (x64)
-- Права администратора (для WinTUN-адаптера)
-
-### Pro — для администраторов
-
-1. Арендуйте Linux-сервер (Ubuntu 22+, Debian 11+), купите домен
-2. Скачайте `TrustTunnel-Pro-v2.6.0-portable-win64.zip`
-    из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
-3. Распакуйте и запустите `TrustTunnel.exe`
-4. В мастере введите SSH-данные сервера (IP, порт, логин, пароль или SSH-ключ)
-5. Приложение установит TrustTunnel-сервер и создаст конфигурацию
-6. Нажмите **Подключить**
-
-### Light — для пользователей
-
-1. Получите конфиг-файл (.toml) или ссылку (tt://) от администратора
-2. Скачайте `TrustTunnel-Light-v2.6.0-portable-win64.zip`
-    из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
-3. Распакуйте и запустите `TrustTunnel Light.exe`
-4. Импортируйте конфиг (файл или ссылка)
-5. Нажмите кнопку подключения
-
-> Также доступны установщики (.exe) для обеих редакций.
-
----
-
-## Архитектура
-
-```text
-┌──────────────────────────────────────────────────┐
-│  GUI (Tauri v2 + React + TypeScript + Tailwind)  │
-│                                                  │
-│  Pro: sidebar, 8 панелей, SSH-деплой             │
-│  Light: bottom nav, 4 экрана, без SSH            │
-│                                                  │
-│  Shared: UI-компоненты, хуки, i18n, tokens.css   │
-│                                                  │
-│  Sidecar: trusttunnel_client.exe (C++)           │
-│  VPN-подключение через WinTUN                    │
-└──────────────────────────────────────────────────┘
+```powershell
+Get-FileHash .\TrustTunnel.Client.Pro_3.1.0_x64-setup.exe -Algorithm SHA256
 ```
 
-- **Frontend**: React 19 + TypeScript + Tailwind CSS
-- **Backend**: Rust 1.88 (Tauri v2) — sidecar, SSH-деплой (Pro), системный трей
-- **Network Core**: C++ библиотеки TrustTunnel — WinTUN-адаптер, DNS, маршрутизация
+Сравните результат с содержимым `.sha256`. Подлинность издателя эта сумма не подтверждает: она
+лежит на той же странице и заливалась тем же аккаунтом, так что подменить можно и её. Подписи,
+которая подтверждала бы издателя, у программы нет.
+
+Только 64-разрядная Windows (x64). Сборок для ARM и 32-разрядных систем нет. Минимальная версия
+Windows нигде не объявлена; разрабатывается и проверяется на Windows 10 и 11. Если компонента
+Microsoft Edge WebView2 в системе нет, установщик докачает и поставит его сам.
+
+Ставится на весь компьютер, в `Program Files`, поэтому установка и удаление просят права
+администратора. **Само приложение тоже запускается с правами администратора, каждый раз** — это
+записано в его манифесте. Без них оно не может поднять сетевой адаптер и переписать маршруты.
+
+### Где лежат ваши данные
+
+В папке вашей учётной записи: `%LOCALAPPDATA%\TrustTunnel Client Pro`. Там конфиги серверов,
+известные хосты, правила маршрутизации, базы стран, журналы работы. В `Program Files` эта папка
+намеренно не кладётся: там файлы доступны на чтение всем пользователям компьютера.
+
+Пароли от SSH хранятся не в файле, а в «Диспетчере учётных данных» Windows. А вот пароль к самому
+VPN-серверу лежит в его `.toml`-конфиге открытым текстом — так устроен формат протокола.
+
+Удаление по умолчанию ничего не стирает: серверы, пароли и настройки остаются на диске. Удалить их
+можно, только если поставить в деинсталляторе отдельную галочку «Удалить всё». Обновление тоже
+сохраняет данные.
+
+### Куда программа ходит сама
+
+Помимо вашего VPN-сервера приложение обращается к нескольким чужим адресам. Вот весь список.
+
+| Куда | Зачем | Когда |
+|---|---|---|
+| `api.github.com` | проверка обновлений самой программы | при запуске и раз в сутки |
+| `api.github.com` | проверка выпусков исходного проекта TrustTunnel | при проверке обновлений сервера |
+| `ipwho.is` | флажок страны на карточке сервера. **Туда уходит адрес вашего сервера** | при показе карточки |
+| `speed.cloudflare.com` | замер скорости в «Панели управления»: качает 5 МБ, отправляет 2 МБ | только когда вы нажали кнопку |
+| `1.1.1.1`, `1.0.0.1`, `8.8.8.8`, `8.8.4.4`, `common.dot.dns.yandex.net` | проверка, есть ли вообще связь, и жив ли туннель | пока идёт подключение и во время работы |
+| `fonts.googleapis.com` | шрифт интерфейса | при каждом запуске окна |
+
+Последняя строка — известный недочёт: шрифт стоило положить внутрь сборки, а не забирать со стороны
+при каждом старте. Записан в план работ.
+
+Замер скорости идёт **с вашего компьютера**, а не с сервера. При поднятом туннеле он пойдёт через
+туннель.
 
 ---
 
-## Сборка из исходников
+## Чем издания отличаются
 
-### Требования
+| | Pro | Light |
+|---|---|---|
+| Можно скачать | да | **нет**, файлы прежних выпусков удалены |
+| Последняя версия | `3.0.0` | `2.7.0` |
+| Подключение к VPN | да | да |
+| Маршрутизация (что идёт через VPN, что напрямую) | да | да |
+| Управление своим сервером по SSH | да | нет |
+| Установка протокола на сервер мастером | да | нет |
+| Внешний вид | переделан целиком в третьей версии | прежний, редизайн ещё не начинался |
 
-- **Node.js** >= 18
-- **Rust** >= 1.88
-- **CMake** >= 3.24
-- **Visual Studio 2022** (C++ Build Tools)
-- **Python** >= 3.10 (для Conan)
+Light — это Pro без раздела управления сервером. Если у вас уже есть конфиг от чужого сервера и
+настраивать ничего не надо, хватило бы и её.
 
-### Сборка
+Но скачать Light негде. Свой установщик у неё был в каждом выпуске начиная с `2.0.0` и до `2.7.0`,
+а портативная сборка появлялась ещё раньше; файлы всех этих выпусков удалены. Редизайн третьей
+версии Light не затронул, поэтому версии `3.x` у неё нет. Ставьте Pro: подключение и маршрутизация
+там те же, а «Панель управления» просто останется неиспользованной вкладкой.
 
-```bash
-# 1. Клонировать
-git clone https://github.com/ialexbond/TrustTunnelClientForWindows.git
-cd TrustTunnelClientForWindows
+## Что умеет Pro
 
-# 2. Собрать C++ sidecar
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build --target trusttunnel_client
+Пять разделов внизу окна: «Панель управления», «Подключение», «Маршрутизация», «Настройки»,
+«О программе».
 
-# 3. Скопировать sidecar для Tauri
-copy build\trusttunnel\trusttunnel_client.exe ^
-     gui-app\src-tauri\trusttunnel_client-x86_64-pc-windows-msvc.exe
+### Подключение
 
-# 4. Собрать Pro
-cd gui-app && npm install && npx tauri build
+Подключений может быть сколько угодно, каждое — своя карточка. Конфиг добавляется файлом `.toml`,
+ссылкой `tt://` или `trusttunnel://`, перетаскиванием в окно, в том числе по несколько за раз.
+У каждого подключения свои настройки: HTTP/2 или HTTP/3, MTU, аварийное отключение интернета при
+обрыве туннеля, защита от блокировок, пост-квантовое шифрование, IPv6, адреса DNS. Подключение
+переносится на другой компьютер QR-кодом.
 
-# 5. Собрать Light
-cd ..\gui-light && npm install && npx tauri build
-```
+### Переход на запасной сервер
+
+Когда связь с сервером пропала по-настоящему, а не моргнула, приложение сразу переходит к следующему
+серверу в вашем списке: молчащий сервер оно не переспрашивает, чтобы не тянуть время. Порядок вы
+задаёте сами, а ненужный сервер можно исключить из очереди, не удаляя его из списка. Если сервер
+в очереди один, переходить некуда — тогда приложение так и продолжает стучаться к нему.
+
+На прежний сервер приложение само не вернётся, даже когда тот снова заработает: вы останетесь на
+запасном, пока не переключитесь обратно вручную.
+
+### Панель управления (только в Pro)
+
+Вход на ваш сервер по SSH, паролем или ключом. Дальше: установка протокола пошаговым мастером
+(с отменой и откатом на любом шаге и продолжением после обрыва), выпуск сертификата (Let's Encrypt,
+самоподписанный или свой), пользователи и их конфиги, межсетевой экран, защита от перебора паролей
+с разблокировкой, BBR, MTProto, замер скорости, обновление сервера и его журналы.
+
+### Маршрутизация
+
+Правила «через VPN» и «напрямую», готовые наборы, которые включаются одной кнопкой, фильтр по
+программам, самообновляющиеся базы стран и категорий.
+
+## Чего нет
+
+### Блокировки сайтов по имени домена
+
+Её убрали. Встроенное VPN-ядро блокирует домен единственным доступным ему способом: молча
+отбрасывает DNS-запрос, а Windows и браузеры обходят это через другой адаптер. Вернуть блокировку
+можно только фильтрующим DNS на вашем собственном сервере.
+
+### Режима SOCKS5
+
+Старый конфиг с SOCKS5 при загрузке превращается в обычный туннель, то есть через VPN пойдёт **весь**
+трафик, а не только трафик прокси. Учитывайте, если переносите старые настройки.
+
+### Замера задержки внутри туннеля
+
+Цифра задержки на карточке подключения показывает, отвечает ли сервер при прямом обращении.
+Задержку внутри туннеля приложение измерить не может. Замер скорости в «Панели управления» меряет
+другую величину — пропускную способность в мегабитах, — и к задержке отношения не имеет.
+
+### Устойчивости к чужому VPN-софту
+
+Другая VPN-программа может помешать подключиться, даже если она не запущена: подтверждено на Radmin
+VPN, где достаточно установленного в системе сетевого драйвера. В приложении есть обход, но саму
+причину он не устраняет.
 
 ---
 
-## Технологии
+## Как устроено
 
-| Компонент | Технология |
-|---|---|
-| GUI Framework | [Tauri v2](https://v2.tauri.app) |
-| Frontend | React 19 + TypeScript + Tailwind CSS |
-| Backend | Rust 1.88 |
-| Network Core | C++20 (TrustTunnel Client Libraries) |
-| Tunnel Driver | [WinTUN](https://www.wintun.net) |
-| SSH Deploy | [russh](https://github.com/warp-tech/russh) (Pro only) |
+Это форк [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
+От исходного проекта взято VPN-ядро на C++: туннель, WinTUN-адаптер, перехват маршрутов и аварийное
+отключение интернета. Графическое приложение написано с нуля здесь, в исходном проекте его нет.
 
----
+Ядро работает отдельным процессом и закрывается вместе с приложением. Сейчас поставляется версия
+ядра `1.1.5`; с номерами версий изданий она никак не связана.
 
-## Благодарности
+Приложение — Tauri 2, интерфейс на React 19 и TypeScript, нативная часть на Rust.
 
-- [AdGuard](https://adguard.com) — за разработку протокола TrustTunnel
-    и открытие исходного кода клиентских библиотек
+### Ветки репозитория
 
----
+На `master` лежит только само приложение и его проверки. Исходники C++-ядра и сборочная система
+лежат на `release/tt-win-3.0.0` и в тегах выпусков; полное дерево берите оттуда. Собранный бинарник
+ядра в репозитории не хранится, его нужно собрать.
+
+`CHANGELOG.md` в корне — это журнал изменений C++-ядра, а не приложения (записи с `0.90.4` за август
+2022 по `1.1.5` за сентябрь 2026). Что изменилось в самом приложении, написано в описании каждого
+выпуска и в окне «Что нового».
 
 ## Лицензия
 
-[Apache 2.0](LICENSE)
+Apache License 2.0, целиком: и ядро, и приложение. Текст лицензии лежит в файле
+[`LICENSE`](LICENSE) в том виде, в каком достался вместе с форком.
+
+Кто чем владеет — в файле [`NOTICE`](NOTICE): C++-ядро и протокол `Copyright 2020 AdGuard Software
+Ltd`, графическое приложение `Copyright 2026 ialexbond`. В самом приложении то же самое написано
+короче: «Протокол © AdGuard · Клиент © ialexbond».
+
+Сторонние компоненты в сборке под Apache 2.0 не подпадают и распространяются по своим лицензиям:
+`wintun.dll` (WireGuard LLC, Prebuilt Binaries License), lwIP (BSD, Swedish Institute of Computer
+Science), распространяемые библиотеки Visual C++ от Microsoft, пакеты Rust и npm из lock-файлов.
+Все они названы в `NOTICE`.
 
 ---
 
-## Ссылки
+## In brief (English)
 
-- [TrustTunnel Endpoint](https://github.com/TrustTunnel/TrustTunnel) —
-    серверная часть протокола
-- [TrustTunnel CLI Client](trusttunnel/README.md) —
-    справка по консольному клиенту (C++)
+A desktop VPN client for Windows speaking the **TrustTunnel** protocol: a window with buttons and
+settings instead of a command line. The upstream project has no Windows GUI, so this one was written
+here. Two editions: **Pro** (connection, routing and full server management over SSH) and **Light**
+(the same without server management). **Light cannot be downloaded right now**: it shipped alongside
+Pro up to version `2.7.0`, but the files of every past release have been removed, and the third
+version's redesign never covered Light. Use Pro; it does everything Light does, with one extra tab
+you can ignore.
+
+Grab it from [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
+x64 Windows only. It installs per-machine, so installing and uninstalling need administrator rights,
+and the application itself runs elevated on every launch — its manifest asks for that, because it
+has to bring up a network adapter and rewrite routes.
+
+The binaries are not code-signed, so Windows will warn about an unknown publisher, and Windows
+Defender has twice flagged them as malware, both times a false positive. The `.sha256` file next to
+the installer tells you the download is complete; it cannot tell you who built it, since it sits on
+the same page under the same account. The Russian section above explains how to restore a
+quarantined file. Read it before installing.
+
+Besides your own VPN server, the application talks to `api.github.com` (its own update check, at
+launch and once a day), `ipwho.is` (a country flag, which means your server's address goes there),
+`speed.cloudflare.com` (the speed test, only when you press the button), a set of public resolvers
+(1.1.1.1, 8.8.8.8 and a Yandex DoH host) to tell whether the link is alive, and
+`fonts.googleapis.com` for the interface font at every start. The Russian section above has the
+table, including which of those is a known mistake.
+
+If the core process is killed hard or crashes, its firewall filters can outlive it and leave the
+machine with no internet at all. Killing `trusttunnel_client.exe` or rebooting clears it.
+
+This is a fork of [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
+The C++ VPN core comes from upstream and ships as a separate sidecar process, version `1.1.5`; the
+GUI is written here. Core sources live on the `release/tt-win-3.0.0` branch and in the release tags,
+not on `master`. The root `CHANGELOG.md` is the core's changelog, not the application's; the
+application has its own release notes.
+
+Everything here, core and application alike, is under the Apache License 2.0 (`LICENSE`). `NOTICE`
+records who holds what: the C++ core and the protocol are `Copyright 2020 AdGuard Software Ltd`, the
+Windows application is `Copyright 2026 ialexbond`. Bundled third-party components (Wintun, lwIP, the
+Microsoft runtimes, the Rust and npm dependencies) keep their own terms and are listed there too.
+
+The interface and the release notes are in Russian and English. This README is mostly Russian because
+that is what the application's audience reads.

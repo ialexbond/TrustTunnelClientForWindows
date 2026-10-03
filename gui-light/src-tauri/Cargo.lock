@@ -5085,7 +5085,7 @@ dependencies = [
 
 [[package]]
 name = "trusttunnel-light"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5111,6 +5111,7 @@ dependencies = [
  "toml_edit 0.22.27",
  "trusttunnel-settings",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

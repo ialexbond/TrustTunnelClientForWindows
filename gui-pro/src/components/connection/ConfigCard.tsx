@@ -1,0 +1,752 @@
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Activity, Check, Clock, ClipboardList, Copy, Globe, Loader2, Pencil, Power, QrCode, Settings, Trash2, X } from "lucide-react";
+import { Card } from "../../shared/ui/Card";
+import { ErrorBanner } from "../../shared/ui/ErrorBanner";
+import { Button } from "../../shared/ui/Button";
+import { IconButton } from "../../shared/ui/IconButton";
+import { StatusBadge } from "../../shared/ui/StatusBadge";
+import { Tooltip } from "../../shared/ui/Tooltip";
+import { UptimeCounter } from "../../shared/ui/UptimeCounter";
+import { FieldError } from "../../shared/ui/FieldError";
+import { OverflowMenu, type OverflowMenuItem } from "../../shared/ui/OverflowMenu";
+import { statusBadgeVariant } from "../../shared/lib/statusBadgeVariant";
+import { ConfigPingPill, type ConfigPing } from "./ConfigPingPill";
+import { isIpAddress } from "./plateDetails";
+import { InlineNameEdit } from "./InlineNameEdit";
+import type { VpnStatus, ReconnectProgress } from "../../shared/types";
+import type { ConfigSummary } from "../../shared/hooks/useConfigList";
+import { reconnectLabel } from "../../shared/utils/reconnectLabel";
+
+/**
+ * `ConfigCard` (production, Phase 11 Plan 11-03) — one horizontal config card. It mirrors
+ * the story-tier `connectionDemos.tsx` `ConfigCardDemo` pixel-for-pixel, but built from
+ * production `shared/ui` primitives, the real `ConfigPingPill`, i18n strings, and the
+ * StatusPanel status→colour mapping (reused verbatim so the lead-card states land in the
+ * right colour band by construction).
+ *
+ * Two shapes:
+ *   - LEAD CARD (`leadCard`) — the active/last-used config. A 3-column vertically-centred
+ *     strip: status badge (left) · centred name + «host · ping · uptime» meta · primary
+ *     button + overflow (right). Connected → green «Отключить» (danger) + ping + monospace
+ *     uptime; any in-flight state → an icon-only spinner (no text), ping HIDDEN. The active
+ *     highlight is a green tint + FULL ring (NO left accent rail — banned design artifact).
+ *   - RESTING ROW (inactive) — leading glyph (or a busy spinner) · name + «host · username»
+ *     · ping pill · primary («Переключиться» when a tunnel is active elsewhere, D-20) +
+ *     overflow. No status dot (a resting config's dot would be always-grey, info-free).
+ *
+ * Decisions honoured: D-18 (lead card carries the lifecycle, no separate block), D-20
+ * («Переключиться» on inactive), D-21 (lock the primary + overflow while another connects),
+ * D-26 (overflow collapsed by default: Изменить/Дублировать/Удалить — QR deferred), F03
+ * (ping hidden during connecting/disconnecting/error). NO `switching`/`switch-failed`
+ * wire-state and NO new VpnStatus value are introduced (Pitfall 4).
+ */
+
+// ─── TruncatedText (production helper, lifted from connectionDemos) ───────────
+
+/** Tooltip width for the full-text reveal — wide so a long name/host reads on 1–2 lines. */
+const FULL_TEXT_TOOLTIP_W = 600;
+
+/**
+ * A single-line text that clips with «…» AND reveals its FULL value in the Tooltip on
+ * hover, but ONLY when it is actually clipped (measured via ResizeObserver). Used for every
+ * truncatable datum on the card so the full text is always reachable at the 672px card
+ * width (Pitfall 7). Needs a width-bounded parent (min-w-0 cell), which all call-sites give.
+ */
+function TruncatedText({ text, className }: { text: string; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [clipped, setClipped] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Measure once up-front (also the only measurement in jsdom, which lacks
+    // ResizeObserver), then observe width changes when the API is available.
+    const measure = () => setClipped(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
+
+  return (
+    <Tooltip text={text} maxWidth={FULL_TEXT_TOOLTIP_W} disabled={!clipped} className="flex min-w-0 max-w-full">
+      <span ref={ref} className={`block w-full select-none truncate ${className ?? ""}`}>
+        {text}
+      </span>
+    </Tooltip>
+  );
+}
+
+// ─── Lifecycle helpers (VpnStatus only — no deferred switching states) ────────
+
+/** In-flight lifecycles → the lead primary shows a SPINNER (loading) instead of a text
+ *  label, because an action is already running. connected / disconnected / error are
+ *  settled (they render a real text button). */
+function isInFlight(status: VpnStatus): boolean {
+  return (
+    status === "connecting" ||
+    status === "reconnecting" ||
+    status === "recovering" ||
+    status === "disconnecting"
+  );
+}
+
+/** A config's ping pill is only honest for the settled disconnected/connected states.
+ *  During any in-flight transition or error a stale ping must NOT paint (F03). */
+function shouldShowPing(status: VpnStatus): boolean {
+  return status === "connected" || status === "disconnected";
+}
+
+export interface ConfigCardProps {
+  config: ConfigSummary;
+  /** The VPN lifecycle for THIS card. Only the lead (active) card sees non-disconnected
+   *  states; inactive cards are always "disconnected". */
+  status?: VpnStatus;
+  /** The resolved ping band for this config (from usePerConfigPing). When absent the pill
+   *  reads no-data «—». */
+  ping?: ConfigPing;
+  /** Lead-card mode — carries the big primary, monospace uptime, ping, and the lifecycle. */
+  leadCard?: boolean;
+  /** Monospace uptime string for the lead card (e.g. «01:23:45»). Storybook/tests pass a frozen
+   *  string; production passes `connectedSince` instead so the counter ticks live. */
+  uptime?: string;
+  /** Live session start — when set (and connected) the lead card renders a ticking «HH:MM:SS»
+   *  uptime counter from it (production path). Takes precedence over the static `uptime` string. */
+  connectedSince?: Date | null;
+  /** A mutation (duplicate/delete) is in flight — actions disabled, a spinner on the dot. */
+  busy?: boolean;
+  /** A tunnel is active on ANOTHER card → this inactive card's primary reads «Переключиться». */
+  activeElsewhere?: boolean;
+  /** Another card is connecting → this card's primary + overflow are locked (D-21). */
+  locked?: boolean;
+  /**
+   * F28 (14-UAT round 3): THIS card's connect was just clicked and is in the window BEFORE the live
+   * status becomes `connecting` (the awaited pre-connect ping probe). Shows an INSTANT spinner on the
+   * primary so the click is never a silent no-op; the real status spinner takes over once it lands.
+   */
+  connectPending?: boolean;
+  /**
+   * Phase 14 (D-12): a seamless A→B switch is in flight for THIS (lead) card. During the
+   * switch the underlying `status` is the GREY `disconnecting`→`connecting` teardown/spawn
+   * leg, so the amber «Переключение» band + label must be FORCED, not derived from `status`
+   * (Pitfall 4: `statusBadgeVariant("disconnecting")` is grey «Отключение», which would flash
+   * the wrong colour/word mid-switch). We reuse the EXISTING `connecting` amber variant — no
+   * 5th badge variant (D-07 regression surface). The spinner + hidden-ping already fall out of
+   * `isInFlight`/`isConnected` for the in-flight legs; the only forced pieces are the band +
+   * the label. Mirrors the story-tier `leadBadgeVariant` switching→connecting mapping
+   * (connectionDemos.tsx). Owned by App.isSwitching, threaded ConnectionPanel→ConfigList→here.
+   */
+  switching?: boolean;
+  /**
+   * Phase 14 (F6, 14-UAT): the seamless-switch REVERT notice, rendered EMBEDDED inside the lead card
+   * (NOT a floating window-level banner). Set by App on a switch that failed and silently reverted to
+   * the previous server — a calm `ErrorBanner variant="info"` (never red — D-05). Only the lead card
+   * renders it; `null`/undefined shows nothing. Mirrors the story-tier «switch-failed-reverted».
+   */
+  revertNotice?: string | null;
+  /** Dismiss the embedded revert notice (clears App's revertNotice state). */
+  onRevertDismiss?: () => void;
+  /**
+   * F20 (14-UAT round 2): the live reconnect attempt progress {attempt, max}. Rendered ONLY on the
+   * lead card in the `reconnecting` status as «Попытка N из M» under the badge, so an auto-reconnect
+   * shows the user it is actively retrying (not silently waiting). `null`/undefined shows nothing.
+   */
+  reconnectProgress?: ReconnectProgress | null;
+  onConnect?: () => void;
+  /**
+   * D-05 (17-07): abort the in-flight (re)connect from the lead card's connecting loader.
+   * Wired to the SAME `useVpnActions.handleDisconnect` → `vpn_disconnect` the tray + StatusPanel
+   * already call (no new backend command). The action is idempotent against the fast-settle race:
+   * `vpn_disconnect` no-ops on an already-settled session (17-RESEARCH §Pitfall 5). Only the lead
+   * card's cancelable states (connecting / reconnecting / recovering) render the button; the
+   * non-cancelable `disconnecting` teardown keeps its inert spinner (mirrors StatusPanel:164-169).
+   */
+  onDisconnect?: () => void;
+  onEdit?: () => void;
+  /** Open the ConfigQr transfer modal for this config (D-09). Available for ANY config
+   *  (active or inactive) — the «QR-код» overflow item is never state-gated. */
+  onQr?: () => void;
+  onDelete?: () => void;
+  onDuplicate?: () => void;
+  /**
+   * Commit a rename (D-14). Receives the trimmed new name ("" is a valid clear — IN-58);
+   * returns an error i18n-resolved string when the name is rejected (duplicate / backend
+   * failure) so the card can render a FieldError and keep the rename open, or
+   * void/undefined on success (the card exits edit mode).
+   * Only the resting (inactive) row exposes rename — the lead card's name is read-only.
+   */
+  onRename?: (newName: string) => Promise<string | void> | string | void;
+  /** Names already taken by OTHER configs — used for the inline duplicate-name check. */
+  existingNames?: string[];
+}
+
+function ConfigCardImpl({
+  config,
+  status = "disconnected",
+  ping,
+  leadCard = false,
+  uptime,
+  connectedSince,
+  busy = false,
+  activeElsewhere = false,
+  locked = false,
+  connectPending = false,
+  switching = false,
+  revertNotice,
+  onRevertDismiss,
+  reconnectProgress,
+  onConnect,
+  onDisconnect,
+  onEdit,
+  onQr,
+  onDelete,
+  onDuplicate,
+  onRename,
+  existingNames = [],
+}: ConfigCardProps) {
+  const { t } = useTranslation();
+
+  const effectivePing: ConfigPing = ping ?? { band: "no-data" };
+  const isConnected = status === "connected";
+
+  // IN-58: an EMPTY name is VALID, and the card TITLE then falls back to the config's
+  // username (owner: «при пустом имени отображается username из конфига»). The Rust list
+  // already derives endpoint.name → username on read (manifest.rs::summarize_unchecked),
+  // so a blank name normally never reaches this card via list_configs — this render-level
+  // fallback keeps the rule true at the COMPONENT contract too (stories/tests/any caller
+  // can pass a raw empty name). NOTE: the rename DRAFT below still starts from the RAW
+  // config.name — the pencil edits the real (possibly empty) name, never the fallback.
+  const displayName = config.name.trim() ? config.name : config.user;
+
+  // ─── Inline rename state (D-14, resting/inactive row ONLY) ───
+  // The name is the config's user-facing TITLE (source: endpoint.name → else username).
+  // It is committed ONLY by Enter/✓ and ONLY when valid; ✗/Escape (and any other action via
+  // runAction) discards the draft. A DUPLICATE name shows a FieldError and never commits;
+  // an EMPTY name is a valid clear (IN-58 — the title falls back to the username).
+  // INLINE rename via the pencil is offered ONLY on the resting (inactive) card; the
+  // ACTIVE/lead card's title is read-only here and is edited in «Изменить» → «Настройки
+  // конфигурации» → «Имя конфига» instead (ConfigEditView), then applied on save.
+  const renameEnabled = !leadCard && Boolean(onRename);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(config.name);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  const trimmed = draft.trim();
+  // IN-58: an EMPTY name is VALID — it clears the title and the card then shows the username
+  // (owner: "имя может быть пустым, тогда отображается username"). Only a DUPLICATE is blocked;
+  // the empty-name error was removed. Clearing commits onRename("") → backend clears endpoint.name.
+  const isDuplicate =
+    trimmed !== config.name && existingNames.some((n) => n === trimmed);
+  const localError = isDuplicate ? t("connection.rename.error_duplicate") : null;
+  // The displayed error is the local validation error OR a server-side error from onRename.
+  const nameErrorMsg = editing ? (localError ?? renameError) : null;
+  const nameInvalid = nameErrorMsg !== null;
+
+  const startRename = () => {
+    setDraft(config.name);
+    setRenameError(null);
+    setEditing(true);
+  };
+  // PP-8 (17-07): stable via useCallback so `runAction` (and thus the memoized `overflowItems`
+  // below) does not change identity on an unrelated re-render — it only re-creates when the
+  // config name it resets the draft to changes.
+  const cancelRename = useCallback(() => {
+    setDraft(config.name);
+    setRenameError(null);
+    setEditing(false);
+  }, [config.name]);
+  const commitRename = async () => {
+    if (localError) return; // never commit a duplicate name (empty is a valid clear, IN-58)
+    if (trimmed === config.name) {
+      // No change — just close the editor (no-op commit).
+      setEditing(false);
+      return;
+    }
+    const result = onRename ? await onRename(trimmed) : undefined;
+    if (typeof result === "string" && result) {
+      // The mutation rejected (e.g. a backend duplicate/rename failure) — keep the editor
+      // open and surface the error below the field.
+      setRenameError(result);
+      return;
+    }
+    setEditing(false);
+    setRenameError(null);
+  };
+  // Any non-rename action on a card with an open rename cancels the rename first (D-14), so
+  // an in-flight rename never hangs when the user clicks Connect / an overflow item.
+  // PP-8 (17-07): useCallback so the memoized `overflowItems` below is stable across re-renders
+  // that don't change `editing` / `cancelRename`.
+  const runAction = useCallback(
+    (fn?: () => void) => () => {
+      if (editing) cancelRename();
+      fn?.();
+    },
+    [editing, cancelRename],
+  );
+
+  // The inline name editor (InlineNameEdit + ✓/✗ + FieldError) — shared verbatim by the lead
+  // card's centred hero name and the resting row, so both edit the title the same way.
+  const nameEditor = (
+    <div className="flex min-w-0 flex-col gap-[var(--space-1)]">
+      <div className="flex min-h-8 min-w-0 items-center gap-[var(--space-1)]">
+        <InlineNameEdit
+          value={draft}
+          onChange={(v) => {
+            setDraft(v);
+            setRenameError(null);
+          }}
+          onCommit={() => void commitRename()}
+          onCancel={cancelRename}
+          maxLength={64}
+          ariaLabel={t("connection.rename.edit_aria")}
+          invalid={nameInvalid}
+          autoFocus
+        />
+        {/* ✓ commits (disabled while invalid), ✗ discards — nothing saves without an explicit
+            ✓/Enter, and a duplicate name can never save (D-14). An EMPTY draft commits a
+            valid clear (IN-58) — the title then falls back to the username. */}
+        <IconButton
+          aria-label={t("connection.rename.commit")}
+          tooltip={t("connection.rename.commit")}
+          icon={<Check className="w-3.5 h-3.5" />}
+          onClick={() => void commitRename()}
+          disabled={Boolean(localError)}
+          className="h-6 w-6 shrink-0"
+        />
+        <IconButton
+          aria-label={t("connection.rename.cancel")}
+          tooltip={t("connection.rename.cancel")}
+          icon={<X className="w-3.5 h-3.5" />}
+          onClick={cancelRename}
+          className="h-6 w-6 shrink-0"
+        />
+      </div>
+      {/* Validation message below the field via the shared FieldError primitive. */}
+      {nameErrorMsg && <FieldError>{nameErrorMsg}</FieldError>}
+    </div>
+  );
+
+  // D-17 active highlight: an 8% green tint over the surface + a FULL-perimeter green ring
+  // (the stronger success-ramp token so the ring survives on a near-white light surface).
+  // There is deliberately NO single-sided (left-edge) accent rail (feedback_no_left_accent_rail).
+  const highlightActive = leadCard && isConnected;
+  // The lead card ALWAYS sits inside ConfigList's frosted-glass wrapper (leadCard ⟺ a live hero:
+  // connecting / connected / disconnecting / reconnecting / recovering). For that frost to show
+  // through, the lead-card body stays TRANSPARENT for the neutral/grey legs.
+  //
+  // F2 (14-UAT): the lead card's SURFACE TINT now FOLLOWS the status badge. The owner reported the
+  // card reading grey while the badge was amber mid-switch — the colours disagreed. It now derives
+  // from the SAME effective variant the badge uses (`statusBadgeVariant(status)`, or the forced
+  // `connecting` amber while `switching`), so the card colour and the badge colour can never
+  // disagree: connected → green tint + ring (the active marker), connecting/switching → amber tint +
+  // ring, error → red tint + ring, disconnecting/disconnected → transparent (the neutral grey frost).
+  // Reuses the existing status-*-bg/-border tokens (no hardcoded hex). Resting (inactive) rows keep
+  // Card's opaque surface (no wrapper behind them) → no tint.
+  const tintVariant = switching ? "connecting" : statusBadgeVariant(status);
+  const activeHighlightClass = !leadCard
+    ? ""
+    : tintVariant === "connected"
+      ? "bg-[var(--color-status-connected-bg)] ring-1 ring-[var(--color-success-tint-25)]"
+      : tintVariant === "connecting"
+        ? "bg-[var(--color-status-connecting-bg)] ring-1 ring-[var(--color-status-connecting-border)]"
+        : tintVariant === "error"
+          ? "bg-[var(--color-status-error-bg)] ring-1 ring-[var(--color-status-error-border)]"
+          : "bg-transparent";
+
+  // Lead-card status label — short state word (no trailing «…» in the badge). Uses the
+  // existing status.* i18n keys (the _short variants for in-flight states).
+  //
+  // Phase 14 (D-12): while `switching`, the label is FORCED to «Переключение» regardless of the
+  // underlying in-flight `status` (the teardown leg is grey `disconnecting` «Отключение», the
+  // spawn leg is `connecting` «Подключение» — neither is the word the user should read during a
+  // seamless switch). This label feeds BOTH the badge AND the spinner primary's aria-label/title,
+  // so the whole face reads «Переключение» in one shot.
+  const leadStatusLabel = switching
+    ? t("status.switching_short")
+    : status === "connected"
+      ? t("status.connected")
+      : status === "connecting"
+        ? t("status.connecting_short")
+        : status === "reconnecting"
+          ? t("status.reconnecting_short")
+          : status === "recovering"
+            ? t("status.recovering_short")
+            : status === "disconnecting"
+              ? t("status.disconnecting_short")
+              : status === "error"
+                ? t("status.error")
+                : t("status.disconnected");
+
+  // D-20: an inactive card's primary reads «Переключиться» when a tunnel is active on
+  // ANOTHER card; otherwise the resting primary is «Подключить». The connected card's
+  // primary is «Отключить».
+  const primaryLabel = isConnected
+    ? t("connection.card.disconnect")
+    : activeElsewhere
+      ? t("connection.card.switch")
+      : t("connection.card.connect");
+
+  // D-19 / D-26: the secondary actions live in the OverflowMenu BY DEFAULT, each with its one
+  // canonical glyph. Phase 15 (D-09): «QR-код» (the QrCode glyph) is now the 4th item, opening
+  // the ConfigQr transfer modal — available for ANY config (active or inactive), NOT state-gated;
+  // only the existing D-21 `locked` (another card connecting) disables it, matching the others.
+  // D-21: locked while another card is connecting.
+  // PP-8 (17-07, n-7): memoized so the array + its icon JSX is not rebuilt on every re-render
+  // (e.g. a ping/uptime tick, or the TruncatedText clip-measure state) — only when a dependency
+  // (the wrapped actions, the lock, or `t`) actually changes.
+  const overflowItems: OverflowMenuItem[] = useMemo(
+    () => [
+      {
+        label: t("connection.card.edit"),
+        onSelect: runAction(onEdit),
+        icon: <Settings className="w-3.5 h-3.5" />,
+        disabled: locked,
+      },
+      {
+        label: t("connection.card.duplicate"),
+        onSelect: runAction(onDuplicate),
+        icon: <Copy className="w-3.5 h-3.5" />,
+        disabled: locked,
+      },
+      {
+        label: t("connection.card.qr"),
+        onSelect: runAction(onQr),
+        icon: <QrCode className="w-3.5 h-3.5" />,
+        disabled: locked,
+      },
+      {
+        label: t("connection.card.delete"),
+        onSelect: runAction(onDelete),
+        icon: <Trash2 className="w-3.5 h-3.5" />,
+        destructive: true,
+        disabled: locked,
+      },
+    ],
+    [t, runAction, onEdit, onDuplicate, onQr, onDelete, locked],
+  );
+
+  return (
+    <Card
+      padding="sm"
+      // The hero (any live state) never hover-highlights its border — it is the frosted focal card,
+      // not an actionable row. Only resting (inactive) rows get the hover affordance.
+      hover={!leadCard}
+      data-testid="config-card"
+      data-lead={leadCard ? "true" : undefined}
+      // data-active-highlight is an inert testability hook: tests assert the green-active
+      // marker semantically (not via CSS hex), and confirm NO left-accent-rail element.
+      data-active-highlight={highlightActive ? "true" : undefined}
+      // IN-38: the live lead card keeps the normal --radius-lg (ROUNDED corners) — the owner
+      // explicitly reverted the IN-28 square. F9 (14-UAT): the sticky frost wrapper in ConfigList is
+      // now ROUNDED + clipped to the SAME --radius-lg (was a square frost that filled the corner
+      // triangles), because its sharp square corners were peeking out below the rounded card. The
+      // frost now matches the card's rounded box exactly — no sharp corners, no separate corner fill.
+      className={`transition-all ${activeHighlightClass}`}
+    >
+      {leadCard ? (
+        <>
+        {/* ── Lead card: one vertically-centred 3-column strip ── */}
+        <div className="grid min-h-[3.75rem] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[var(--space-3)]">
+          {/* Left: status badge. Phase 14 (D-12): while switching the band is FORCED to the
+              amber `connecting` variant (reusing the existing variant — no 5th) rather than
+              derived from the grey `disconnecting` teardown status (Pitfall 4). F20: during an
+              auto-reconnect a second row shows «Попытка N из M» under the badge. */}
+          <div className="flex min-w-0 flex-col items-start gap-[var(--space-1)]">
+            <StatusBadge
+              variant={switching ? "connecting" : statusBadgeVariant(status)}
+              label={leadStatusLabel}
+            />
+            {/* F20 (14-UAT round 2): show the reconnect attempt progress so the user sees it is
+                actively retrying, not silently waiting (the backend already emits attempt/max). Only
+                for the genuine `reconnecting` status (never during a manual switch); the reserved grid
+                min-height (3.75rem) keeps the card from growing/jumping between connected and reconnecting. */}
+            {status === "reconnecting" && !switching && reconnectProgress && (
+              <span className="min-w-0 select-none truncate text-xs tabular-nums text-[var(--color-text-muted)]">
+                {/* Same sentence as the status line above it — both call `reconnectLabel`. This card
+                    used to hardcode «Попытка N из M», which is why it kept saying «Попытка 1 из 1»
+                    during a failover walk after StatusPanel had been taught better (28-UAT test 3). */}
+                {(() => {
+                  const label = reconnectLabel(reconnectProgress);
+                  return t(label.key, label.vars);
+                })()}
+              </span>
+            )}
+          </div>
+
+          {/* Centre: config identity — name (hero, READ-ONLY here) + «host · ping · uptime»
+              meta. The active config's title is edited in «Изменить» (ConfigEditView), not
+              inline — inline rename is a resting-row affordance only. */}
+          <div className="flex min-w-0 flex-col items-center gap-[var(--space-1)] text-center">
+            <TruncatedText
+              text={displayName}
+              className="max-w-full text-base font-semibold text-[var(--color-text-primary)]"
+            />
+            <div className="flex min-w-0 max-w-full items-center justify-center gap-[var(--space-3)] text-xs text-[var(--color-text-muted)]">
+              <span className="flex min-w-0 items-center gap-[var(--space-1)]">
+                {/* Phase 16 (T-22): a bare-IP endpoint (no domain) shows a leading LETTER-glyph
+                    «IP» instead of the `Globe`, so the user can tell a raw-IP server (self-signed /
+                    no-domain) apart from a domain one at a glance. Locked visual (connection.md):
+                    a TEXT glyph, NOT a lucide icon — do NOT reuse buildConnectDetails' `Server` swap.
+                    IP-only AND lead-card only: resting rows never show it (they drop the host icon
+                    entirely). Derived from the EXISTING `isIpAddress` helper (no new regex) and the
+                    EXISTING `connection.card.ip_only_tooltip` key (no new key). The `Tooltip` gives
+                    the hover affordance; the visually-hidden `sr-only` span carries the same label as
+                    the accessible name in the always-rendered DOM (a hover-portal tooltip alone is not
+                    reachable for a screen reader parked on the glyph, and is not in the card subtree). */}
+                {/* 16-07 (gap 5a): the glyph branch + host text key off config.display_host (the
+                    IP-preferring card value), NOT config.host (the raw dedup key). A bare-IP server
+                    carrying a fake SNI hostname (trusttunnel.local) thus shows the real IP + «IP»
+                    glyph; a real domain keeps the domain + globe. Dedup still keys off config.host. */}
+                {/* 5a-2 (16-12): the «IP» marker must be CONSISTENT with the domain
+                    `Globe` treatment (owner: «не по дизайну») — the boxed pill
+                    (border + bg + rounded box) read as a mismatched badge next to
+                    the clean inline globe. Render «IP» as a plain inline monochrome
+                    marker at the SAME size (h-3.5 = 14px) and the SAME muted token
+                    color as the globe, no pill/border/background. It sits inline in
+                    the meta row exactly where the globe would, so a bare-IP server
+                    and a domain server read as the same kind of host glyph. */}
+                {isIpAddress(config.display_host) ? (
+                  <Tooltip text={t("connection.card.ip_only_tooltip")} position="top">
+                    <span
+                      className="inline-flex h-3.5 shrink-0 items-center text-[11px] font-semibold leading-none tracking-wide text-[var(--color-text-muted)]"
+                      aria-hidden="true"
+                      data-testid="config-card-ip-marker"
+                      // TA-9: stable semantic marker for the "plain inline glyph (not a boxed
+                      // pill/badge)" contract (5a-2). Tests assert on this, not on Tailwind class
+                      // substrings, so a cosmetic restyle/token-rename can't break the test.
+                      data-variant="plain"
+                    >
+                      IP
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                )}
+                {isIpAddress(config.display_host) && (
+                  <span className="sr-only">{t("connection.card.ip_only_tooltip")}</span>
+                )}
+                <TruncatedText text={config.display_host} className="min-w-0 font-mono" />
+              </span>
+              {/* Phase 14: explicitly hide the connected-only details (ping + uptime) while
+                  `switching`. A transient `connected` in the switch/revert window (A briefly up, or A
+                  reconnected on revert while `isSwitching` is not yet cleared) must NOT flash a stale
+                  ping/uptime — the amber «Переключение» owns the row. Direct `!switching` guard, not the
+                  `isConnected` side-effect (verifier WARNING: the side-effect left a 1-render flash window). */}
+              {isConnected && !switching && shouldShowPing(status) && (
+                <span className="flex shrink-0 items-center gap-[var(--space-1)]">
+                  <Activity className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <ConfigPingPill ping={effectivePing} />
+                </span>
+              )}
+              {/* Session uptime: a LIVE 1s ticker from `connectedSince` in production (the wire that
+                  was missing since Phase 11 — the slot + Storybook existed, the data did not); the
+                  static `uptime` string is the Storybook/test fallback. */}
+              {isConnected && !switching && (connectedSince || uptime) && (
+                <span className="flex shrink-0 items-center gap-[var(--space-1)] font-mono tabular-nums">
+                  <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {connectedSince ? <UptimeCounter since={connectedSince} /> : uptime}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Right: primary + overflow. min-w-[9rem] fits the longest label «Переключиться». */}
+          <div className="flex items-center justify-end gap-[var(--space-1)]">
+            {/* D-05 (17-07) / BUG-A2 (17-uat): the loader carries a LIVE «Отмена» button so the user
+                can abort the wait — the SAME affordance StatusPanel offers (StatusPanel.tsx:169-175),
+                mounted here on the Connection tab's lead card. It calls the reused `onDisconnect`
+                (App's race-safe handleUserCancel → vpn_disconnect), idempotent against the fast-settle
+                race — vpn_disconnect no-ops on an already-settled session (Pitfall 5). No new backend
+                command, no new state.
+                BUG-A2: the LIVE cancel shows for `connecting` / `recovering` — the states where the
+                App's `reconnectResolve` latch is GUARANTEED null, so handleUserCancel PROCEEDS and the
+                cancel actually works. It shows EVEN WHILE `connectPending` is true: on a plain connect
+                handleConnectActive raises pendingConnectPath (→ connectPending) for the WHOLE connect
+                span, and the live status is `connecting` throughout — gating the cancel on
+                `!connectPending` would HIDE the «Отмена» for the entire normal connect (the exact
+                "нет кнопки отмены при обычном подключении" bug). Because handleUserCancel is safe during
+                connecting/recovering, there is no reason to hide it there. The FIRST branch (this one)
+                wins whenever the status is already `connecting`/`recovering`; the F28 pre-`connecting`
+                instant-feedback window (status still disconnected/error + connectPending) has NO
+                connecting status, so it falls to the inert-spinner branch below. It is NOT shown when:
+                  - `reconnecting` — AMBIGUOUS: it is set BOTH by the backend auto-retry supervisor
+                    (reconnectResolve null → safe) AND by a FE save-and-reconnect whose teardown ARMS
+                    reconnectResolve (→ handleUserCancel is inert). Since we cannot tell them apart from
+                    status alone, `reconnecting` gets the INERT spinner — never a live-but-dead cancel;
+                  - `disconnecting` — the teardown itself is non-cancelable (StatusPanel hides it too);
+                  - `switching` — a seamless A→B switch is self-terminating (isSwitching held across its
+                    `connecting` leg, during which handleUserCancel IS inert), so its controls are locked
+                    to the inert spinner (never a live-but-dead cancel — Phase 14 D-12).
+                A backend AUTO-reconnect now shows the live cancel too, and that is the UAT
+                fix (2026-08-26). `reconnecting` used to be excluded outright as ambiguous — the
+                status is raised BOTH by the Rust auto-retry supervisor (cancel works) and by a FE
+                save-and-reconnect whose teardown arms `reconnectResolve` (cancel inert) — so the
+                card hid the button in both cases. Ten attempts into an automatic reconnect the only
+                way to stop was the tray menu, which works because it calls `tray_vpn_disconnect`
+                directly. The two cases ARE distinguishable without new state: a FE
+                save-and-reconnect raises `pendingConnectPath` → `connectPending` for exactly its own
+                span (`handleReconnectGuarded`, cleared in the same `finally`), while a backend
+                auto-retry raises nothing on the frontend. `reconnecting && !connectPending` is
+                therefore precisely «this one is the backend's, and the cancel will land».
+                The inert-spinner branch below stays the exact complement, so the show-condition
+                still matches the handler's works-condition — no dead button, and no hidden live one. */}
+            {(status === "connecting" ||
+              status === "recovering" ||
+              (status === "reconnecting" && !connectPending)) &&
+            !switching ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDisconnect?.()}
+                aria-label={t("buttons.cancel")}
+                className="min-w-[9rem] justify-center"
+              >
+                <Power className="w-3.5 h-3.5" />
+                {t("buttons.cancel")}
+              </Button>
+            ) : isInFlight(status) || switching || connectPending ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled
+                loading
+                aria-label={leadStatusLabel}
+                title={leadStatusLabel}
+                className="min-w-[9rem] justify-center"
+              />
+            ) : (
+              <Button
+                variant={isConnected ? "danger" : "ghost"}
+                size="sm"
+                onClick={() => onConnect?.()}
+                disabled={busy || locked}
+                aria-label={primaryLabel}
+                className="min-w-[9rem] justify-center"
+              >
+                {primaryLabel}
+              </Button>
+            )}
+            <OverflowMenu
+              items={overflowItems}
+              triggerAriaLabel={t("connection.card.actions_label")}
+              className={locked ? "pointer-events-none opacity-50" : ""}
+            />
+          </div>
+        </div>
+        {/* F6 (14-UAT): the switch-failed-reverted notice EMBEDDED in the lead card — a calm,
+            dismissible ErrorBanner variant="info" (never the red banner — D-05). Mirrors the
+            story-tier connectionDemos «switch-failed-reverted». The aria-label names the
+            role="status" live region (name only — D-29). */}
+        {revertNotice && (
+          <ErrorBanner
+            variant="info"
+            message={revertNotice}
+            onDismiss={onRevertDismiss}
+            aria-label={revertNotice}
+            className="mt-[var(--space-2)]"
+          />
+        )}
+        </>
+      ) : (
+        /* ── Resting (inactive) row ── */
+        <div className="flex items-center gap-[var(--space-3)] min-w-0">
+          {/* Leading slot — a glyph that swaps to a busy spinner WITHOUT shifting the row. */}
+          {busy ? (
+            <Loader2
+              className="w-4 h-4 shrink-0 animate-spin text-[var(--color-text-muted)]"
+              aria-label={t("connection.card.busy_label")}
+            />
+          ) : (
+            <ClipboardList className="w-4 h-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+          )}
+
+          {/* Name area: display / inline-edit / error sub-states (D-14). The display↔edit
+              swap keeps a constant min-height (h-8) so the host line never shifts. Rename is
+              offered only when the caller wires onRename (resting card only). */}
+          <div className="flex flex-col min-w-0 flex-1 gap-[var(--space-1)]">
+            {editing ? (
+              nameEditor
+            ) : (
+              <div className="flex items-center gap-[var(--space-1)] min-w-0 min-h-8">
+                <TruncatedText
+                  text={displayName}
+                  className="min-w-0 text-sm font-medium text-[var(--color-text-primary)]"
+                />
+                {renameEnabled && (
+                  <IconButton
+                    aria-label={t("connection.rename.aria")}
+                    tooltip={t("connection.rename.aria")}
+                    icon={<Pencil className="w-3.5 h-3.5" />}
+                    onClick={startRename}
+                    disabled={busy || locked}
+                    className="h-6 w-6 shrink-0"
+                  />
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-[var(--space-1)] min-w-0 text-xs text-[var(--color-text-muted)]">
+              {/* 16-07: resting-row host text shows the IP-preferring display_host too (dedup keys off host). */}
+              <TruncatedText text={config.display_host} className="min-w-0 font-mono" />
+              {config.user && (
+                <>
+                  <span aria-hidden="true" className="shrink-0 select-none">·</span>
+                  <span className="shrink-0 select-none truncate">{config.user}</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Ping pill — right-aligned in a fixed column; only for the settled buckets (F03). */}
+          {shouldShowPing(status) && (
+            <div className="flex w-20 shrink-0 items-center justify-end">
+              <ConfigPingPill ping={effectivePing} />
+            </div>
+          )}
+
+          {/* Action zone — primary + overflow, separated by a wider gap (Gestalt). */}
+          <div className="flex items-center gap-[var(--space-1)] shrink-0 ml-[var(--space-4)]">
+            <Button
+              variant={isConnected ? "danger" : "ghost"}
+              size="sm"
+              onClick={runAction(onConnect)}
+              disabled={busy || locked}
+              // F28: instant spinner the moment this card's «Подключить»/«Переключиться» is clicked, for
+              // the window before the live status flips to connecting (Button.loading also disables it).
+              loading={connectPending}
+              aria-label={primaryLabel}
+              className="min-w-[9rem] justify-center"
+            >
+              {primaryLabel}
+            </Button>
+            <OverflowMenu
+              items={overflowItems}
+              triggerAriaLabel={t("connection.card.actions_label")}
+              className={locked ? "pointer-events-none opacity-50" : ""}
+            />
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * PP-8 (17-07, n-7): `ConfigCard` is `React.memo`-wrapped so a re-render of the list (e.g. an
+ * unrelated card's ping update landing on the shared `pings` map, or a parent state tick) does not
+ * re-render every card — only the cards whose own props (id / status / ping / the flags / the
+ * action callbacks) actually changed. Default shallow comparison is correct here (no deep-equal
+ * needed): the list passes a stable `pings[id]` reference per card, so an unchanged card gets the
+ * same `ping` object.
+ *
+ * F13 (17-review): for the memo to ACTUALLY skip a render, every prop must keep stable identity
+ * across a ping tick. ConfigList used to build FRESH inline arrow callbacks (`() => onConnect(config)`
+ * …) and a freshly-mapped `existingNames` array on each render, so the shallow compare always failed
+ * and the memo was a no-op. ConfigList now hands each card the SAME closure identities from a
+ * memoized id→handlers map + a memoized shared `existingNames` array (rebuilt only when `configs` or
+ * the callbacks change, not on a ping tick), so an unchanged card's props compare equal and this memo
+ * genuinely bails — see ConfigList `cardHandlers`/`allNames`.
+ */
+export const ConfigCard = memo(ConfigCardImpl);
