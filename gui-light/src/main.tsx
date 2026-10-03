@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import { SnackBarProvider } from "./shared/ui/SnackBarContext";
 import "./shared/styles/tokens.css";
@@ -16,6 +17,21 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
   }
 });
+
+// Dev-only aggregated log window trigger (T-14): Ctrl+Shift+L invokes the
+// `open_log_window` Rust command. Gated by `import.meta.env.DEV`, so the listener
+// is dead code in a production bundle; the command it calls only exists under the
+// `devtools` cargo feature anyway (double gate).
+if (import.meta.env.DEV) {
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.shiftKey && (e.key === "L" || e.key === "l")) {
+      e.preventDefault();
+      // In a release-shape build the command is absent and invoke rejects —
+      // swallow so a stray shortcut never surfaces an error.
+      invoke("open_log_window").catch(() => {});
+    }
+  });
+}
 
 // Block right-click context menu
 document.addEventListener("contextmenu", (e) => {

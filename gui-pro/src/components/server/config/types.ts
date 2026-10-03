@@ -1,0 +1,238 @@
+/**
+ * Phase 15.1 — Schema-driven TOML editor type system.
+ *
+ * Discriminated union TomlFieldType + TomlFieldSchema interface form
+ * the structure of the field tree generated from smol-toml parse +
+ * static defaults map (Plan 15.1-05). SchemaFieldRenderer (Plan 15.1-03)
+ * dispatches by `type.kind`; useTomlConfigState (Plan 15.1-04) tracks
+ * dirty state по path[].
+ *
+ * Roll-our-own visitor pattern (RESEARCH.md Q1) — @rjsf/core несовместим
+ * с +15 KB gzip budget (~156 KB).
+ *
+ * Backend contract: shape mirrors ConfigBundle in
+ * `gui-pro/src-tauri/src/ssh/server/server_config.rs` через serde
+ * `#[serde(rename_all = "camelCase")]` (Plan 15.1-01 extends bundle до 4 файлов).
+ */
+
+// ────────────────────────────────────────────────────────────────────────────
+// Allowed file_name для server_save_config_file (D-15.1).
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Allowed file names for the generic save command. credentials = forbidden
+ * by design (D-2.1 — credentials.toml = read-only, edited only через Users tab;
+ * D-15.1 — backend file_name enum rejects "credentials" via char-whitelist).
+ *
+ * Type-level enforcement: TS code passing `fileName: "credentials"` would not
+ * compile. Backend re-validates per V13 trust-boundary invariant.
+ */
+export type ConfigFileName = "vpn" | "hosts" | "rules";
+
+// ────────────────────────────────────────────────────────────────────────────
+// Backend ConfigBundle TS mirror (Plan 15.1-01 backend extends to 4 files).
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mirrors `ConfigBundle` struct в gui-pro/src-tauri/src/ssh/server/server_config.rs.
+ * Backend uses `#[serde(rename_all = "camelCase")]` so Rust `vpn_toml` →
+ * JS `vpnToml`, `rules_toml` → `rulesToml`, etc.
+ *
+ * Phase 15.1-01 (parallel Wave 1 task) extends backend ConfigBundle с двумя
+ * новыми полями: `credentials_toml` + `rules_toml`. Этот TS interface уже
+ * включает их; backend SUMMARY должен подтвердить exact key spelling.
+ */
+export interface ConfigBundle {
+  vpnToml: string;
+  hostsToml: string;
+  /** D-2.1: read-only preview content — never mutated via this bundle. */
+  credentialsToml: string;
+  /**
+   * D-2.3: editable с frontend pre-merge ownership split.
+   *
+   * NOTE: serde camelCase converts `rules_toml` → `rulesToml`, NOT `ruleToml`.
+   * If Plan 15.1-01 SUMMARY documents a different spelling, update this name.
+   */
+  rulesToml: string;
+  typed: VpnConfigKnown;
+  allowedSni: AllowedSniHost[];
+  serviceStatus: string;
+}
+
+/**
+ * Typed Quick Settings fields (Plan 15-01 shipped). Mirrors `VpnConfigKnown`
+ * struct в server_config.rs. `extra` preserves untyped TOML values that
+ * Rust serde flattens via `HashMap<String, toml::Value>`.
+ */
+export interface VpnConfigKnown {
+  listen_address: string;
+  ipv6_available: boolean;
+  allow_private_network_connections: boolean;
+  log_level: string | null;
+  auth_failure_status_code: number;
+  ping_enable: boolean;
+  speedtest_enable: boolean;
+  ping_path: string;
+  speedtest_path: string;
+  credentials_file: string;
+  /**
+   * Catch-all preserving timeouts, [listen_protocols.*], [forward_protocol],
+   * [reverse_proxy], [icmp], [metrics] sub-tables. Rust HashMap → JS
+   * `Record<string, unknown>`; smol-toml parse on `vpnToml` reproduces
+   * the same structure for schema-driven rendering.
+   */
+  extra?: Record<string, unknown>;
+}
+
+/**
+ * One `[[main_hosts]]` entry, trimmed to fields the frontend SNI autocomplete
+ * needs (Plan 15-02 shipped). Backend struct `AllowedSniHost { hostname,
+ * allowed_sni }` → camelCase → `{ hostname, allowedSni }`.
+ */
+export interface AllowedSniHost {
+  hostname: string;
+  allowedSni: string[];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Discriminated union for visitor pattern dispatch.
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tagged union representing the type of a parsed TOML node плюс its
+ * current value. SchemaFieldRenderer switches on `kind`:
+ *
+ *   string             → StringField
+ *   integer            → NumberField
+ *   boolean            → ToggleField
+ *   array-of-strings   → string-array editor (chip-list pattern)
+ *   array-of-tables    → ArrayOfTablesBlock (inline fieldset cards)
+ *   table              → nested section heading или TabsInline (≥2 sub-sections, D-9.1)
+ *   unknown            → RawUnknownField + warning badge (D-16.1 forward-compat)
+ */
+export type TomlFieldType =
+  | { kind: "string"; value: string }
+  | { kind: "integer"; value: number }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "array-of-strings"; value: string[] }
+  | { kind: "array-of-tables"; value: Record<string, unknown>[] }
+  | { kind: "table"; fields: Record<string, TomlFieldType> }
+  | { kind: "unknown"; rawValue: string };
+
+/**
+ * One field в schema tree. Generated by Plan 15.1-04 schema-builder
+ * (smol-toml parse + Plan 15.1-05 default maps + Plan 15.1-05 disrupt map).
+ */
+export interface TomlFieldSchema {
+  /** Raw English TOML key (D-3.1). E.g. `listen_address`, `max_concurrent_streams`. */
+  key: string;
+  /** Path в дереве как массив сегментов (e.g. ["listen_protocols", "http2", "max_concurrent_streams"]). */
+  path: string[];
+  /** Type info + current value. */
+  type: TomlFieldType;
+  /** True if field explicitly present в файле; false if value comes from default map (D-6.1). */
+  isExplicit: boolean;
+  /** i18n key для tooltip RU description (D-3.2). E.g. `server.config.field_desc.vpn.listen_address`. */
+  tooltipKey?: string;
+  /** True if field в static disrupt-fields.ts map (D-4.4 — disrupt-high warning). */
+  isDisruptHigh?: boolean;
+  /** True if field присутствует в файле, но НЕТ в default map (D-16.1 forward-compat). */
+  isUnknown?: boolean;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Pure helper: infer kind discriminator from a JS value (post smol-toml parse).
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pure helper: derive TomlFieldType.kind from a parsed JS value.
+ *
+ * RESEARCH.md Q2: smol-toml maps TOML primitives 1-to-1 to JS:
+ *   TOML integer → JS number (Number.isInteger == true)
+ *   TOML float   → JS number (Number.isInteger == false)
+ *   TOML bool    → JS boolean
+ *   TOML string  → JS string
+ *   TOML array   → JS Array (homogeneous: of strings, of tables, etc.)
+ *   TOML table   → JS object
+ *
+ * Phase 15.1 simplification: treats all JS numbers as `integer` because
+ * upstream TrustTunnel CONFIGURATION.md schema has no float fields. If
+ * future schema introduces floats, extend with a dedicated `kind: "float"`.
+ *
+ * Empty arrays (length 0) default to `array-of-tables` because that is the
+ * dominant array shape in TrustTunnel TOML files (main_hosts, ping_hosts,
+ * speedtest_hosts, reverse_proxy_hosts, [[rule]]). Plan 15.1-05 default
+ * maps disambiguate when the value is empty by inspecting the schema.
+ */
+export function inferTomlFieldType(value: unknown): TomlFieldType["kind"] {
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number") {
+    // TOML distinguishes int vs float; smol-toml parses both as JS number.
+    // For Phase 15.1 simplicity we treat all numbers as integer (sufficient
+    // for upstream TrustTunnel schema).
+    return "integer";
+  }
+  if (typeof value === "string") return "string";
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      // Empty array: assume array-of-tables (dominant upstream shape).
+      // Plan 15.1-05 default maps disambiguate by inspecting schema.
+      return "array-of-tables";
+    }
+    return typeof value[0] === "object" && value[0] !== null
+      ? "array-of-tables"
+      : "array-of-strings";
+  }
+  if (typeof value === "object" && value !== null) return "table";
+  return "unknown";
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Dirty tracking (Plan 15.1-04 useTomlConfigState).
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One dirty field record для useTomlConfigState (Plan 15.1-04).
+ *
+ * Map keyed by `path.join(".")`. The hook stores `before` for diff display
+ * (D-4.3 ConfirmDialog «Файл / Поле / Было / Стало»), `after` for the
+ * outgoing save payload, and `fileName` to batch the change to the right
+ * file when sequentially saving via server_save_config_file.
+ */
+export interface DirtyFieldRecord {
+  /** Original value when bundle was loaded (anchor for diff display, D-4.3). */
+  before: unknown;
+  /** Current edited value (sent to backend on save). */
+  after: unknown;
+  /** Which file this change belongs to (used for save batching). */
+  fileName: ConfigFileName;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Plan 15.1-05 schema data contracts (defaults + disrupt sets).
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Static defaults map для одного TOML файла (D-6.2).
+ *
+ * Map keys = path joined with dots ("listen_protocols.http2.max_concurrent_streams").
+ * Map values = upstream defaults (per CONFIGURATION.md). Schema-builder использует
+ * defaults для (а) explicit-vs-default detection (D-6.1: показать только overridden
+ * поля + toggle «Показать все default»), (б) type inference fallback when value
+ * is not present в файле, (в) initial values при первом render «Показать все».
+ *
+ * Typed as `Record<string, unknown>` чтобы покрыть смешанные scalar/object/array
+ * defaults без жёсткого type narrowing на этом уровне; визуальный renderer
+ * использует `inferTomlFieldType` для dispatch.
+ */
+export type DefaultsMap = Record<string, unknown>;
+
+/**
+ * Set of "joined.path" strings flagging fields that disconnect active VPN
+ * users when changed (D-4.4).
+ *
+ * Plan 15.1-04 useTomlConfigState computes `hasDisruptHighField` by
+ * intersecting dirty paths с этим set; ConfigurationTab footer показывает
+ * disrupt warning Banner в case of intersection.
+ */
+export type DisruptSet = Set<string>;

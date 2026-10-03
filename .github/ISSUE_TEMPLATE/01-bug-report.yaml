@@ -1,111 +1,117 @@
-name: 🐞 Bug report
-description: Report a bug related to TrustTunnel console client
-title: "[Bug]: "
-labels: ["Bug"]
+name: 🐞 Сообщить об ошибке
+description: Что-то работает не так в приложении для Windows
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug!
+        Спасибо, что нашли время написать.
 
-        ⚠️ Please note:
-        - This template is intended for **bugs only**
-        - Questions and usage issues should go to Discussions
-        - Issues that do not follow this template may be closed
+        Это трекер **графического клиента TrustTunnel для Windows** (издания Pro и Light).
+        Ошибки в самом протоколе TrustTunnel и в консольном клиенте — в
+        [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
 
-  - type: checkboxes
+  - type: dropdown
+    id: edition
     attributes:
-      label: Before submitting, please confirm
+      label: Какое издание
       options:
-        - label: I read the README and followed all setup steps in order
-          required: true
-        - label: I searched existing issues and found no duplicates
-          required: true
-        - label: I am using the latest version of the TrustTunnel console client
-          required: true
-
-  - type: textarea
-    id: environment
-    attributes:
-      label: Environment details
-      description: |
-        Please provide relevant environment details.
-        Examples:
-          - **OS**: Ubuntu v22.04
-          - **Architecture**: x86-64
-      value: |
-        - OS:
-        - Architecture:
+        - Pro
+        - Light
+        - Не знаю
     validations:
       required: true
 
   - type: input
     id: app_version
     attributes:
-      label: App version
-      description: Version where the issue occurs
-      placeholder: ex. 0.99.99
+      label: Версия приложения
+      description: 'Открыть «О программе» — версия написана там. Если после номера стоит дефис и шесть символов (например `3.0.0-a3f9k2`), укажите целиком: это тестовая сборка.'
+      placeholder: например 3.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Версия Windows
+      options:
+        - Windows 11
+        - Windows 10
+        - Другая
     validations:
       required: true
 
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
-      description: |
-        Provide clear and minimal steps to reproduce the issue.
-        If possible, include a minimal reproducible example.
+      label: Что вы делали
+      description: По шагам, чтобы можно было повторить. Если ошибка появляется не всегда — напишите, как часто.
       placeholder: |
-        1. Run the app
-        2. Click on the toggle button
-        3. Observe crash / incorrect behavior
+        1. Открыл вкладку «Подключение»
+        2. Нажал «Подключить» на сервере
+        3. …
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
-      placeholder: Describe what you expected to happen.
+      label: Что должно было произойти
     validations:
       required: false
 
   - type: textarea
     id: actual
     attributes:
-      label: Actual behavior
-      placeholder: Describe what actually happened.
+      label: Что произошло на самом деле
+      description: Если приложение показало сообщение об ошибке — приведите его текст целиком.
     validations:
       required: true
 
   - type: textarea
+    id: other_vpn
+    attributes:
+      label: Другие VPN-программы на этом компьютере
+      description: |
+        Важно даже если они **выключены и не запущены**. Чужой сетевой драйвер, просто установленный
+        в системе, умеет ломать подключение — такой случай уже разбирали (Radmin VPN).
+        Перечислите всё, что стоит: Radmin VPN, WireGuard, OpenVPN, Amnezia, Hamachi и подобное.
+      placeholder: 'например: стоит Radmin VPN, не запущен'
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Журнал работы
+      description: |
+        Сильно помогает. В приложении: «Настройки» → журнал → **«Показать в папке»**, нужен файл `app.log`.
+        Папка же лежит по пути `%LOCALAPPDATA%\TrustTunnel Client Pro`.
+
+        Паролей в этом файле нет — приложение не пишет их в журнал. Но адреса ваших серверов там
+        есть: если не хотите показывать их публично, замените на `example.com` перед отправкой.
+      placeholder: Приложите файл или вставьте последние строки.
+    validations:
+      required: false
+
+  - type: textarea
     id: screens
     attributes:
-      label: Screenshots
-      description: |
-        If applicable add screenshots explaining your problem.
-        You can drag and drop images or paste them from clipboard.
-        Use `<details> </details>` tag to hide screenshots under the spoiler.
-      placeholder: If applicable add screenshots explaining your problem.
+      label: Снимки экрана
+      description: Можно перетащить картинку прямо в это поле или вставить из буфера обмена.
       value: |
-          <details><summary>Screenshot 1</summary>
+        <details><summary>Снимок экрана</summary>
 
-          <!-- paste screenshot here -->
+        <!-- вставьте картинку сюда -->
 
-          </details>
+        </details>
     validations:
       required: false
 
   - type: textarea
     id: additional
     attributes:
-      label: Additional Information
-      placeholder: Add any other context about the problem here.
+      label: Что ещё стоит знать
     validations:
       required: false
-  - type: markdown
-    attributes:
-      value: |
-        ---
-
-        Upvote [important issues](https://github.com/TrustTunnel/TrustTunnelClient/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc+) with a :+1:

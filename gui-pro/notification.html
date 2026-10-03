@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TrustTunnel Notification</title>
+    <style>
+      /* OPAQUE surface — a transparent Win11 window renders black in dark theme
+         (Tauri #13859, the bug that killed this repo's custom webview tray-menu),
+         so the plate window is opaque. The elevated-surface token matches the
+         ConnectionToast Card so the window edge and the plate read as one layer. */
+      html, body, #notification-root {
+        margin: 0;
+        padding: 0;
+        background: var(--color-bg-elevated);
+        overflow: hidden;
+        height: 100%;
+        font-family: "Geist Sans", "Segoe UI", system-ui, sans-serif;
+        user-select: none;
+        -webkit-font-smoothing: antialiased;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="notification-root"></div>
+    <script type="module" src="/src/notification.tsx"></script>
+  </body>
+</html>

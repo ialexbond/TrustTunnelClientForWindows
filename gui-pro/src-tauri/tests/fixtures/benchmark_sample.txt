@@ -1,0 +1,71 @@
+########################################################################
+              IP.Check.Place — Server Quality Report
+########################################################################
+
+1. Basic Information
+########################################################################
+IP Address:         203.0.113.42
+Hostname:           srv42.example.com
+Country:            Germany (DE)
+City:               Frankfurt am Main
+ISP:                Hetzner Online GmbH
+ASN:                AS24940
+Organization:       Hetzner Online GmbH
+PTR Record:         static.42.113.0.203.clients.your-server.de
+
+2. IP Type
+########################################################################
+Type:               Hosting / Data Center
+Proxy:              No
+VPN:                No
+Tor Exit Node:      No
+Bogon:              No
+Abuse Contact:      abuse@hetzner.com
+
+3. Risk Score
+########################################################################
+Fraud Score:        12 / 100
+Risk Level:         Low
+Verdict:            Clean
+Recent Abuse:       No
+Blacklisted:        No
+Spam Detected:      No
+
+4. Risk Factors
+########################################################################
+Known Attacker:     No
+Known Abuser:       No
+Bot Activity:       No
+Data Center IP:     Yes (Hosting provider)
+Residential IP:     No
+Anonymous Proxy:    No
+
+5. Accessibility check for media and AI services
+########################################################################
+Netflix:            Available
+YouTube:            Available
+Spotify:            Available
+ChatGPT:            Available
+Claude AI:          Available
+Bing AI:            Available
+Gemini:             Available
+Amazon Prime Video: Available
+Disney+:            Restricted
+BBC iPlayer:        Blocked
+
+6. Email service availability and blacklist detection
+########################################################################
+SMTP Port 25:       Open
+Spamhaus ZEN:       Not Listed
+Barracuda:          Not Listed
+SpamCop:            Not Listed
+SORBS:              Not Listed
+MX Toolbox:         Clean
+Senderscore:        95 / 100
+Email Reputation:   Good
+
+########################################################################
+                         Report Complete
+########################################################################
+Total Time:         47.3 seconds
+Checked At:         2026-05-18 12:34:56 UTC

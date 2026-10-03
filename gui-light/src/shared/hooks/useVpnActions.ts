@@ -52,8 +52,28 @@ export function useVpnActions({
   const handleReconnect = useCallback(async () => {
     if (status !== "connected" && status !== "connecting") return;
 
-    // Disconnect and wait for actual disconnected status
-    await handleDisconnect();
+    // Plan 02-12 (Light mirror of Pro): opt the MANUAL reconnect into the same
+    // recovering guard the AUTO-reconnect path already uses (useVpnEvents.ts:
+    // prev === "recovering" && payload === "disconnected" → keep). We set the
+    // status to the canonical Plan-02-06/08 "recovering" token UP FRONT so the
+    // intermediate teardown "disconnected" event is suppressed and the user keeps
+    // seeing a continuous «Переподключение…» label instead of a misleading
+    // «Отключено» flash for the whole teardown window (user-reported bug 02-12).
+    setStatus("recovering");
+
+    // Tear the tunnel down via a DIRECT vpn_disconnect invoke rather than
+    // handleDisconnect(): handleDisconnect sets status to "disconnecting", which
+    // would clobber the "recovering" we just set and break the guard above (the
+    // guard keys on prev === "recovering"; with prev === "disconnecting" the
+    // intermediate "disconnected" event would NOT be suppressed and the «Отключено»
+    // flash would return). The "disconnected" event still resolves the reconnect
+    // promise below (that listener keys on reconnectResolve.current, not on status).
+    try {
+      await invoke("vpn_disconnect");
+    } catch (e) {
+      setError(formatError(e));
+    }
+
     await new Promise<void>((resolve) => {
       reconnectResolve.current = resolve;
       // Safety timeout: if disconnect event never comes, resolve after 5s
@@ -68,9 +88,10 @@ export function useVpnActions({
     // Small delay to let the sidecar process fully terminate
     await new Promise((r) => setTimeout(r, 200));
 
-    // Now reconnect
+    // Now reconnect — handleConnect moves "recovering" → "connecting" → "connected"
+    // on success, or → "error" via its own catch on a real failure.
     await handleConnect();
-  }, [status, handleDisconnect, handleConnect, reconnectResolve]);
+  }, [status, handleConnect, reconnectResolve, setStatus, setError]);
 
   return { handleConnect, handleDisconnect, handleReconnect };
 }

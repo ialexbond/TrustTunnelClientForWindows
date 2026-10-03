@@ -1,5 +1,6 @@
 cmake-build-*/
 build/
+env/
 .idea/
 .vscode/
 .DS_Store
@@ -7,6 +8,8 @@ CMakeUserPresets.json
 pyvenv.cfg
 .clangd/
 /.cache/
+
+target/
 
 # Conan and conan-cmake create some files in-tree by design
 conan.lock
@@ -18,6 +21,7 @@ cmake/conan_provider.cmake
 
 # Build artifacts
 *.zip
+*.tgz
 webview_data/
 geodata/
 routing_rules.json
@@ -25,9 +29,9 @@ build_log.txt
 build_*.bat
 build_*.ps1
 build_output.log
-gui-app/src-tauri/vcruntime*.dll
-gui-app/src-tauri/wintun.dll
-gui-app/src-tauri/trusttunnel_client-*.exe
+gui-pro/src-tauri/vcruntime*.dll
+gui-pro/src-tauri/wintun.dll
+gui-pro/src-tauri/trusttunnel_client-*.exe
 gui-light/src-tauri/vcruntime*.dll
 gui-light/src-tauri/wintun.dll
 gui-light/src-tauri/trusttunnel_client-*.exe
@@ -39,6 +43,21 @@ installer/output/
 .claude/
 CLAUDE.md
 
+# AI tool workspace directories
+.agents/
+.junie/
+.kiro/
+.windsurf/
+
+# Skills system
+skills/
+skills-lock.json
+gui-pro/skills-lock.json
+gui-light/skills-lock.json
+
+# Node artifacts
+node_modules/
+
 # Obsidian working notes
 memory/
 
@@ -46,6 +65,21 @@ memory/
 TrustTunnel-Portable/
 TrustTunnel-v*-portable-*/
 exclusions.json
-gui-app/coverage/
+gui-pro/coverage/
 .planning/
 AGENTS.md
+GEMINI.md
+.hex-skills/
+
+# Design-hook cache (generated per session by the impeccable tooling, never source).
+.impeccable/
+
+# C++ core build trees (local only — the sidecar is committed as a binary, not built in CI).
+build-msvc*/
+build-v115-src/
+
+# Version files generated at build time from templates by cmake/version.cmake
+# and setup_wizard/build.rs (see cmake/version.cmake). Never committed.
+trusttunnel/include/vpn/trusttunnel/version.h
+trusttunnel/trusttunnel_client.rc
+trusttunnel/setup_wizard/resources/setup_wizard.rc
