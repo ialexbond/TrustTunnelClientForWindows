@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { IconButton } from "../../shared/ui/IconButton";
 import { placeFocus } from "../../shared/hooks/usePointerPresence";
+import { isValidRouteAddress } from "../../shared/utils/cidr";
 import { GeoAutocomplete } from "./GeoAutocomplete";
 import type { RouteAction, GeoDataIndex, GeoDataStatus, IplistGroup } from "./useRoutingState";
 
@@ -56,14 +57,15 @@ function validateEntry(value: string, groupIds: string[]): string | null {
   // geoip:/geosite: — always valid (autocomplete handles validation)
   if (/^geo(ip|site):/i.test(trimmed)) return null;
 
-  // IP address (v4)
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed)) return null;
-
-  // CIDR (v4)
-  if (/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(trimmed)) return null;
-
-  // IPv6
-  if (/^[0-9a-fA-F:]+$/.test(trimmed) && trimmed.includes(":")) return null;
+  // IP address / CIDR (v4 or v6) — a FINAL decision (D-17): once the input looks like an
+  // address (only digits/dots/one slash, or hex+colons+dots/slash), it never falls through to
+  // the domain branches below. Before this fix, `1.2.3` (has a dot, only digits/dots) silently
+  // passed the Latin-domain branch as a "domain" — see AddRuleInput.test.tsx MR3-06 suite.
+  // Routed through the shared cidr.ts validator (isValidRouteAddress) so this field and the
+  // server-CIDR field never diverge on what an IPv4 CIDR means.
+  if (/^[\d./]+$/.test(trimmed) || (trimmed.includes(":") && /^[0-9a-fA-F:./]+$/.test(trimmed))) {
+    return isValidRouteAddress(trimmed) ? null : "routing.validation.invalidIp";
+  }
 
   // Domain validation:
   // Latin domains: a-z, 0-9, hyphens, dots, wildcards

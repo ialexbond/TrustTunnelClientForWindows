@@ -12,6 +12,10 @@ import i18n from "./index";
 // the `?raw` query (typed via `vite/client` in tsconfig types).
 import ruRaw from "./locales/ru.json?raw";
 import enRaw from "./locales/en.json?raw";
+// `?raw` precedent: gui-pro/src/shared/shellOpenScope.test.ts imports
+// tauri.conf.json?raw for the same reason — the point is what SHIPS in the
+// file, before React/i18n ever runs, not a parsed/transformed view of it.
+import indexHtmlRaw from "../../../index.html?raw";
 
 function flattenKeys(obj: Record<string, unknown>, prefix = ""): Set<string> {
   const keys = new Set<string>();
@@ -58,6 +62,47 @@ describe("i18n key parity", () => {
     expect(ru.routing.processListErrorHint).toBeTruthy();
     expect(en.routing.processListErrorHint).toBeTruthy();
     expect(ru.routing.processListError).not.toBe(en.routing.processListError);
+  });
+});
+
+describe("MR3-03: document language follows the interface", () => {
+  // D-16: whatever path switches the interface language, the main window's
+  // `document.documentElement.lang` follows it — driven by i18next's own
+  // `languageChanged` event (registered in ./index BEFORE i18n.init), so every
+  // switch path (settings, toggle, tray) is covered without touching each caller.
+  it("ru -> en -> ru: the real i18n instance drives document.documentElement.lang", async () => {
+    const startingLang = i18n.language;
+    try {
+      await i18n.changeLanguage("ru");
+      expect(document.documentElement.lang).toBe("ru");
+
+      await i18n.changeLanguage("en");
+      expect(document.documentElement.lang).toBe("en");
+
+      await i18n.changeLanguage("ru");
+      expect(document.documentElement.lang).toBe("ru");
+    } finally {
+      // Restore the instance's starting language so other tests in this file
+      // (and this suite) are unaffected by this test's language switches.
+      await i18n.changeLanguage(startingLang);
+    }
+  });
+
+  it("the initial document language already matches the instance's current language", () => {
+    // i18next emits languageChanged during init too, so the listener registered
+    // in ./index before .init(...) must have stamped the document on import —
+    // not only on a later explicit changeLanguage call.
+    expect(document.documentElement.lang).toBe(
+      i18n.language.startsWith("en") ? "en" : "ru",
+    );
+  });
+
+  it("the static default in index.html is lang=\"ru\" (the app's primary language), never lang=\"en\"", () => {
+    // The pre-React default, for the few milliseconds before i18n initialises.
+    // Task 1's listener corrects it to "en" on an English interface as soon as
+    // i18n runs; this only guards the static fallback itself.
+    expect(indexHtmlRaw).toContain('<html lang="ru">');
+    expect(indexHtmlRaw).not.toContain('lang="en"');
   });
 });
 

@@ -1,0 +1,295 @@
+name: Run tests (public)
+
+# Inherited upstream workflow for the C++ sidecar (`trusttunnel/setup_wizard`)
+# and the `dns-libs` / `native_libs_common` Conan dependencies.
+#
+# All three jobs (Linux / MacOS / Windows) are gated to the upstream
+# repository `TrustTunnel/TrustTunnelClient` via
+#   if: github.repository == 'TrustTunnel/TrustTunnelClient'
+# On the `ialexbond/TrustTunnelClientForWindows` fork the jobs short-
+# circuit to `skipped`, which is intentional — the fork iterates on
+# the Tauri client (gui-pro), not on the upstream C++ sidecar.
+#
+# Why not just run the tests:
+#   - 2026-05-23: `bootstrap_conan_deps.py` failed on the fork because
+#     upstream tags `dns-libs/v2.8.42` and `native_libs_common/v8.0.27`
+#     were removed from AdguardTeam. We bumped to v2.8.44 / v8.1.27 in
+#     conanfile.py (commit 483f87f8).
+#   - 2026-05-24: with the new pins the script then failed on
+#     `FileNotFoundError: conandata.yml` — NativeLibsCommon refactored
+#     its build infra in the 8.x line and `conandata.yml` no longer
+#     exists at the repo root (last tag that has it is v7.0.15). The
+#     script as-shipped is incompatible with the new NLC layout.
+#
+# Fixing the script properly is a C++ build-infra job that touches
+# upstream-scope tooling; this fork doesn't iterate on it. The gate is
+# the pragmatic answer: skipped > failure when the failing path is
+# entirely out of scope. The file itself is kept so future upstream
+# merges land cleanly.
+
+env:
+  CONAN_VER: 2.12
+  CLANG_FORMAT_VER: 21.1.8
+  # The workflow bootstraps Conan itself, so `make` must not do it again.
+  SKIP_BOOTSTRAP: 1
+
+on:
+  push:
+    branches:
+      - master
+      - 'stable-*'
+      - 'dev-*'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  Linux:
+    runs-on: ubuntu-latest
+    env:
+      LLVM_MAJOR_VER: 21
+      PRESET: clang-relwithdebinfo-sanitizer
+      # GitHub-hosted runners have no IPv6 connectivity.
+      CMAKE_ARGS: >-
+        -DIPV6_UNAVAILABLE=ON
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    if: github.repository == 'TrustTunnel/TrustTunnelClient'
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: |
+          sudo apt install -y ninja-build
+          pip install -r requirements.txt
+          pip install conan~=$CONAN_VER
+          pip install clang-format~=$CLANG_FORMAT_VER
+          ## Install LLVM
+          curl -O https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh $LLVM_MAJOR_VER
+          rm ./llvm.sh
+          sudo apt install -y libc++-${LLVM_MAJOR_VER}-dev libclang-rt-${LLVM_MAJOR_VER}-dev
+          sudo apt install clang-tidy-${LLVM_MAJOR_VER}
+          echo "/usr/lib/llvm-$LLVM_MAJOR_VER/bin" >> $GITHUB_PATH
+          ## Add python's bin dir to path to ensure the correct clang-format version
+          PY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))")
+          echo "$PY_BIN" >> $GITHUB_PATH
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-ccache
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Conan cache
+        uses: actions/cache@v4
+        id: conan-cache
+        with:
+          path: ~/.conan2/
+          key: ${{ runner.os }}-conan2-v4-${{ hashFiles('conanfile.py') }}
+          restore-keys: ${{ runner.os }}-conan2-v4-
+
+      - name: Bootstrap conan
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        run: |
+          ./scripts/bootstrap_conan_deps.py
+
+      - name: Lint
+        run: |
+          make lint-cpp
+
+      - name: Run cmake
+        run: |
+          make setup_cmake
+
+      - name: Cache built conan packages
+        uses: actions/cache/save@v4
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.conan2/
+          key: ${{ runner.os }}-conan2-v4-${{ hashFiles('conanfile.py') }}
+
+      - name: Run tests
+        run: |
+          make test
+
+# -------------------------------------------------------------
+
+  MacOS:
+    runs-on: macos-latest
+    env:
+      PRESET: clang-relwithdebinfo-sanitizer
+      # GitHub-hosted runners have no IPv6 connectivity.
+      CMAKE_ARGS: >-
+        -DIPV6_UNAVAILABLE=ON
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    if: github.repository == 'TrustTunnel/TrustTunnelClient'
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: |
+          brew install ninja llvm@21
+          sed -i '' 's/_LIBCPP_INTRODUCED_IN_LLVM_21 1/_LIBCPP_INTRODUCED_IN_LLVM_21 0/g' "$(brew --prefix llvm@21)/include/c++/v1/__configuration/availability.h"
+          pip install -r requirements.txt
+          pip install conan~=$CONAN_VER
+          pip install clang-format~=$CLANG_FORMAT_VER
+          echo "/opt/homebrew/opt/llvm@21/bin" >> $GITHUB_PATH
+          ## Add python's bin dir to path to ensure the correct clang-format version
+          PY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))")
+          echo "$PY_BIN" >> $GITHUB_PATH
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-ccache
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Conan cache
+        uses: actions/cache@v4
+        id: conan-cache
+        with:
+          path: ~/.conan2/
+          key: ${{ runner.os }}-conan2-v4-1-${{ hashFiles('conanfile.py') }}
+          restore-keys: ${{ runner.os }}-conan2-v4-1-
+
+      - name: Bootstrap conan
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        run: |
+          ./scripts/bootstrap_conan_deps.py
+
+      - name: Run cmake
+        run: |
+          make setup_cmake
+
+      - name: Cache built conan packages
+        uses: actions/cache/save@v4
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.conan2/
+          key: ${{ runner.os }}-conan2-v4-1-${{ hashFiles('conanfile.py') }}
+
+      - name: Run tests
+        run: |
+          # Needed to avoid a sanitizer error (likely to be false positive)
+          # inside gtest
+          export ASAN_OPTIONS=detect_container_overflow=0
+
+          make test
+
+# -------------------------------------------------------------
+
+  Windows:
+    runs-on: windows-latest
+    env:
+      MSVC_VER: 17
+      MSVC_YEAR: 2022
+      PRESET: msvc-relwithdebinfo
+      BUILD_DIR: cmake-build-msvc-relwithdebinfo
+    if: github.repository == 'TrustTunnel/TrustTunnelClient'
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install packages
+        run: |
+          choco install strawberryperl nasm
+          pip install conan~=${{ env.CONAN_VER }}
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-ccache
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Conan cache
+        uses: actions/cache@v4
+        id: conan-cache
+        with:
+          path: ~/.conan2/
+          key: ${{ runner.os }}-conan2-v4${{ hashFiles('conanfile.py') }}
+          restore-keys: ${{ runner.os }}-conan2-v4-
+
+      - name: Bootstrap conan
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        run: |
+          python ./scripts/bootstrap_conan_deps.py
+
+      # GNU make is not part of the Windows runner image, so the Windows jobs
+      # drive the same presets through cmake directly.
+      - name: Run cmake
+        run: |
+          & cmake --preset ${{ env.PRESET }} `
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache `
+            -DIPV6_UNAVAILABLE=ON
+
+      - name: Cache built conan packages
+        uses: actions/cache/save@v4
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.conan2/
+          key: ${{ runner.os }}-conan2-v4-${{ hashFiles('conanfile.py') }}
+
+      - name: Build tests
+        run: |
+          & cmake --build ${{ env.BUILD_DIR }} --target tests
+
+      - name: Run tests
+        run: |
+          & cargo test --workspace --manifest-path trusttunnel/setup_wizard/Cargo.toml
+          & ctest --test-dir ${{ env.BUILD_DIR }} --output-junit junit.xml `
+            --no-compress-output --output-on-failure

@@ -135,45 +135,287 @@ fn make_run_dir_name() -> String {
 /// finding F7), so a naive read of that value yields a path that does not exist.
 const INSTALL_DIR_PRODUCT_KEY: &str = r"Software\trusttunnel\TrustTunnel Client Pro";
 
-fn build_updater_bat(
+/// Everything [`build_updater_bat`] splices into the batch.
+///
+/// A struct rather than positional parameters: WIN-16 adds an eighth input (the
+/// Program Files root), and eight `&str`-shaped positionals in a row are both a
+/// `clippy::too_many_arguments` finding and an easy place to swap two paths
+/// unnoticed.
+struct UpdaterBatPaths<'a> {
     pid: u32,
-    setup_str: &str,
-    app_str: &str,
-    exe_name: &str,
-    vbs_str: &str,
-    loader_str: &str,
-    run_dir_str: &str,
-) -> String {
+    /// The downloaded installer, run with `/S`.
+    setup: &'a str,
+    /// The executable path captured BEFORE the install (`TT_EXE`, the fallback target).
+    app: &'a str,
+    /// Basename of the executable, joined to the registry install dir when adopted.
+    exe_name: &'a str,
+    vbs: &'a str,
+    loader: &'a str,
+    run_dir: &'a str,
+    /// Program Files root from HKLM (`resolve_program_files_dir`). `None` makes the
+    /// batch ignore every registry install dir and relaunch through `TT_EXE`.
+    program_files_dir: Option<&'a str>,
+}
+
+/// The updater batch text (see the notes above `INSTALL_DIR_PRODUCT_KEY` for the
+/// cleanup and relocation contracts, and `registry_dir_narrowing` for WIN-16).
+///
+/// D-11 (T-02-06): the batch runs with administrator rights, so nothing it starts may
+/// be resolved through PATH or the current directory, where an entry ahead of
+/// System32 would win. Every external executable (`tasklist`, `find`, `timeout`,
+/// `reg`, `cmd`) is written as `%SystemRoot%\System32\<name>.exe`. `%SystemRoot%`
+/// expands when the line is parsed and holds no spaces on a stock install, so these
+/// paths stay unquoted, which keeps the nested `""{run_dir}""` quoting of the cleanup
+/// line intact. `ComSpec` is pinned first for the same reason: pipes and `for /f
+/// ('...')` start their child shell through `%ComSpec%`, not through a path the batch
+/// writes out.
+///
+/// `start`, `del`, `rmdir`, `goto`, `set`, `if`, `echo`, `title` and
+/// `setlocal`/`endlocal` are cmd.exe built-ins with no file to name. For `start` the
+/// D-11 rule is met by what it launches: only absolute targets, `"%TT_EXE%"` and
+/// System32 `cmd.exe` (research assumption A2, rated reversible).
+fn build_updater_bat(paths: &UpdaterBatPaths<'_>) -> String {
+    let &UpdaterBatPaths {
+        pid,
+        setup: setup_str,
+        app: app_str,
+        exe_name,
+        vbs: vbs_str,
+        loader: loader_str,
+        run_dir: run_dir_str,
+        program_files_dir,
+    } = paths;
     let product_key = INSTALL_DIR_PRODUCT_KEY;
+    let narrowing = registry_dir_narrowing(program_files_dir);
     format!(
         r#"@echo off
 title TrustTunnel Updater
+set "ComSpec=%SystemRoot%\System32\cmd.exe"
 echo Waiting for TrustTunnel to exit (PID {pid})...
 :waitloop
-tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL
+%SystemRoot%\System32\tasklist.exe /FI "PID eq {pid}" 2>NUL | %SystemRoot%\System32\find.exe "{pid}" >NUL
 if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
+    %SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
     goto waitloop
 )
 echo Installing update...
 "{setup_str}" /S
 echo Starting TrustTunnel...
-timeout /t 2 /nobreak >nul
+%SystemRoot%\System32\timeout.exe /t 2 /nobreak >nul
 set "TT_EXE={app_str}"
 setlocal enabledelayedexpansion
 set "TT_DIR="
-for /f "delims=" %%L in ('reg query "HKLM\{product_key}" /ve 2^>nul ^| find "REG_SZ"') do set "TT_LINE=%%L" & set "TT_DIR=!TT_LINE:*REG_SZ    =!"
-if not defined TT_DIR for /f "delims=" %%L in ('reg query "HKCU\{product_key}" /ve 2^>nul ^| find "REG_SZ"') do set "TT_LINE=%%L" & set "TT_DIR=!TT_LINE:*REG_SZ    =!"
-endlocal & set "TT_DIR=%TT_DIR%"
+for /f "delims=" %%L in ('%SystemRoot%\System32\reg.exe query "HKLM\{product_key}" /ve 2^>nul ^| %SystemRoot%\System32\find.exe "REG_SZ"') do set "TT_LINE=%%L" & set "TT_DIR=!TT_LINE:*REG_SZ    =!"
+if not defined TT_DIR for /f "delims=" %%L in ('%SystemRoot%\System32\reg.exe query "HKCU\{product_key}" /ve 2^>nul ^| %SystemRoot%\System32\find.exe "REG_SZ"') do set "TT_LINE=%%L" & set "TT_DIR=!TT_LINE:*REG_SZ    =!"
+{narrowing}endlocal & set "TT_DIR=%TT_DIR%"
 if defined TT_DIR if exist "%TT_DIR%\{exe_name}" set "TT_EXE=%TT_DIR%\{exe_name}"
 start "" "%TT_EXE%"
 echo Cleaning up...
 del "{vbs_str}" >nul 2>&1
 del "{loader_str}" >nul 2>&1
 del "{setup_str}" >nul 2>&1
-start "" /b cmd /c "timeout /t 5 /nobreak >nul & rmdir /S /Q ""{run_dir_str}""" >nul 2>&1
+start "" /b %SystemRoot%\System32\cmd.exe /c "%SystemRoot%\System32\timeout.exe /t 5 /nobreak >nul & rmdir /S /Q ""{run_dir_str}""" >nul 2>&1
 (goto) 2>nul & del "%~f0"
 "#
+    )
+}
+
+/// Accept a Program Files root only in the one shape the narrowing can splice into
+/// batch text safely: drive-letter absolute (`X:\...`), one trailing backslash
+/// trimmed, and none of the characters batch or `!var:*str=!` substitution would
+/// read as syntax.
+///
+/// The root comes from an admin-only HKLM value, so a hostile value is not the
+/// expected case; the check exists because the value is interpolated VERBATIM into
+/// an elevated batch. `=` in particular would end the search string of the prefix
+/// substitution early, and `%`/`!`/`"` would be expanded or would close a quote.
+/// Anything outside the accepted shape yields `None`, which makes the batch ignore
+/// every registry install dir: the safe direction.
+fn sanitize_program_files_dir(raw: &str) -> Option<String> {
+    const FORBIDDEN: &[char] = &['"', '%', '!', '^', '&', '|', '<', '>', '=', '*', '?'];
+    let root = raw.strip_suffix('\\').unwrap_or(raw);
+    let b = root.as_bytes();
+    let drive_form = b.len() > 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\';
+    if !drive_form
+        || root.ends_with('\\')
+        || root.contains("..")
+        || root[2..].contains(':')
+        || root.chars().any(|c| c.is_control() || FORBIDDEN.contains(&c))
+    {
+        return None;
+    }
+    Some(root.to_string())
+}
+
+/// WIN-16 / REL-06: the batch lines that decide whether the install directory read
+/// back from the registry may become the relaunch target.
+///
+/// Why the check exists. The batch runs with administrator rights and relaunches the
+/// app from `%TT_DIR%\{exe_name}`. When HKLM has no value, `TT_DIR` comes from HKCU,
+/// which any unprivileged process of the same user can write. Unchecked, that is a
+/// way to have an elevated `start` launch a file of the attacker's choosing.
+///
+/// Why it is batch text and not a Rust `if`. The value does not exist yet when the
+/// batch is written: the installer the batch itself runs is what writes it (RESEARCH
+/// Pitfall 5). So the decision can only be made by cmd.exe, after the install.
+///
+/// What is accepted. `TT_DIR` survives only if it is
+/// - in drive-letter form, `X:\...` (characters 2-3 are `:\`). UNC (`\\server\...`),
+///   device paths (`\\?\...`) and relative paths fail here;
+/// - free of `"`, so nothing in it can close a quoted argument on the lines after
+///   `endlocal`, where `%TT_DIR%` is expanded at parse time (P-02-02-2);
+/// - free of `..`, so it cannot climb out of the root after passing the prefix test
+///   (a legitimate folder name with `..` in it merely falls back, see below);
+/// - free of the wildcards `?` and `*`: `if exist` matches a pattern, `start` cannot
+///   launch one, so a wildcard that got through would relaunch nothing at all
+///   (`!TT_DIR:**=!` is the only way to find a `*`: it cuts through the first one);
+/// - free of any `:` after the root, which would be an alternate data stream or a
+///   second drive spec, never an install directory;
+/// - strictly under the Program Files root: the text before the first `<root>\` is
+///   empty (it compares equal, case-insensitively, to `<root>\` + the remainder) and
+///   the remainder is not empty, so `Program FilesX`, `Program Files (x86)` and the
+///   bare root itself are all refused.
+///
+/// «Local drive» is implemented as those two together: drive-letter form, plus the
+/// prefix of a root that is itself a local system path. A mapped network drive
+/// cannot be the Program Files root.
+///
+/// Where the root comes from. `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion`
+/// `ProgramFilesDir`, read in Rust (`resolve_program_files_dir`) and sanitised
+/// (`sanitize_program_files_dir`), never from `%ProgramFiles%`: the environment is
+/// the user's to change, that key is writable only by administrators. When it cannot
+/// be read or fails sanitising, the lines clear `TT_DIR` unconditionally.
+///
+/// Why rejection is safe (D-10). A cleared `TT_DIR` leaves `TT_EXE` at the path
+/// captured before the install, and the installer writes over that same folder, so a
+/// custom-folder install (`D:\TrustTunnel`, a drive root) still relaunches correctly.
+/// The narrowing can therefore only ever remove a candidate, never add one.
+///
+/// Every comparison reads `!TT_DIR!` (delayed expansion, after the line is parsed),
+/// never `%TT_DIR%`: whatever the value contains, it is data to cmd.exe here. The
+/// lines run inside the builder's `setlocal enabledelayedexpansion` window, after
+/// both registry probes and before `endlocal`, and they only ever clear `TT_DIR`
+/// (plus their own scratch variables). The `registry_narrowing_tests` module runs
+/// this exact text through cmd.exe.
+fn registry_dir_narrowing(program_files_dir: Option<&str>) -> String {
+    let Some(root) = program_files_dir.and_then(sanitize_program_files_dir) else {
+        return "set \"TT_DIR=\"\n".to_string();
+    };
+    format!(
+        r#"if defined TT_DIR if not "!TT_DIR:~1,2!"==":\" set "TT_DIR="
+if defined TT_DIR set "TT_CHK=!TT_DIR:"=!"
+if defined TT_DIR if not "!TT_CHK!"=="!TT_DIR!" set "TT_DIR="
+if defined TT_DIR set "TT_CHK=!TT_DIR:..=!"
+if defined TT_DIR if not "!TT_CHK!"=="!TT_DIR!" set "TT_DIR="
+if defined TT_DIR set "TT_CHK=!TT_DIR:?=!"
+if defined TT_DIR if not "!TT_CHK!"=="!TT_DIR!" set "TT_DIR="
+if defined TT_DIR set "TT_CHK=!TT_DIR:**=!"
+if defined TT_DIR if not "!TT_CHK!"=="!TT_DIR!" set "TT_DIR="
+if defined TT_DIR set "TT_CHK=!TT_DIR:*{root}\=!"
+if defined TT_DIR set "TT_REST=!TT_CHK::=!"
+if defined TT_DIR if not "!TT_REST!"=="!TT_CHK!" set "TT_DIR="
+if defined TT_DIR if not defined TT_CHK set "TT_DIR="
+if defined TT_DIR if /I not "!TT_DIR!"=="{root}\!TT_CHK!" set "TT_DIR="
+set "TT_CHK="
+set "TT_REST="
+"#
+    )
+}
+
+/// The Program Files root the update batch accepts a registry install dir under.
+///
+/// Read from `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion` `ProgramFilesDir`
+/// (writable only by administrators) instead of `%ProgramFiles%`, which a per-user
+/// environment could redirect. The 64-bit view is requested explicitly: the
+/// installer is per-machine x64, so its home is the 64-bit Program Files even if
+/// this code were ever built for 32 bits. Any failure is `None`, which makes the
+/// batch relaunch through `TT_EXE` only.
+fn resolve_program_files_dir() -> Option<String> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
+        use winreg::RegKey;
+
+        let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey_with_flags(
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+                KEY_READ | KEY_WOW64_64KEY,
+            )
+            .ok()?;
+        key.get_value::<String, _>("ProgramFilesDir").ok()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// Absolute path to `wscript.exe` under `%SystemRoot%\System32`, resolved in Rust
+/// rather than left to `Command::new`'s implicit search.
+///
+/// CR-02 (code review, phase 02): `self_update` runs elevated
+/// (`trusttunnel.exe.manifest` sets `requireAdministrator`), and `Command::new` with a
+/// bare name resolves through `CreateProcess`'s standard search order — the calling
+/// process's own directory, then the current working directory, then `System32`, then
+/// the Windows directory, then every `PATH` entry, including per-user `PATH` entries
+/// that need no admin rights to add. A `wscript.exe` planted anywhere earlier in that
+/// order would run with the admin token before the WIN-16-hardened `.bat` is even
+/// launched. This is the same D-11 principle `build_updater_bat` already applies to
+/// every external command the batch itself runs — applied here to the Rust-side spawn
+/// that starts the VBS launcher.
+///
+/// Falls back to the bare name only if `SystemRoot` is unreadable, which does not
+/// happen on a real Windows install (every `registry_narrowing_tests` case that reads
+/// it uses `.expect(...)` for the same reason); this path never runs on `spawn()`
+/// itself failing, only feeds into it.
+fn wscript_exe_path() -> std::path::PathBuf {
+    match std::env::var("SystemRoot") {
+        Ok(root) => std::path::Path::new(&root).join("System32").join("wscript.exe"),
+        Err(_) => std::path::PathBuf::from("wscript.exe"),
+    }
+}
+
+/// Absolute path of Windows PowerShell for the cosmetic loader window `self_update`
+/// spawns from the same elevated process. Same reason as `wscript_exe_path`: a bare
+/// `powershell` name is a PATH/CWD lookup under the admin token (security audit of
+/// phase 02, same class as CR-02). Falls back to the bare name only if `SystemRoot` is
+/// unset, which does not happen on a real Windows install.
+fn powershell_exe_path() -> std::path::PathBuf {
+    match std::env::var("SystemRoot") {
+        Ok(root) => std::path::Path::new(&root)
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe"),
+        Err(_) => std::path::PathBuf::from("powershell"),
+    }
+}
+
+/// The VBS launcher text `self_update` writes to hide the updater `.bat` window.
+///
+/// CR-01 (code review, phase 02; `deferred-items.md`, WIN-16 threat review): the
+/// command string is `%SystemRoot%\System32\cmd.exe /d /c "<bat>"`, not the bare `.bat`
+/// path. `WScript.Shell.Run` on a bare document path resolves it through the shell's
+/// file-type association, which starts `cmd.exe /c <bat>` WITHOUT `/d` — and cmd.exe
+/// started that way processes `HKCU\Software\Microsoft\Command Processor\AutoRun`
+/// before a single line of the batch runs. `HKCU` is writable by any process running
+/// as the same Windows user, no admin rights required, so an unprivileged same-user
+/// process could plant an `AutoRun` value that then runs with this elevated updater's
+/// admin token — before WIN-16's registry-dir narrowing (or any of D-11's hardening) is
+/// ever reached. `/d` skips `AutoRun`; routing through `cmd.exe` explicitly also
+/// removes the dependency on the `.bat` file-type association entirely.
+/// `WScript.Shell.Run` expands environment variables in its command string, so
+/// `%SystemRoot%` resolves at launch time, same as in `build_updater_bat`'s own text.
+///
+/// `bat_path` is escaped the same way it always was (backslashes doubled, quotes
+/// doubled) before being wrapped in the extra `""..""` VBS-string-literal quoting that
+/// `cmd.exe /d /c` needs around its own quoted argument. Proven by
+/// `autorun_bypass_tests` below, which plants a foreign `HKCU` `AutoRun` value and runs
+/// this exact command text through real `cmd.exe`.
+fn build_vbs_launcher_content(bat_path: &str) -> String {
+    format!(
+        "CreateObject(\"Wscript.Shell\").Run \"%SystemRoot%\\System32\\cmd.exe /d /c \"\"{}\"\"\", 0, False",
+        bat_path.replace('\\', "\\\\").replace('"', "\"\"")
     )
 }
 
@@ -1343,15 +1585,25 @@ pub async fn self_update(
     // D-10.3: `app_str` is the PRE-install path and is now only the fallback. The
     // basename goes in separately because the batch composes the real target from it
     // and the install directory it reads back from the registry after installing.
-    let bat_content = build_updater_bat(
+    //
+    // WIN-16: that registry directory is adopted only under the Program Files root
+    // resolved here from HKLM; `None` (unreadable) makes the batch use `app_str` only.
+    let exe_name_str = exe_name.to_string_lossy();
+    let vbs_str = vbs_path.to_string_lossy();
+    let loader_path = run_dir.join("trusttunnel_loader.ps1");
+    let loader_str = loader_path.to_string_lossy();
+    let run_dir_str = run_dir.to_string_lossy();
+    let program_files_dir = resolve_program_files_dir();
+    let bat_content = build_updater_bat(&UpdaterBatPaths {
         pid,
-        &setup_str,
-        &app_str,
-        &exe_name.to_string_lossy(),
-        &vbs_path.to_string_lossy(),
-        &run_dir.join("trusttunnel_loader.ps1").to_string_lossy(),
-        &run_dir.to_string_lossy(),
-    );
+        setup: &setup_str,
+        app: &app_str,
+        exe_name: &exe_name_str,
+        vbs: &vbs_str,
+        loader: &loader_str,
+        run_dir: &run_dir_str,
+        program_files_dir: program_files_dir.as_deref(),
+    });
 
     {
         let mut bat_file = std::fs::File::create(&bat_path)
@@ -1361,14 +1613,10 @@ pub async fn self_update(
             .map_err(|e| format!("Cannot write updater script: {e}"))?;
     }
 
-    // Launch bat hidden via VBS wrapper
-    let vbs_content = format!(
-        "CreateObject(\"Wscript.Shell\").Run \"{}\", 0, False",
-        bat_path
-            .to_string_lossy()
-            .replace('\\', "\\\\")
-            .replace('"', "\"\"")
-    );
+    // Launch bat hidden via VBS wrapper. See `build_vbs_launcher_content` (CR-01) for
+    // why the command string routes through `cmd.exe /d /c "<bat>"` rather than the
+    // bare `.bat` path.
+    let vbs_content = build_vbs_launcher_content(&bat_path.to_string_lossy());
     std::fs::write(&vbs_path, &vbs_content)
         .map_err(|e| format!("Cannot create VBS launcher: {e}"))?;
 
@@ -1378,7 +1626,7 @@ pub async fn self_update(
     // checksum for a malicious .exe. Verifying the installer's Authenticode
     // signature with WinVerifyTrust before this spawn is the authenticity check;
     // it requires a code-signing cert + signing pipeline (BACKLOG T-20).
-    std::process::Command::new("wscript.exe")
+    std::process::Command::new(wscript_exe_path())
         .arg(&vbs_path)
         .creation_flags(0x08000000)
         .spawn()
@@ -1444,7 +1692,7 @@ pub async fn self_update(
          Remove-Item $MyInvocation.MyCommand.Path -Force -EA 0\n"
     );
     std::fs::write(&loader_ps, &loader_content).ok();
-    std::process::Command::new("powershell")
+    std::process::Command::new(powershell_exe_path())
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", &loader_ps.to_string_lossy()])
         .creation_flags(0x08000000)
         .spawn()
@@ -1536,6 +1784,26 @@ mod self_update_integrity_tests {
 mod self_update_cleanup_tests {
     use super::*;
 
+    const RUN_DIR: &str = r"C:\Temp\tt_update_abc123";
+    const PROGRAM_FILES: &str = r"C:\Program Files";
+
+    /// The batch `self_update` would write for `app`, with the fixed per-run dir above.
+    fn bat_for(app: &str, exe_name: &str, program_files_dir: Option<&str>) -> String {
+        let setup = format!(r"{RUN_DIR}\trusttunnel_setup.exe");
+        let vbs = format!(r"{RUN_DIR}\trusttunnel_updater.vbs");
+        let loader = format!(r"{RUN_DIR}\trusttunnel_loader.ps1");
+        build_updater_bat(&UpdaterBatPaths {
+            pid: 4242,
+            setup: &setup,
+            app,
+            exe_name,
+            vbs: &vbs,
+            loader: &loader,
+            run_dir: RUN_DIR,
+            program_files_dir,
+        })
+    }
+
     // be-1 regression: the updater .bat must NOT try to remove its own run_dir
     // with a non-recursive `rmdir "{run_dir}"` while the still-running .bat (and
     // any open loader.ps1) sits inside it — a non-empty dir makes that rmdir fail
@@ -1544,15 +1812,11 @@ mod self_update_cleanup_tests {
     // that outlives the .bat's own self-delete.
     #[test]
     fn updater_bat_schedules_detached_recursive_cleanup() {
-        let run_dir = r"C:\Temp\tt_update_abc123";
-        let bat = build_updater_bat(
-            4242,
-            &format!(r"{run_dir}\trusttunnel_setup.exe"),
+        let run_dir = RUN_DIR;
+        let bat = bat_for(
             r"C:\Program Files\TrustTunnel\app.exe",
             "app.exe",
-            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
-            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
-            run_dir,
+            Some(PROGRAM_FILES),
         );
 
         // The leaky inline non-recursive form must be gone.
@@ -1566,15 +1830,15 @@ mod self_update_cleanup_tests {
             bat.contains(&format!("rmdir /S /Q \"\"{run_dir}\"\"")),
             "must recursively (/S /Q) remove the whole run_dir:\n{bat}"
         );
-        // ...by a DETACHED process (start "" /b cmd /c ...) so it survives the
-        // .bat's own (goto)/del self-delete on the final line.
+        // ...by a DETACHED process (start "" /b cmd.exe /c ...) so it survives the
+        // .bat's own (goto)/del self-delete on the final line. D-11: by full path.
         assert!(
-            bat.contains("start \"\" /b cmd /c"),
+            bat.contains(r#"start "" /b %SystemRoot%\System32\cmd.exe /c"#),
             "recursive cleanup must run in a detached cmd that outlives the .bat:\n{bat}"
         );
         // ...after a short delay so the .bat + loader release their handles.
         assert!(
-            bat.contains("timeout /t 5 /nobreak >nul & rmdir /S /Q"),
+            bat.contains(r"%SystemRoot%\System32\timeout.exe /t 5 /nobreak >nul & rmdir /S /Q"),
             "detached cleanup must wait before removing the dir:\n{bat}"
         );
 
@@ -1633,18 +1897,9 @@ mod self_update_cleanup_tests {
     // rather than to nothing when the registry cannot answer.
     #[test]
     fn updater_bat_learns_the_install_dir_from_the_registry_after_installing() {
-        let run_dir = r"C:\Temp\tt_update_abc123";
-        let setup = format!(r"{run_dir}\trusttunnel_setup.exe");
+        let setup = format!(r"{RUN_DIR}\trusttunnel_setup.exe");
         let captured = r"C:\Users\me\AppData\Local\TrustTunnel Client Pro\trusttunnel.exe";
-        let bat = build_updater_bat(
-            4242,
-            &setup,
-            captured,
-            "trusttunnel.exe",
-            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
-            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
-            run_dir,
-        );
+        let bat = bat_for(captured, "trusttunnel.exe", Some(PROGRAM_FILES));
 
         // The old shape — relaunching the captured path unconditionally — must be GONE.
         assert!(
@@ -1731,15 +1986,10 @@ mod self_update_cleanup_tests {
     // everything after it.
     #[test]
     fn updater_bat_registry_parse_survives_a_localized_default_value_name() {
-        let run_dir = r"C:\Temp\tt_update_abc123";
-        let bat = build_updater_bat(
-            4242,
-            &format!(r"{run_dir}\trusttunnel_setup.exe"),
+        let bat = bat_for(
             r"C:\Users\me\AppData\Local\TrustTunnel Client Pro\trusttunnel.exe",
             "trusttunnel.exe",
-            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
-            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
-            run_dir,
+            Some(PROGRAM_FILES),
         );
 
         assert!(
@@ -1772,15 +2022,10 @@ mod self_update_cleanup_tests {
     // target. Clearing it first costs one line and closes that off.
     #[test]
     fn updater_bat_clears_an_inherited_tt_dir_before_probing_the_registry() {
-        let run_dir = r"C:\Temp\tt_update_abc123";
-        let bat = build_updater_bat(
-            4242,
-            &format!(r"{run_dir}\trusttunnel_setup.exe"),
+        let bat = bat_for(
             r"C:\Users\me\AppData\Local\TrustTunnel Client Pro\trusttunnel.exe",
             "trusttunnel.exe",
-            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
-            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
-            run_dir,
+            Some(PROGRAM_FILES),
         );
 
         let cleared_at = bat
@@ -1793,6 +2038,650 @@ mod self_update_cleanup_tests {
             cleared_at < probed_at,
             "an inherited TT_DIR must be cleared before the registry is probed:\n{bat}"
         );
+    }
+
+    // WIN-16 / D-10 / D-12: an install OUTSIDE Program Files relaunches the path
+    // captured before the install. The narrowing (proven by cmd.exe in
+    // `registry_narrowing_tests`) sits between the probes and `endlocal`, so a
+    // rejected registry value never reaches the guard, and TT_EXE is already set.
+    #[test]
+    fn updater_bat_relaunches_the_captured_path_when_the_install_is_outside_program_files() {
+        let captured = r"D:\TrustTunnel\trusttunnel.exe";
+        let bat = bat_for(captured, "trusttunnel.exe", Some(PROGRAM_FILES));
+
+        let fallback_at = bat
+            .find(&format!("set \"TT_EXE={captured}\""))
+            .unwrap_or_else(|| panic!("the captured path is not assigned as TT_EXE:\n{bat}"));
+        let hklm_at = bat
+            .find(&format!("HKLM\\{INSTALL_DIR_PRODUCT_KEY}"))
+            .unwrap_or_else(|| panic!("no machine-hive probe in the batch:\n{bat}"));
+        assert!(
+            fallback_at < hklm_at,
+            "TT_EXE must hold the captured path before any registry probe runs:\n{bat}"
+        );
+
+        let narrowing = registry_dir_narrowing(Some(PROGRAM_FILES));
+        let hkcu_at = bat
+            .find(&format!("HKCU\\{INSTALL_DIR_PRODUCT_KEY}"))
+            .unwrap_or_else(|| panic!("no user-hive probe in the batch:\n{bat}"));
+        let narrowing_at = bat
+            .find(&narrowing)
+            .unwrap_or_else(|| panic!("the narrowing is not in the batch verbatim:\n{bat}"));
+        let endlocal_at = bat
+            .find("endlocal & set \"TT_DIR=%TT_DIR%\"")
+            .unwrap_or_else(|| panic!("no endlocal hand-over of TT_DIR:\n{bat}"));
+        assert!(
+            hkcu_at < narrowing_at && narrowing_at + narrowing.len() == endlocal_at,
+            "the narrowing must run after both probes and immediately before endlocal:\n{bat}"
+        );
+
+        assert!(
+            bat.contains("start \"\" \"%TT_EXE%\""),
+            "the relaunch must go through TT_EXE:\n{bat}"
+        );
+    }
+
+    // When HKLM cannot give a Program Files root, the batch must still relaunch: TT_EXE
+    // is assigned before the probes, the narrowing collapses to clearing TT_DIR, and
+    // the relaunch goes through TT_EXE (P-02-02-1: never launch nothing).
+    #[test]
+    fn updater_bat_without_a_program_files_root_still_relaunches_the_captured_path() {
+        let captured = r"D:\TrustTunnel\trusttunnel.exe";
+        let bat = bat_for(captured, "trusttunnel.exe", None);
+
+        let fallback_at = bat
+            .find(&format!("set \"TT_EXE={captured}\""))
+            .unwrap_or_else(|| panic!("the captured path is not assigned as TT_EXE:\n{bat}"));
+        let hklm_at = bat
+            .find(&format!("HKLM\\{INSTALL_DIR_PRODUCT_KEY}"))
+            .unwrap_or_else(|| panic!("no machine-hive probe in the batch:\n{bat}"));
+        assert!(fallback_at < hklm_at, "TT_EXE must be assigned before the probes:\n{bat}");
+        assert!(
+            bat.contains("set \"TT_DIR=\"\nendlocal & set \"TT_DIR=%TT_DIR%\""),
+            "without a root, TT_DIR must be cleared right before endlocal:\n{bat}"
+        );
+        assert!(
+            bat.contains("start \"\" \"%TT_EXE%\""),
+            "the relaunch must go through TT_EXE:\n{bat}"
+        );
+    }
+
+    // D-11 / T-02-06: the batch runs elevated, so no program it starts may be found
+    // through PATH or the current directory, where a user-writable entry ahead of
+    // System32 would win. Each external executable is named by full path, and a regex
+    // over the whole text proves no bare command word is left.
+    #[test]
+    fn updater_bat_calls_external_commands_by_full_path() {
+        let bat = bat_for(
+            r"C:\Program Files\TrustTunnel Client Pro\trusttunnel.exe",
+            "trusttunnel.exe",
+            Some(PROGRAM_FILES),
+        );
+        for name in ["tasklist", "find", "timeout", "reg", "cmd"] {
+            assert!(
+                bat.contains(&format!(r"%SystemRoot%\System32\{name}.exe")),
+                "{name} is never called by full path:\n{bat}"
+            );
+        }
+        let bare = regex::Regex::new(r"(?im)(^|[\s|&('])(tasklist|find|timeout|reg|cmd)(\.exe)?\s")
+            .unwrap();
+        let hits: Vec<&str> = bare.find_iter(&bat).map(|m| m.as_str()).collect();
+        assert!(hits.is_empty(), "bare command words left: {hits:?}\n{bat}");
+
+        // `for /f ('...')` runs its command through %ComSpec%, an environment variable a
+        // per-user setting can redirect. It is pinned before the first such loop.
+        let comspec_at = bat
+            .find(r#"set "ComSpec=%SystemRoot%\System32\cmd.exe""#)
+            .unwrap_or_else(|| panic!("ComSpec is not pinned to System32:\n{bat}"));
+        let first_for_at = bat
+            .find("for /f")
+            .unwrap_or_else(|| panic!("no for /f probe in the batch:\n{bat}"));
+        assert!(
+            comspec_at < first_for_at,
+            "ComSpec must be pinned before the first for /f spawns a shell:\n{bat}"
+        );
+    }
+
+    // `start` is a cmd.exe built-in: there is no start.exe to name by path. D-11 is
+    // met for it by what it launches: every target is an absolute path.
+    #[test]
+    fn updater_bat_start_targets_are_absolute() {
+        let bat = bat_for(
+            r"C:\Program Files\TrustTunnel Client Pro\trusttunnel.exe",
+            "trusttunnel.exe",
+            Some(PROGRAM_FILES),
+        );
+        let starts: Vec<&str> = bat
+            .lines()
+            .map(str::trim_start)
+            .filter(|l| l.starts_with("start "))
+            .collect();
+        assert_eq!(starts.len(), 2, "expected the relaunch and the cleanup start:\n{bat}");
+        for line in starts {
+            let target = line
+                .strip_prefix("start \"\" ")
+                .map(|rest| rest.strip_prefix("/b ").unwrap_or(rest))
+                .unwrap_or_else(|| panic!("start without an empty title: {line}"));
+            assert!(
+                target.starts_with("\"%TT_EXE%\"")
+                    || target.starts_with(r"%SystemRoot%\System32\cmd.exe "),
+                "start launches a target that is not an absolute path: {line}"
+            );
+        }
+    }
+}
+
+// WIN-16: the registry install-dir narrowing, executed by the real cmd.exe.
+//
+// Reading the generated text proves the lines are THERE; only the interpreter proves
+// what they DO. Batch quoting, delayed expansion and `!var:*str=!` substitution have
+// enough corner cases that a string assertion could pass over a check cmd.exe reads
+// differently. So each case writes a tiny batch that feeds a candidate into TT_DIR,
+// runs the exact text `registry_dir_narrowing` returns, and reports whether TT_DIR
+// survived.
+#[cfg(all(test, windows))]
+mod registry_narrowing_tests {
+    use super::*;
+
+    /// Run the narrowing for `candidate` under the given Program Files root through
+    /// `%SystemRoot%\System32\cmd.exe` and return its trimmed stdout+stderr:
+    /// `ADOPTED` when TT_DIR survives, `REJECTED` when the narrowing cleared it.
+    ///
+    /// The candidate arrives through an environment variable and is copied with
+    /// delayed expansion, so quotes and ampersands in it reach the narrowing exactly as
+    /// a registry value would after the `REG_SZ` split: unparsed.
+    fn run_narrowing(program_files: Option<&str>, candidate: &str) -> String {
+        let scratch = std::env::temp_dir()
+            .join(format!("tt_narrow_test_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        let bat_path = scratch.join("narrow.bat");
+        let harness = [
+            "@echo off".to_string(),
+            "setlocal enabledelayedexpansion".to_string(),
+            "set \"TT_DIR=!TT_CANDIDATE!\"".to_string(),
+            registry_dir_narrowing(program_files),
+            "if defined TT_DIR (echo ADOPTED) else (echo REJECTED)".to_string(),
+        ]
+        .join("\r\n");
+        std::fs::write(&bat_path, format!("{harness}\r\n")).unwrap();
+
+        let system_root =
+            std::env::var("SystemRoot").expect("SystemRoot is set on every Windows install");
+        let out = std::process::Command::new(format!(r"{system_root}\System32\cmd.exe"))
+            .args(["/d", "/c"])
+            .arg(&bat_path)
+            .env("TT_CANDIDATE", candidate)
+            .output()
+            .expect("cmd.exe must run");
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&out.stderr));
+        text.trim().to_string()
+    }
+
+    const PROGRAM_FILES: &str = r"C:\Program Files";
+
+    // D-02: the first case written. A custom-folder install outside Program Files is
+    // the one live configuration the narrowing can break; it must be REJECTED here so
+    // the relaunch falls back to TT_EXE (the installer writes over that same folder).
+    #[test]
+    fn narrowing_rejects_an_install_dir_outside_program_files() {
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"D:\TrustTunnel"),
+            "REJECTED"
+        );
+    }
+
+    // The per-machine install the installer writes to HKLM is adopted, which is the
+    // D-10.3 relocation fix this narrowing must not undo.
+    #[test]
+    fn narrowing_adopts_an_install_dir_inside_program_files() {
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files\TrustTunnel Client Pro"),
+            "ADOPTED"
+        );
+    }
+
+    // `self_update` passes this value in; it must be a root the sanitiser accepts on a
+    // real Windows install, or every update would silently ignore the registry.
+    #[test]
+    fn program_files_dir_resolves_from_hklm() {
+        let root = resolve_program_files_dir().expect("HKLM ProgramFilesDir is readable");
+        let b = root.as_bytes();
+        assert!(
+            b.len() > 3 && b[0].is_ascii_alphabetic() && &b[1..3] == b":\\",
+            "not in drive-letter form: {root}"
+        );
+        assert!(!root.ends_with('\\'), "trailing backslash: {root}");
+        assert_eq!(sanitize_program_files_dir(&root).as_deref(), Some(root.as_str()));
+    }
+
+    // ── The rejection surface, one class per case ─────────────────────────────────
+
+    // D-10: a custom folder at a drive root is outside Program Files → TT_EXE.
+    #[test]
+    fn narrowing_rejects_a_drive_root_custom_folder() {
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), r"C:\TrustTunnel"), "REJECTED");
+    }
+
+    #[test]
+    fn narrowing_rejects_a_unc_path() {
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"\\server\share\Program Files\TT"),
+            "REJECTED"
+        );
+    }
+
+    #[test]
+    fn narrowing_rejects_a_device_path() {
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"\\?\C:\Program Files\TT"),
+            "REJECTED"
+        );
+    }
+
+    #[test]
+    fn narrowing_rejects_a_relative_path() {
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), r"Program Files\TT"), "REJECTED");
+    }
+
+    #[test]
+    fn narrowing_rejects_a_traversal_out_of_program_files() {
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files\..\Users\Public\TT"),
+            "REJECTED"
+        );
+    }
+
+    // The prefix test must end at a path separator: a sibling that merely starts with
+    // the same letters is a different directory.
+    #[test]
+    fn narrowing_rejects_a_sibling_sharing_the_root_prefix() {
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), r"C:\Program FilesX\TT"), "REJECTED");
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files (x86)\TT"),
+            "REJECTED"
+        );
+    }
+
+    // The root itself is not an install directory, with or without the separator.
+    #[test]
+    fn narrowing_rejects_the_bare_root() {
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files"), "REJECTED");
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), "C:\\Program Files\\"), "REJECTED");
+    }
+
+    #[test]
+    fn narrowing_rejects_an_empty_value() {
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), ""), "REJECTED");
+    }
+
+    // Windows paths are case-insensitive; the registry may spell the root differently.
+    #[test]
+    fn narrowing_adopts_the_root_in_any_letter_case() {
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"c:\PROGRAM FILES\TrustTunnel Client Pro"),
+            "ADOPTED"
+        );
+    }
+
+    // T-02-05 / P-02-02-2: a value built to close the quote and chain a command. The
+    // narrowing must refuse it AND nothing in it may run while it is being examined.
+    #[test]
+    fn narrowing_rejects_a_quote_injection_without_running_it() {
+        let out = run_narrowing(
+            Some(PROGRAM_FILES),
+            r#"C:\Program Files\TT" & echo INJECTED & ""#,
+        );
+        assert!(!out.contains("INJECTED"), "the injected command ran: {out}");
+        assert_eq!(out, "REJECTED");
+    }
+
+    // P-02-02-1: `if exist` matches wildcards but `start` cannot launch them, so a
+    // wildcard value that got through would relaunch nothing at all.
+    #[test]
+    fn narrowing_rejects_wildcards() {
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files\Trust*"), "REJECTED");
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files\Trust?"), "REJECTED");
+    }
+
+    // A second colon is an alternate data stream or a second drive spec; neither is an
+    // install directory.
+    #[test]
+    fn narrowing_rejects_a_colon_after_the_drive() {
+        assert_eq!(run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files\TT:ads"), "REJECTED");
+        assert_eq!(
+            run_narrowing(Some(PROGRAM_FILES), r"C:\Program Files\C:\Program Files\TT"),
+            "REJECTED"
+        );
+    }
+
+    // No resolvable root: every registry value is discarded and TT_EXE is used.
+    #[test]
+    fn narrowing_without_a_root_rejects_everything() {
+        assert_eq!(
+            run_narrowing(None, r"C:\Program Files\TrustTunnel Client Pro"),
+            "REJECTED"
+        );
+    }
+
+    // ── The builder's own tail, end to end ────────────────────────────────────────
+    //
+    // The lines from `set "TT_EXE=..."` up to the relaunch, cut out of the real
+    // builder output. The two registry probes are swapped for the candidate, and the
+    // relaunch for `set TT_EXE`, which prints the target without parsing it.
+    fn run_tail(program_files: &str, candidate: &str) -> String {
+        let captured = r"C:\Captured\trusttunnel.exe";
+        let bat = build_updater_bat(&UpdaterBatPaths {
+            pid: 4242,
+            setup: r"C:\Temp\tt_update_abc\trusttunnel_setup.exe",
+            app: captured,
+            exe_name: "trusttunnel.exe",
+            vbs: r"C:\Temp\tt_update_abc\trusttunnel_updater.vbs",
+            loader: r"C:\Temp\tt_update_abc\trusttunnel_loader.ps1",
+            run_dir: r"C:\Temp\tt_update_abc",
+            program_files_dir: Some(program_files),
+        });
+        let from = bat.find("set \"TT_EXE=").expect("TT_EXE assignment");
+        let to = bat.find("start \"\" \"%TT_EXE%\"").expect("relaunch line");
+        let mut lines = vec!["@echo off".to_string()];
+        for line in bat[from..to].lines() {
+            if line.contains(r"HKLM\") {
+                lines.push("set \"TT_DIR=!TT_CANDIDATE!\"".to_string());
+            } else if !line.contains(r"HKCU\") {
+                lines.push(line.to_string());
+            }
+        }
+        lines.push("set TT_EXE".to_string());
+
+        let scratch = std::env::temp_dir()
+            .join(format!("tt_narrow_test_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        let bat_path = scratch.join("tail.bat");
+        std::fs::write(&bat_path, format!("{}\r\n", lines.join("\r\n"))).unwrap();
+        let system_root =
+            std::env::var("SystemRoot").expect("SystemRoot is set on every Windows install");
+        let out = std::process::Command::new(format!(r"{system_root}\System32\cmd.exe"))
+            .args(["/d", "/c"])
+            .arg(&bat_path)
+            .env("TT_CANDIDATE", candidate)
+            .output()
+            .expect("cmd.exe must run");
+        let _ = std::fs::remove_dir_all(&scratch);
+        let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&out.stderr));
+        text.trim().to_string()
+    }
+
+    /// A scratch "Program Files" with one install dir named `name` holding the exe, so
+    /// the builder's `if exist` guard has something real to find.
+    fn scratch_root_with_install(name: &str) -> (std::path::PathBuf, String, String) {
+        let root = std::env::temp_dir()
+            .join(format!("tt_narrow_root_{}", uuid::Uuid::new_v4().simple()));
+        let install = root.join(name);
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("trusttunnel.exe"), b"").unwrap();
+        let root_str = root.to_string_lossy().into_owned();
+        assert!(
+            sanitize_program_files_dir(&root_str).is_some(),
+            "the scratch root must be a root the sanitiser accepts: {root_str}"
+        );
+        let install_str = install.to_string_lossy().into_owned();
+        (root, root_str, install_str)
+    }
+
+    // D-10 end to end: a rejected value leaves TT_EXE at the captured path.
+    #[test]
+    fn tail_relaunches_the_captured_path_when_the_value_is_rejected() {
+        let (root, root_str, _) = scratch_root_with_install("TrustTunnel Client Pro");
+        let out = run_tail(&root_str, r"D:\TrustTunnel");
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(out, r"TT_EXE=C:\Captured\trusttunnel.exe");
+    }
+
+    // An adopted value is expanded with %...% on the lines after `endlocal`. Batch
+    // metacharacters other than the quote are legal in a folder name; they must stay
+    // data there too, so the relaunch target is exactly the folder + exe and nothing
+    // in the name runs.
+    #[test]
+    fn tail_keeps_metacharacters_of_an_adopted_value_inert() {
+        let (root, root_str, install) = scratch_root_with_install("TT & echo INJECTED");
+        let out = run_tail(&root_str, &install);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            !out.lines().any(|l| l.trim() == "INJECTED"),
+            "the folder name ran as a command: {out}"
+        );
+        assert_eq!(out, format!(r"TT_EXE={install}\trusttunnel.exe"));
+    }
+}
+
+// CR-01 (code review, phase 02): `build_vbs_launcher_content` is proven two ways, same
+// split as `registry_narrowing_tests` above — a pure string check that the generated
+// VBS text has the expected shape, then a behavioral check through the real
+// interpreter. The behavioral half runs `%SystemRoot%\System32\cmd.exe /d /c "<bat>"`
+// directly rather than through `wscript.exe`/WSH: that is the command
+// `WScript.Shell.Run` executes once its own string literal is parsed (VBS's `""`
+// decodes to one literal `"`; VBScript does NOT collapse the doubled backslashes the
+// launcher writes into the path, but Windows path parsing tolerates `\\` separators,
+// so the batch that runs is the same one — and `/d` is what the test is about), and
+// running it directly makes the assertion synchronous instead of racing an async,
+// fire-and-forget `Run(..., False)` child process. `AutoRunGuard` plants a real,
+// temporary `HKCU\Software\Microsoft\Command Processor\AutoRun` value for the
+// duration of one test and restores the prior value (or removes it if there was none)
+// on drop, including on panic/assertion failure, so a red run never leaves a foreign
+// AutoRun behind on the machine running the suite.
+#[cfg(all(test, windows))]
+mod autorun_bypass_tests {
+    use super::*;
+
+    /// Sets `HKCU\Software\Microsoft\Command Processor\AutoRun` to `marker_cmd` for the
+    /// lifetime of the guard and restores whatever was there before (or removes the
+    /// value if it was previously undefined) when the guard drops.
+    //
+    // The two behavioral tests below are `#[ignore]`d on purpose and serialized by
+    // `AUTORUN_LOCK`. They write the real per-user AutoRun value of whoever runs the
+    // suite, and the libtest harness runs tests in parallel: in the first version two of
+    // them interleaved — each guard saved the other's marker as "the original" — and the
+    // machine was left with a test command in its AutoRun, displacing the value that was
+    // there. A routine `cargo test --lib` (and CI) must never touch a real user
+    // registry, so these run only on request:
+    //   cargo test --lib autorun_bypass_tests -- --ignored --test-threads=1
+    // The pure shape tests above stay in the default run and pin the launcher text.
+    static AUTORUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct AutoRunGuard {
+        key: winreg::RegKey,
+        original: Option<String>,
+        // Held for the guard's whole life so no other AutoRun test can save or restore
+        // the value in between; released after `drop` has put the original back.
+        _serial: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl AutoRunGuard {
+        const PATH: &'static str = r"Software\Microsoft\Command Processor";
+
+        fn set(marker_cmd: &str) -> Self {
+            use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
+            use winreg::RegKey;
+
+            let serial = AUTORUN_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let key = RegKey::predef(HKEY_CURRENT_USER)
+                .create_subkey_with_flags(Self::PATH, KEY_READ | KEY_SET_VALUE)
+                .expect("HKCU Command Processor is writable by the current user")
+                .0;
+            let original = key.get_value::<String, _>("AutoRun").ok();
+            key.set_value("AutoRun", &marker_cmd)
+                .expect("setting a per-user AutoRun value needs no admin rights");
+            Self { key, original, _serial: serial }
+        }
+    }
+
+    impl Drop for AutoRunGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => {
+                    let _ = self.key.set_value("AutoRun", v);
+                }
+                None => {
+                    let _ = self.key.delete_value("AutoRun");
+                }
+            }
+        }
+    }
+
+    // Pure shape check: the doubled quotes wrap the bat path, the doubled backslashes
+    // are the same escaping the code used before this fix, and the interpreter path is
+    // the System32 one, not a bare `wscript`/`cmd` name.
+    #[test]
+    fn launcher_content_wraps_the_bat_in_system32_cmd_with_slash_d() {
+        let vbs = build_vbs_launcher_content(r"C:\Temp\tt_update_abc\trusttunnel_updater.bat");
+        // `%SystemRoot%\System32\cmd.exe` is literal template text (single backslash);
+        // only the interpolated `bat_path` goes through `.replace('\\', "\\\\")`, so it
+        // carries doubled backslashes. Both live in this one raw string.
+        assert_eq!(
+            vbs,
+            r#"CreateObject("Wscript.Shell").Run "%SystemRoot%\System32\cmd.exe /d /c ""C:\\Temp\\tt_update_abc\\trusttunnel_updater.bat""", 0, False"#
+        );
+    }
+
+    // A quote in the bat path (should never happen in practice, but the escaping is
+    // meant to hold regardless) must still close correctly and not break out of the
+    // `cmd.exe /d /c "..."` argument.
+    #[test]
+    fn launcher_content_escapes_quotes_in_the_bat_path() {
+        let vbs = build_vbs_launcher_content(r#"C:\Temp\weird "quoted" dir\updater.bat"#);
+        assert!(vbs.contains(r#"weird ""quoted"" dir"#), "unexpected escaping: {vbs}");
+    }
+
+    // CR-02 and the security audit's follow-up: both interpreters the elevated
+    // `self_update` spawns are addressed by absolute System32 paths, never by a bare
+    // name that Windows would resolve through PATH/CWD under the admin token.
+    #[test]
+    fn elevated_interpreters_are_spawned_by_absolute_system32_path() {
+        let root = std::env::var("SystemRoot").expect("SystemRoot is set on every Windows install");
+        let system32 = std::path::Path::new(&root).join("System32");
+
+        let wscript = wscript_exe_path();
+        assert!(wscript.is_absolute(), "wscript path is not absolute: {wscript:?}");
+        assert_eq!(wscript, system32.join("wscript.exe"));
+
+        let powershell = powershell_exe_path();
+        assert!(powershell.is_absolute(), "powershell path is not absolute: {powershell:?}");
+        assert_eq!(
+            powershell,
+            system32.join("WindowsPowerShell").join("v1.0").join("powershell.exe")
+        );
+    }
+
+    /// Runs the exact command `WScript.Shell.Run` would execute for `bat_path` (decoded
+    /// from `build_vbs_launcher_content`'s output) through real `%SystemRoot%\System32`
+    /// `cmd.exe`, with the given `/c`-vs-`/d` flag set, and returns whether each marker
+    /// file exists afterward: `(bat_ran, autorun_ran)`.
+    fn run_launcher_command(bat_path: &std::path::Path, use_slash_d: bool) -> (bool, bool) {
+        let dir = bat_path.parent().unwrap();
+        let bat_marker = dir.join("bat_ran.marker");
+        let autorun_marker = dir.join("autorun_ran.marker");
+        let _ = std::fs::remove_file(&bat_marker);
+        let _ = std::fs::remove_file(&autorun_marker);
+
+        std::fs::write(
+            bat_path,
+            format!("@echo off\r\necho ran>\"{}\"\r\n", bat_marker.display()),
+        )
+        .unwrap();
+
+        let autorun_cmd = format!(r#"echo ran>"{}""#, autorun_marker.display());
+        let _guard = AutoRunGuard::set(&autorun_cmd);
+
+        let system_root =
+            std::env::var("SystemRoot").expect("SystemRoot is set on every Windows install");
+        let mut cmd = std::process::Command::new(format!(r"{system_root}\System32\cmd.exe"));
+        if use_slash_d {
+            cmd.arg("/d");
+        }
+        cmd.arg("/c").arg(bat_path);
+        let out = cmd.output().expect("cmd.exe must run");
+        assert!(out.status.success(), "stand-in .bat failed: {out:?}");
+
+        (bat_marker.exists(), autorun_marker.exists())
+    }
+
+    // Positive control: without `/d`, the AutoRun value from `HKCU` DOES fire before the
+    // batch's own first line. This proves the harness actually detects AutoRun running
+    // at all — without it, a passing "AutoRun did not run" assertion in the `/d` test
+    // below would be meaningless.
+    #[test]
+    #[ignore = "writes the real HKCU AutoRun value; run on request with -- --ignored --test-threads=1"]
+    fn without_slash_d_autorun_fires_before_the_batch() {
+        let scratch =
+            std::env::temp_dir().join(format!("tt_autorun_test_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        let bat_path = scratch.join("stand_in.bat");
+
+        let (bat_ran, autorun_ran) = run_launcher_command(&bat_path, false);
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        assert!(bat_ran, "the stand-in .bat did not run at all");
+        assert!(autorun_ran, "AutoRun did not fire without /d — harness cannot detect it");
+    }
+
+    // CR-01: with `/d` — the flag `build_vbs_launcher_content` now uses — the AutoRun
+    // value is skipped, while the batch itself still runs normally.
+    #[test]
+    #[ignore = "writes the real HKCU AutoRun value; run on request with -- --ignored --test-threads=1"]
+    fn with_slash_d_autorun_is_skipped_and_the_batch_still_runs() {
+        let scratch =
+            std::env::temp_dir().join(format!("tt_autorun_test_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        let bat_path = scratch.join("stand_in.bat");
+
+        // Sanity: `build_vbs_launcher_content` for this exact path really does produce
+        // the `/d` command this test then runs directly.
+        let vbs = build_vbs_launcher_content(&bat_path.to_string_lossy());
+        assert!(vbs.contains("cmd.exe /d /c"), "generated command lost /d: {vbs}");
+
+        let (bat_ran, autorun_ran) = run_launcher_command(&bat_path, true);
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        assert!(bat_ran, "the stand-in .bat did not run under /d");
+        assert!(!autorun_ran, "AutoRun ran despite /d — the CR-01 fix regressed");
+    }
+}
+
+// The Program Files root is spliced into batch text verbatim, so its sanitiser is
+// pinned on its own (pure; runs on any host).
+#[cfg(test)]
+mod program_files_root_tests {
+    use super::*;
+
+    #[test]
+    fn sanitizer_trims_one_trailing_backslash() {
+        assert_eq!(
+            sanitize_program_files_dir("C:\\Program Files\\").as_deref(),
+            Some(r"C:\Program Files")
+        );
+        assert_eq!(
+            sanitize_program_files_dir(r"C:\Program Files").as_deref(),
+            Some(r"C:\Program Files")
+        );
+    }
+
+    #[test]
+    fn sanitizer_refuses_anything_but_drive_letter_form() {
+        for raw in ["", "Program Files", r"\\srv\pf", "C:", "C:\\", r"\Program Files"] {
+            assert_eq!(sanitize_program_files_dir(raw), None, "accepted {raw:?}");
+        }
+    }
+
+    // `%`/`!` would expand, `"` would close a quote, `=` would end the search string of
+    // the `!TT_DIR:*<root>\=!` substitution early.
+    #[test]
+    fn sanitizer_refuses_batch_metacharacters() {
+        for raw in [r"C:\Pro%gram", r"C:\A=B", r#"C:\x"y"#, r"C:\a!b", r"C:\a^b", r"C:\a&b"] {
+            assert_eq!(sanitize_program_files_dir(raw), None, "accepted {raw:?}");
+        }
     }
 }
 
@@ -2207,94 +3096,49 @@ mod update_check_timeout_tests {
 // `digest_body_too_large` is a pure function over `Option<u64>` and its unit
 // tests were always green — but they measured the ANNOUNCEMENT, and a hostile
 // release simply does not have to make one. These tests exercise the read
-// itself, over a real socket, against a server that declares no length and then
-// never stops sending: the exact case the declared-length cap lets through.
+// itself — `read_capped_digest_text` pulling chunks from a real
+// `reqwest::Response` — against a body that declares no length and then keeps
+// going far past the cap: the exact case the declared-length cap lets through.
+//
+// WHY THE BODY IS IN MEMORY AND NOT ON A SOCKET (WINDOWS.md entry 39, fixed in
+// phase 02 of v3.1.0). The first versions served the body from a chunked HTTP
+// server on an ephemeral loopback port. Under the full parallel suite that
+// fixture failed about once in eighty runs and once hung the test binary for ten
+// minutes: the verdict depended on whether the fixture's server task got
+// scheduled in time, which is a property of the machine, not of the code. Moving
+// the server to its own worker thread and adding deadlines only changed the
+// symptom (a `TimedOut` on `send()` in roughly one run in five under load). The
+// property under test is «the reader stops at the cap», and the reader only ever
+// sees `Response::chunk()` — so the body is now a stream built in memory and
+// converted into a `reqwest::Response`, with no socket, server task or scheduler
+// left to starve. Chunked-transfer decoding itself is reqwest's contract, not
+// this module's.
 #[cfg(test)]
 mod digest_read_cap_tests {
     use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use futures_util::stream;
 
-    /// How many 1 KiB filler chunks the oversized fixture sends: 64 KiB, sixteen
-    /// times `MAX_DIGEST_BYTES`.
-    ///
-    /// WHY A FINITE NUMBER AND NOT AN ENDLESS STREAM. The first version of this
-    /// fixture wrote forever, on the reasoning that «unbounded» is the property
-    /// under test. It hung the test binary: the client stops reading at the cap
-    /// and drops the response, but the writer task and the pooled connection are
-    /// still on the test's runtime, and the runtime cannot be torn down under
-    /// them. A test that hangs reports as CI infrastructure trouble, not as a
-    /// defect — the exact failure mode the timeout work in this same file just
-    /// removed from production.
-    ///
-    /// A finite body loses nothing, because the property is not «the server never
-    /// stops», it is «the reader stops at the cap». A reader without the cap
-    /// returns a 64 KiB string here and the `is_none()` assertion fails; a reader
-    /// with it returns `None`. The mutation check below confirms exactly that.
-    const OVERSIZED_CHUNKS: usize = 64;
+    type ChunkResult = Result<String, std::io::Error>;
 
-    /// An HTTP/1.1 server that answers with `Transfer-Encoding: chunked`, sends
-    /// `body`, and then optionally sends `OVERSIZED_CHUNKS` filler chunks.
-    ///
-    /// Chunked on purpose: it is the standard way to answer WITHOUT a
-    /// `Content-Length`, so `res.content_length()` is `None` and the cheap arm of
-    /// the guard cannot fire. Whatever these tests prove, they prove about the
-    /// streaming arm alone.
-    async fn chunked_server(body: &'static str, keep_sending: bool) -> std::net::SocketAddr {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            while let Ok((mut stream, _)) = listener.accept().await {
-                tokio::spawn(async move {
-                    // DRAIN THE REQUEST FIRST, even though its contents are irrelevant
-                    // to what is measured. Skipping this made the test flaky under the
-                    // full parallel suite (~1 run in 3): closing a socket that still has
-                    // unread received data makes Windows send RST instead of FIN, and the
-                    // RST discards the response the client had not finished reading. The
-                    // symptom was `send().await.unwrap()` panicking on a connection
-                    // reset — a fixture defect that looks exactly like a product defect,
-                    // which is the worst kind of flake to leave in a security test.
-                    let mut request = Vec::new();
-                    let mut byte = [0u8; 1];
-                    while !request.ends_with(b"\r\n\r\n") {
-                        match stream.read(&mut byte).await {
-                            Ok(0) | Err(_) => return,
-                            Ok(_) => request.push(byte[0]),
-                        }
-                    }
-                    let head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
-                    if stream.write_all(head.as_bytes()).await.is_err() {
-                        return;
-                    }
-                    let first = format!("{:x}\r\n{}\r\n", body.len(), body);
-                    if stream.write_all(first.as_bytes()).await.is_err() {
-                        return;
-                    }
-                    if keep_sending {
-                        // 1 KiB per chunk, `OVERSIZED_CHUNKS` of them.
-                        let filler = "x".repeat(1024);
-                        let chunk = format!("400\r\n{filler}\r\n");
-                        for _ in 0..OVERSIZED_CHUNKS {
-                            if stream.write_all(chunk.as_bytes()).await.is_err() {
-                                return;
-                            }
-                        }
-                    }
-                    let _ = stream.write_all(b"0\r\n\r\n").await;
-                });
-            }
-        });
-        addr
+    /// A `reqwest::Response` whose body is `chunks`, streamed with NO declared
+    /// length — the in-memory equivalent of `Transfer-Encoding: chunked`, so
+    /// `res.content_length()` is `None` and the cheap arm of the guard cannot
+    /// fire. Whatever these tests prove, they prove about the streaming arm alone.
+    fn undeclared_response<S>(chunks: S) -> reqwest::Response
+    where
+        S: futures_util::Stream<Item = ChunkResult> + Send + 'static,
+    {
+        let body = reqwest::Body::wrap_stream(chunks);
+        reqwest::Response::from(tauri::http::Response::new(body))
     }
 
-    async fn read_from(addr: std::net::SocketAddr) -> Option<String> {
-        let client = reqwest::Client::new();
-        let res = client.get(format!("http://{addr}/x.sha256")).send().await.unwrap();
-        // The premise of the whole test: the server declared nothing, so the
+    async fn read_capped(res: reqwest::Response) -> Option<String> {
+        // The premise of the whole test: nothing was declared, so the
         // declared-length arm has no opinion here.
         assert_eq!(
             res.content_length(),
             None,
-            "the fixture must answer WITHOUT a Content-Length, or it is testing the other arm"
+            "the fixture must carry NO declared length, or it is testing the other arm"
         );
         assert!(!digest_body_too_large(res.content_length()));
         read_capped_digest_text(res, MAX_DIGEST_BYTES as usize).await
@@ -2304,27 +3148,48 @@ mod digest_read_cap_tests {
     async fn an_ordinary_undeclared_digest_body_still_reads() {
         // The guard must not defend by breaking the normal case: a real
         // `sha256sum` line is about eighty bytes and may perfectly well arrive
-        // chunked.
+        // in more than one chunk.
         const LINE: &str =
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  Setup.exe\n";
-        let addr = chunked_server(LINE, false).await;
-        let text = read_from(addr).await.expect("a short body must read normally");
+        let (head, tail) = LINE.split_at(40);
+        let res = undeclared_response(stream::iter(vec![
+            Ok::<_, std::io::Error>(head.to_string()),
+            Ok(tail.to_string()),
+        ]));
+        let text = read_capped(res).await.expect("a short body must read normally");
         assert_eq!(text, LINE);
         assert!(is_hex_sha256(text.split_whitespace().next().unwrap()));
     }
 
     #[tokio::test]
     async fn an_undeclared_oversized_body_is_refused_at_the_cap() {
-        // 64 KiB arriving with no declared length: `digest_body_too_large` has
-        // nothing to refuse (asserted inside `read_from`), so if this comes back
-        // as a string, the only bound on the read was the server's goodwill.
-        let addr = chunked_server("start", true).await;
-        let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), read_from(addr))
-            .await
-            .expect(
-                "the read never returned — an undeclared body is being read without bound, \
-                 which is the defect this cap exists to remove",
-            );
+        // 64 KiB — sixteen times `MAX_DIGEST_BYTES` — arriving with no declared
+        // length: `digest_body_too_large` has nothing to refuse (asserted inside
+        // `read_capped`), so if this comes back as a string, the only bound on the
+        // read was the sender's goodwill.
+        //
+        // WHY FINITE AND NOT ENDLESS. An endless in-memory stream is always ready,
+        // so a reader WITHOUT the cap would spin on it forever without ever
+        // yielding to the runtime — the timeout below could never fire, and a
+        // regression would hang the suite instead of failing it (checked by
+        // mutation: removing the cap hung the endless variant). A finite body turns
+        // the same regression into a returned 64 KiB string, which the `is_none()`
+        // assertion rejects; the property is «the reader stops at the cap», not «the
+        // sender never stops».
+        const OVERSIZED_CHUNKS: usize = 64;
+        let filler = "x".repeat(1024);
+        let chunks: Vec<ChunkResult> = std::iter::once(Ok("start".to_string()))
+            .chain((0..OVERSIZED_CHUNKS).map(|_| Ok(filler.clone())))
+            .collect();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            read_capped(undeclared_response(stream::iter(chunks))),
+        )
+        .await
+        .expect(
+            "the read never returned — an undeclared body is being read without bound, \
+             which is the defect this cap exists to remove",
+        );
         assert!(
             outcome.is_none(),
             "an oversized body must yield None, not a truncated string that could \

@@ -54,25 +54,24 @@ export function useVpnLogListener({
 
       // ── Detect known errors and show user-friendly messages ──
       //
-      // STATUS-03 / D-07: status is NO LONGER inferred from log text here. The backend (sidecar.rs,
-      // plan 01-01) emits an authoritative VpnStatus::Error event for these same 4 fatal markers, so
-      // the error STATUS arrives via the "vpn-status" listener — the single source of truth. This
+      // STATUS-03 / D-07: status is NO LONGER inferred from log text here. The backend (sidecar.rs)
+      // emits the authoritative VpnStatus::Error event, so the error STATUS and its reason arrive
+      // via the "vpn-status" listener (CORE_MESSAGE_I18N) — the single source of truth. This
       // listener only enriches the user-facing MESSAGE (setError) and appends the raw line to the
       // log buffer; it must never call setStatus (that would re-introduce a parallel status owner).
+      //
+      // G-03.1-7: only the auth and connection-refused markers stay here. The WinTUN adapter
+      // failure (WintunCreateAdapter …) and «Failed to create listener» lines used to raise a
+      // message from this listener, but the backend now retries an adapter failure by itself
+      // (plan 03.1-10), so the same lines show up while «Подключение...» is still honestly in
+      // progress — a message raised from the log would flash an error the retry is about to
+      // fix. Their final reason arrives through vpn-status only, after the backend gives up.
+      // The old «Failed to setup adapter … Timed out» branch is gone too: that line is not
+      // printed anywhere in the core sources, so the branch could never fire.
       if (msg.includes("Authorization Required")) {
         setError(i18n.t("errors.auth_required", "Ошибка авторизации: логин или пароль неверны. Обновите конфиг с сервера через Панель управления."));
-      } else if (msg.includes("WintunCreateAdapter") && msg.includes("cannot find")) {
-        setError(i18n.t("errors.wintun_missing", "Не удалось создать VPN-адаптер. Запустите приложение от имени администратора."));
-      } else if (msg.includes("Failed to create listener")) {
-        setError(i18n.t("errors.listener_failed", "Не удалось запустить VPN-туннель. Проверьте права администратора и наличие wintun.dll."));
       } else if (msg.includes("Connection refused") || msg.includes("connection refused")) {
         setError(i18n.t("errors.connection_refused", "Сервер отклонил подключение. Проверьте, запущен ли VPN-сервис на сервере."));
-      } else if (msg.includes("timed out") || msg.includes("Timed out")) {
-        // Show a hint for the fatal adapter-setup timeout, but (like the markers above) do NOT set
-        // status — the backend owns that now.
-        if (msg.includes("Failed to setup adapter")) {
-          setError(i18n.t("errors.adapter_timeout", "Таймаут создания VPN-адаптера. Перезапустите приложение от имени администратора."));
-        }
       }
     });
     return () => { unlisten.then((f) => f()); };

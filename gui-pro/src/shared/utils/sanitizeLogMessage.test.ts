@@ -106,6 +106,49 @@ describe("redactCredentialShapes", () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════
+// MR3-04 (D-07/D-08): ssh/sanitize.rs::validate_vpn_password allows `;` and
+// `,` inside a VPN password, but the FE scrubber's bare-token VALUE class used
+// to stop at those characters, so a password like `Ab;cd,ef!` only had its
+// leading fragment `Ab` redacted and `;cd,ef!` leaked into the activity log.
+// ═══════════════════════════════════════════════════════
+
+describe("MR3-04: separators inside a password", () => {
+  const SEMI_COMMA_SECRET = "Ab;cd,ef!";
+
+  it("D-07: sanitizeLogMessage leaves no fragment of a `;`/`,`-bearing password", () => {
+    const out = sanitizeLogMessage(`auth failed: password: ${SEMI_COMMA_SECRET}`);
+    expect(out).not.toContain(SEMI_COMMA_SECRET);
+    expect(out).not.toContain(";cd");
+    expect(out).not.toContain(",ef!");
+    expect(out).not.toContain("cd,ef");
+    expect(out).toContain("[redacted]");
+  });
+
+  it("D-07: redactCredentialShapes masks the whole value and keeps trailing words", () => {
+    const out = redactCredentialShapes(`password=${SEMI_COMMA_SECRET} next words stay`);
+    expect(out).toBe("password=[redacted] next words stay");
+  });
+
+  it("D-08: a long English error with no credential key passes through unchanged", () => {
+    const longEnglish =
+      "Deploy failed: the server returned an unexpected response while restarting the service; " +
+      "check the firewall, the disk space, and the systemd journal, then retry the operation " +
+      "from the control panel …";
+    expect(redactCredentialShapes(longEnglish)).toBe(longEnglish);
+  });
+
+  it("D-07 trade-off: a field glued to the password with no space is swallowed, not leaked", () => {
+    // Recorded decision (WR-01, 03-REVIEW.md): allowing `;`/`,` inside the secret VALUE
+    // means a log line that joins the next key=value pair directly onto the password with
+    // NO separating whitespace loses that adjacent field too — this is the accepted
+    // trade-off (over-redaction over leakage), not a bug.
+    const out = redactCredentialShapes("password=Ab;cd,ef!,port=22");
+    expect(out).not.toContain("Ab;cd,ef!");
+    expect(out).not.toContain("port=22");
+  });
+});
+
 describe("redactSecretValue", () => {
   it("scrubs a known secret out of free prose that has no key=value shape", () => {
     // The gap identity-redaction exists to close: no `:` or `=`, so the

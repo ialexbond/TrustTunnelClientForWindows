@@ -260,6 +260,45 @@ pub fn restore_main_window_to_front(app: &tauri::AppHandle) {
     w.set_focus().ok();
 }
 
+/// The `vpn-flow` payload a tray connect announces to the window: the action, the origin and the
+/// config PATH the window's cards already hold (the requested spelling, not the canonical form).
+/// Origin + path only — no secret, no config contents (D-29).
+fn tray_connect_flow_payload(requested: &str) -> serde_json::Value {
+    serde_json::json!({ "action": "connect", "origin": "tray", "configPath": requested })
+}
+
+/// The config a tray connect uses, and the config the tray menu's «Подключить» promises: the
+/// pointer a window connect stored, else the manifest's last-used config, else the first
+/// detected `.toml`.
+///
+/// The window lists the manifest last-used config first and `markLastUsed` keeps it current, so
+/// it is the Rust-visible answer to "which config does the window show". The folder scan takes
+/// whichever `.toml` the directory listing returns first, which can be a different server; it
+/// stays only as the last resort for a manifest that names nothing. The two fallbacks are
+/// closures so a live stored pointer never reads the manifest or scans the folder (the pointer
+/// itself is checked for existence by `stored_config_path` before it gets here). One function
+/// serves both callers, so an enabled menu item always connects what it promises.
+fn resolve_tray_connect_target(
+    stored: Option<String>,
+    last_used: impl FnOnce() -> Option<String>,
+    auto_detect: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    stored.or_else(last_used).or_else(auto_detect)
+}
+
+/// The config pointer a window or tray connect stored, kept only while it still names something.
+/// Nothing clears `AppState.config_path` when a card is deleted, so a pointer to a removed file
+/// would otherwise beat the manifest's last-used entry in `resolve_tray_connect_target`. One
+/// filter for both callers (`tray_vpn_connect`, `tray_menu_has_config`).
+fn keep_existing_config(stored: Option<String>) -> Option<String> {
+    stored.filter(|p| std::path::Path::new(p).is_file())
+}
+
+/// `AppState.config_path` after the existence filter — the `stored` input of the resolver.
+fn stored_config_path(state: &AppState) -> Option<String> {
+    keep_existing_config(state.config_path.lock().ok().and_then(|g| g.clone()))
+}
+
 /// Connect VPN from tray menu (no frontend involvement).
 pub fn tray_vpn_connect(app: tauri::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return; };
@@ -298,10 +337,13 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         }
     }
 
-    // Get config path: stored from last connect, or auto-detect
-    let config_path = state.config_path.lock().ok()
-        .and_then(|g| g.clone())
-        .or_else(crate::commands::config::auto_detect_config);
+    // Get config path: stored from last connect, else the manifest last-used config, else the
+    // first detected .toml (see `resolve_tray_connect_target`).
+    let config_path = resolve_tray_connect_target(
+        stored_config_path(&state),
+        crate::commands::manifest::last_used_config_path,
+        crate::commands::config::auto_detect_config,
+    );
 
     let Some(config_path) = config_path else {
         // No config found — show the window so user can configure.
@@ -322,6 +364,24 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         return;
     };
 
+    // The path exactly as the app stored it (or auto-detect found it) — the spelling the window's
+    // cards hold. Bound BEFORE the canonical shadowing below: this is the string the `vpn-flow`
+    // announcement carries. The canonical form (`\\?\C:\…` on Windows) never matched a card, so
+    // announcing it left the window with no active card (gap G-03.1-5). Display only — spawn,
+    // ping, routing and egress keep using the canonical path.
+    let requested_config_path = config_path.clone();
+
+    // Read here (it used to be read after the path guard) so the connect line below can report it.
+    let log_level = state.log_level.lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| "info".to_string());
+
+    // Same line, same prefix as the window door's `vpn_connect`, so one search of app.log finds
+    // both doors; `origin=tray` tells them apart. A tray-started session used to leave no connect
+    // record at all. Written before the path guard so a refused connect is on record too. app.log
+    // is the debug stream (D-29): a file path and a level, never config contents or credentials.
+    crate::logging::log_app("INFO", &format!("VPN connect: config={requested_config_path}, log_level={log_level}, origin=tray"));
+
     // CA-2, THE THIRD SPAWN DOOR (30.1 regression defect 2). The window door
     // (`vpn_connect`), the reconnect door (`respawn_sidecar`) and eight path-taking IPC
     // commands all confine a config path to the data root before touching it. This door did
@@ -334,8 +394,8 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
     // input. Window says «доступ запрещён», tray connects. The confinement control the codebase
     // believes it has was missing on one of its three spawn paths — the class, not the instance.
     //
-    // Guarded HERE, in the synchronous half, before the `vpn-flow` emit below: a refused path
-    // must not be broadcast to the window as the config the tray just connected, and the
+    // Guarded HERE, in the synchronous half, before anything is announced to the window: a
+    // refused path must not be broadcast as the config the tray just connected, and the
     // refusal costs nothing to decide early. The CANONICAL path the guard returns replaces the
     // raw string from this point on, mirroring the window door's F16 fix so validate and spawn
     // resolve the string exactly once (no check-then-use window).
@@ -364,22 +424,7 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         }
     };
 
-    let log_level = state.log_level.lock()
-        .map(|g| g.clone())
-        .unwrap_or_else(|_| "info".to_string());
-
     let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
-
-    // 3.6 F-TRAY (F10): mirror the tray connect to the window so its active-config pointer + hero
-    // follow the config the tray actually connected, instead of a stale/reverted FE pointer (the
-    // "tray icon green while the tab shows all «Подключить» / no active card" split). Carries
-    // origin + the config PATH only — paths already cross this boundary via the config commands; no
-    // secret (D-29).
-    app.emit(
-        "vpn-flow",
-        serde_json::json!({ "action": "connect", "origin": "tray", "configPath": config_path }),
-    )
-    .ok();
 
     tauri::async_runtime::spawn(async move {
         let Some(state) = app.try_state::<AppState>() else { return; };
@@ -439,7 +484,28 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
                 .unwrap_or_else(|e| e.into_inner());
             connect_generation =
                 state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
+            // G-03.1-5 parity with `vpn_connect` (G-19-6 v2): record the config this connect
+            // uses in AppState.config_path, at the same moment and under the same lock as the
+            // generation bump — only after the refuse checks above, so a refused or duplicate
+            // tray connect never repoints a live session. It is the sole source the
+            // notification uses to NAME the server, and the next tray connect reuses it. The
+            // requested spelling, not the canonical form: every reader of this pointer compares
+            // it with manifest-form paths (same reason `respawn_sidecar` keeps the requested
+            // string). `config_path` is a different mutex, so no deadlock with the slot lock.
+            state.commit_live_config_path(&requested_config_path);
         }
+
+        // 3.6 F-TRAY (F10): mirror the tray connect to the window so its active-config pointer + hero
+        // follow the config the tray actually connected, instead of a stale/reverted FE pointer (the
+        // "tray icon green while the tab shows all «Подключить» / no active card" split).
+        //
+        // Sent HERE — after the in-lock liveness re-check and the generation bump — so a tray
+        // connect that was aborted as a duplicate never moves the window's active-config pointer
+        // to a config that is not the live one. The payload names the path the window's cards
+        // hold (the requested spelling), not the canonical `\\?\` form, which matched no card
+        // (gap G-03.1-5). Carries origin + the config PATH only — paths already cross this
+        // boundary via the config commands; no secret (D-29).
+        app.emit("vpn-flow", tray_connect_flow_payload(&requested_config_path)).ok();
 
         // Fable R3 (MAJOR-A): emit `Connecting` FIRST — BEFORE the pre-connect ping probe below. The probe
         // eats its FULL 1.5s timeout on an unreachable endpoint, and it used to run while status was still
@@ -517,6 +583,19 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         // Disconnected on the first drop — i.e. tray sessions silently lost ALL
         // auto-reconnect.
         state.user_disconnect_requested.store(false, Ordering::SeqCst);
+        // Deep review of AUD-08, M-1: the per-attempt pre-flight verdict, measured HERE
+        // exactly like `vpn_connect` measures it. The never-connected classifier
+        // (`lifecycle::never_connected_exit_reason`) reads `last_preflight_offline` on every
+        // failed start, and this door used to leave it untouched — a tray attempt then
+        // inherited whatever the last WINDOW attempt measured, so an «offline» verdict from
+        // an earlier attempt could name «Нет подключения к интернету» on a machine that is
+        // online. Warning only, never a block (same reasoning as the window door: captive
+        // and corporate networks fail this probe while the VPN still connects).
+        let preflight_offline = !crate::connectivity::check_adapter_online().await;
+        state.last_preflight_offline.store(preflight_offline, Ordering::SeqCst);
+        if preflight_offline {
+            sidecar::emit_preflight_offline_marker(&app);
+        }
         // FAB-R4 (Fable-5 review of Phase 14) — CONSUME the switch-authorized stamp on
         // this connect entry point too. A tray «Подключиться» is a fresh user-initiated
         // connect, NOT a switch destination, so it must NEVER bail on the stamp — but a
@@ -570,6 +649,9 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         match spawn_result {
             Ok(child) => {
                 eprintln!("[tray_vpn_connect] Sidecar spawned OK (PID {})", child.child.pid());
+                // Same app.log line as the window door (vpn_connect): a tray session used to leave
+                // no spawn record. A process id only (D-29).
+                crate::logging::log_app("INFO", &format!("Sidecar spawned OK (PID {})", child.child.pid()));
                 // 3.3 F-6 (Fable-5): mirror vpn_connect's #19 post-spawn cancel re-check on the tray
                 // path. `spawn_trusttunnel` is async; a tray/window disconnect can land (and complete)
                 // WHILE the spawn is in flight — and even under the 3.3 lock the tray-DISCONNECT twin's
@@ -841,14 +923,15 @@ pub fn tray_menu_current_locale(app: tauri::AppHandle) -> String {
 /// False — «Подключиться» должен быть disabled: нечего подключать.
 #[tauri::command]
 pub fn tray_menu_has_config(app: tauri::AppHandle) -> bool {
-    // Same resolution как в tray_vpn_connect — если здесь true,
+    // The SAME resolver as tray_vpn_connect — если здесь true,
     // значит clicked "Подключиться" реально подключит VPN.
-    let stored = app.try_state::<AppState>()
-        .and_then(|s| s.config_path.lock().ok().and_then(|g| g.clone()));
-    if stored.is_some() {
-        return true;
-    }
-    crate::commands::config::auto_detect_config().is_some()
+    let stored = app.try_state::<AppState>().and_then(|s| stored_config_path(&s));
+    resolve_tray_connect_target(
+        stored,
+        crate::commands::manifest::last_used_config_path,
+        crate::commands::config::auto_detect_config,
+    )
+    .is_some()
 }
 
 /// Disconnect VPN from tray menu.
@@ -997,6 +1080,9 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             };
             if write_disconnected {
                 set_vpn_status(&app_clone, &state, VpnStatus::Disconnected, None);
+                // Same app.log line as the window door's vpn_disconnect: a tray session used to
+                // leave no disconnect record. Fixed phrase (D-29).
+                crate::logging::log_app("INFO", "VPN disconnected (origin=tray)");
             }
             // WR-01: clear the process-wide `disconnecting` intent flag after the
             // disconnect completes (mirrors `vpn_disconnect`). The sidecar's
@@ -1157,6 +1243,375 @@ mod tests {
             found.iter().map(|(l, n, _)| (l, n)).collect::<Vec<_>>(),
             expected.iter().map(|(l, n, _)| (l, n)).collect::<Vec<_>>()
         );
+    }
+
+    // Deep review of AUD-08, M-1: `last_preflight_offline` is read by the never-connected
+    // classifier (`lifecycle::never_connected_exit_reason`) on EVERY failed start, but only the
+    // window's `vpn_connect` used to write it. A tray connect therefore inherited whatever the
+    // last window attempt measured — an «offline» verdict from an hour ago could turn a tray
+    // attempt's server-unreachable failure into «Нет подключения к интернету» on a machine
+    // that is online. Both fresh-connect doors must measure and record their OWN verdict, and
+    // they must do it before the spawn that the verdict is about.
+    #[test]
+    fn both_fresh_connect_doors_record_their_own_preflight_verdict() {
+        let store = "last_preflight_offline.store(";
+        for (label, raw) in [
+            ("commands/vpn.rs", include_str!("commands/vpn.rs")),
+            ("tray.rs", include_str!("tray.rs")),
+        ] {
+            let body = production_half(raw);
+            let store_at = body.find(store).unwrap_or_else(|| {
+                panic!(
+                    "{label} starts a fresh connect but never records its own pre-flight verdict \
+                     (`{store}`) — the classifier would read a stale value left by an earlier \
+                     attempt"
+                )
+            });
+            let spawn_at = body
+                .find("spawn_trusttunnel(")
+                .expect("the fresh-connect door is why this file is listed");
+            assert!(
+                store_at < spawn_at,
+                "{label}: the pre-flight verdict must be recorded BEFORE the spawn it describes"
+            );
+        }
+    }
+
+    // ─── G-03.1-5: the tray tells the window the path IT knows, and only once the connect is real ───
+    //
+    // The tray door replaces its config path with the canonical form (`\\?\C:\…` on Windows) so
+    // that validate and spawn resolve the string once. It used to broadcast that canonical form
+    // in the `vpn-flow` connect event, and the window — whose cards hold the plain spelling —
+    // found no card for it. The event must carry the string the window already knows (the
+    // requested path, bound before canonicalisation), and it must be sent from inside the spawned
+    // task AFTER the in-lock liveness re-check, so a connect aborted as a duplicate never moves
+    // the window's active-config pointer.
+    //
+    // Positional over the production half, the style the spawn-door census above uses: the door
+    // cannot be driven without a running app, so the ORDER of its statements is what is pinned.
+
+    /// The body of `tray_vpn_connect` in the production half of this file.
+    fn tray_connect_body() -> String {
+        let prod = production_half(include_str!("tray.rs"));
+        let start = prod
+            .find("pub fn tray_vpn_connect(")
+            .expect("tray_vpn_connect must exist in the production half");
+        let rest = &prod[start..];
+        // The function is top-level: its closing brace is the first `}` in column 0.
+        let end = rest.find("\n}\n").expect("tray_vpn_connect must end at column 0");
+        rest[..end].to_string()
+    }
+
+    #[test]
+    fn the_tray_announces_the_requested_path_not_the_canonical_one() {
+        let body = tray_connect_body();
+        let requested_at = body.find("let requested_config_path").expect(
+            "the tray door must bind `requested_config_path` — the spelling the window knows — \
+             before the path is canonicalised",
+        );
+        let canonical_at = body
+            .find("validate_app_path_canonical(")
+            .expect("the door must keep its path confinement (CA-2)");
+        assert!(
+            requested_at < canonical_at,
+            "`requested_config_path` must be bound BEFORE the canonical shadowing, or it would \
+             capture the `\\\\?\\` form the window cannot match"
+        );
+
+        let emit_at = body.find("\"vpn-flow\"").expect("the door must announce the connect");
+        let window: String = body[emit_at..].chars().take(240).collect();
+        assert!(
+            window.contains("requested_config_path"),
+            "the `vpn-flow` connect payload must carry `requested_config_path`, got: {window}"
+        );
+        assert!(
+            !body.contains("\"configPath\": config_path"),
+            "the canonical `config_path` must never be the announced spelling"
+        );
+    }
+
+    #[test]
+    fn the_tray_connect_payload_carries_the_requested_spelling_unchanged() {
+        let payload = tray_connect_flow_payload("C:\\cfg\\b.toml");
+        assert_eq!(payload["action"], "connect");
+        assert_eq!(payload["origin"], "tray");
+        assert_eq!(payload["configPath"], "C:\\cfg\\b.toml");
+        // Origin + path only (D-29): no other key rides along.
+        assert_eq!(payload.as_object().map(|o| o.len()), Some(3));
+    }
+
+    #[test]
+    fn the_tray_announces_the_connect_only_after_the_in_lock_liveness_recheck() {
+        let body = tray_connect_body();
+        // The entry guard and the in-lock re-check both read `session_active`; the second
+        // occurrence of the bail is the in-lock one (inside the spawned task).
+        let first = body.find("if session_active {").expect("entry guard");
+        let recheck_at = body[first + 1..]
+            .find("if session_active {")
+            .map(|i| first + 1 + i)
+            .expect("the in-lock liveness re-check must exist inside the spawned task");
+        let emit_at = body.find("\"vpn-flow\"").expect("the door must announce the connect");
+        assert!(
+            emit_at > recheck_at,
+            "the `vpn-flow` connect announcement must follow the in-lock re-check, so an aborted \
+             duplicate tray connect cannot move the window's active-config pointer"
+        );
+        assert_eq!(
+            body.matches("\"vpn-flow\"").count(),
+            1,
+            "the tray connect door announces exactly once"
+        );
+    }
+
+    // ─── G-03.1-5 (03.1-05): which config the tray connects, and that it records it ───
+    //
+    // Two doors to «connect» must not disagree about the config. The window's `vpn_connect`
+    // commits the config it connects into `AppState.config_path`; the tray never did, so with
+    // the pointer empty the connect/error notification had no server name and the next tray
+    // connect could not reuse the config. And with nothing stored the tray took the FIRST
+    // `.toml` the folder scan found — a different server from the one the window lists on top.
+
+    /// The body of a top-level function (by its `fn <name>(` header) in the production half.
+    fn fn_body(name: &str) -> String {
+        let prod = production_half(include_str!("tray.rs"));
+        let start = prod
+            .find(&format!("fn {name}("))
+            .unwrap_or_else(|| panic!("{name} must exist in the production half"));
+        let rest = &prod[start..];
+        let end = rest
+            .find("\n}\n")
+            .unwrap_or_else(|| panic!("{name} must end at column 0"));
+        rest[..end].to_string()
+    }
+
+    #[test]
+    fn a_stored_config_wins_and_neither_fallback_is_consulted() {
+        let got = resolve_tray_connect_target(
+            Some("C:\\cfg\\stored.toml".into()),
+            || panic!("last_used must not be consulted when a config is stored"),
+            || panic!("auto_detect must not be consulted when a config is stored"),
+        );
+        assert_eq!(got, Some("C:\\cfg\\stored.toml".to_string()));
+    }
+
+    #[test]
+    fn with_nothing_stored_the_manifest_last_used_config_is_connected() {
+        let got = resolve_tray_connect_target(
+            None,
+            || Some("C:\\cfg\\last.toml".into()),
+            || panic!("auto_detect must not be consulted when the manifest names a config"),
+        );
+        assert_eq!(got, Some("C:\\cfg\\last.toml".to_string()));
+    }
+
+    #[test]
+    fn with_nothing_stored_and_no_marker_the_first_detected_config_is_the_last_resort() {
+        let got = resolve_tray_connect_target(
+            None,
+            || None,
+            || Some("C:\\cfg\\first.toml".into()),
+        );
+        assert_eq!(got, Some("C:\\cfg\\first.toml".to_string()));
+    }
+
+    #[test]
+    fn with_no_config_anywhere_there_is_no_target() {
+        assert_eq!(resolve_tray_connect_target(None, || None, || None), None);
+    }
+
+    // WR-01: the stored pointer is filtered by existence BEFORE it enters the resolver, so a
+    // deleted config falls through to the manifest's last-used entry.
+
+    /// A path in the temp dir that is unique to this test run and does not exist.
+    fn missing_config_path(tag: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("tt-wr01-{}-{tag}.toml", std::process::id()))
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn a_stored_pointer_to_a_deleted_file_is_dropped() {
+        let gone = missing_config_path("gone");
+        assert!(!std::path::Path::new(&gone).exists(), "fixture must not exist");
+        assert_eq!(keep_existing_config(Some(gone)), None);
+    }
+
+    #[test]
+    fn a_stored_pointer_to_an_existing_file_is_kept() {
+        let present = std::env::temp_dir().join(format!("tt-wr01-{}-present.toml", std::process::id()));
+        std::fs::write(&present, "x").expect("write fixture");
+        let path = present.to_string_lossy().into_owned();
+        let got = keep_existing_config(Some(path.clone()));
+        std::fs::remove_file(&present).ok();
+        assert_eq!(got, Some(path));
+    }
+
+    #[test]
+    fn nothing_stored_stays_nothing() {
+        assert_eq!(keep_existing_config(None), None);
+    }
+
+    #[test]
+    fn a_deleted_stored_config_falls_through_to_the_manifest_last_used_entry() {
+        let got = resolve_tray_connect_target(
+            keep_existing_config(Some(missing_config_path("fallthrough"))),
+            || Some("C:\\cfg\\last.toml".into()),
+            || panic!("auto_detect must not be consulted when the manifest names a config"),
+        );
+        assert_eq!(got, Some("C:\\cfg\\last.toml".to_string()));
+    }
+
+    #[test]
+    fn the_connect_door_and_the_menu_state_filter_the_stored_pointer_through_one_helper() {
+        for name in ["tray_vpn_connect", "tray_menu_has_config"] {
+            let body = fn_body(name);
+            assert!(
+                body.contains("stored_config_path("),
+                "{name} must read the stored pointer through stored_config_path, so a deleted \
+                 config is dropped the same way at both doors"
+            );
+            assert!(
+                !body.contains("config_path.lock()"),
+                "{name} must not read AppState.config_path by hand, bypassing the existence filter"
+            );
+        }
+    }
+
+    #[test]
+    fn the_connect_door_and_the_menu_state_share_one_resolver() {
+        for name in ["tray_vpn_connect", "tray_menu_has_config"] {
+            let body = fn_body(name);
+            assert!(
+                body.contains("resolve_tray_connect_target("),
+                "{name} must resolve the target through resolve_tray_connect_target, so an enabled \
+                 «Подключить» always connects what it promises"
+            );
+            assert!(
+                !body.contains("auto_detect_config()")
+                    && !body.contains("or_else(crate::commands::config::auto_detect_config)"),
+                "{name} must not repeat the stored → folder-scan resolution by hand"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tray_records_the_connected_config_together_with_the_generation_bump() {
+        let body = tray_connect_body();
+        let first = body.find("if session_active {").expect("entry guard");
+        let recheck_at = body[first + 1..]
+            .find("if session_active {")
+            .map(|i| first + 1 + i)
+            .expect("the in-lock liveness re-check must exist inside the spawned task");
+        let bump_at = body
+            .find("connection_generation.fetch_add(")
+            .expect("the connect bump must exist");
+        let commit_at = body
+            .find("commit_live_config_path(&requested_config_path)")
+            .expect(
+                "the tray must record the config it connects in AppState.config_path, like \
+                 vpn_connect does — the notification names its server from it",
+            );
+        let spawn_at = body.find("spawn_trusttunnel(").expect("the door spawns");
+        assert!(
+            commit_at > recheck_at,
+            "the pointer is committed only after the in-lock re-check, so a refused or duplicate \
+             tray connect cannot repoint a live session"
+        );
+        assert!(
+            commit_at > bump_at && commit_at - bump_at < 300,
+            "the pointer is committed in the same locked block as the generation bump"
+        );
+        assert!(commit_at < spawn_at, "the pointer is committed before the spawn");
+    }
+
+    // ─── G-03.1-5 (03.1-05): the tray trail in app.log matches the window's ───
+    //
+    // A tray session left no `VPN connect: config=…`, no `Sidecar spawned OK` and no `VPN
+    // disconnected` line in app.log (the window door writes all three), so a tray-started
+    // session could only be reconstructed from indirect evidence. The lines go to app.log via
+    // `log_app` — the debug stream — and carry a file path and a PID only, never config
+    // contents, never a password, and never the activity-log / `vpn-log` channel (D-29).
+
+    /// Whitespace removed, so a needle matches however rustfmt wraps the call.
+    fn squashed(s: &str) -> String {
+        s.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    #[test]
+    fn the_tray_connect_logs_the_config_it_connects_before_the_path_guard() {
+        let body = squashed(&tray_connect_body());
+        let line = squashed(
+            "log_app(\"INFO\", &format!(\"VPN connect: config={requested_config_path}",
+        );
+        let line_at = body.find(&line).expect(
+            "the tray connect must write `VPN connect: config=…` to app.log — the prefix the \
+             window door writes, so one search finds both doors",
+        );
+        assert!(
+            body.contains(&squashed("log_level={log_level}, origin=tray")),
+            "the line names the log level and is tagged origin=tray"
+        );
+        let guard_at = body
+            .find("validate_app_path_canonical(")
+            .expect("the door keeps its path confinement");
+        assert!(
+            line_at < guard_at,
+            "the connect line is written before the path guard, so a refused connect is on record too"
+        );
+        let level_at = body.find("letlog_level").expect("log_level is read");
+        assert!(
+            level_at < line_at,
+            "log_level is read before the connect line that reports it"
+        );
+    }
+
+    #[test]
+    fn the_tray_connect_logs_the_spawned_pid_in_the_ok_arm() {
+        let body = squashed(&tray_connect_body());
+        let ok_at = body.find("Ok(child)=>").expect("the spawn Ok arm");
+        let line = squashed("log_app(\"INFO\", &format!(\"Sidecar spawned OK (PID");
+        let line_at = body
+            .find(&line)
+            .expect("the Ok arm must write `Sidecar spawned OK (PID n)` to app.log like the window door");
+        assert!(line_at > ok_at, "the PID line belongs to the spawn Ok arm");
+    }
+
+    #[test]
+    fn the_tray_disconnect_logs_where_it_writes_disconnected() {
+        let body = squashed(&fn_body("tray_vpn_disconnect"));
+        let block_at = body
+            .find("ifwrite_disconnected{")
+            .expect("the branch that writes Disconnected");
+        let block_end = block_at + body[block_at..].find('}').expect("the branch closes");
+        let block = &body[block_at..block_end];
+        let write_at = block
+            .find("set_vpn_status(&app_clone,&state,VpnStatus::Disconnected")
+            .expect("the branch writes Disconnected");
+        let line_at = block
+            .find(&squashed("log_app(\"INFO\", \"VPN disconnected"))
+            .expect(
+                "the tray disconnect must write `VPN disconnected` to app.log inside the branch \
+                 that writes Disconnected — the window door writes it after its teardown",
+            );
+        assert!(line_at > write_at, "the line follows the Disconnected write");
+    }
+
+    #[test]
+    fn no_tray_log_line_carries_a_config_path_into_the_activity_log() {
+        // D-29: the activity log / `vpn-log` channel never receives a path or user text. The tray
+        // has no such call today; this pins that a config path never joins one.
+        let prod = squashed(&production_half(include_str!("tray.rs")));
+        for channel in ["emit_log(", "write_activity_log", "\"vpn-log\""] {
+            for (at, _) in prod.match_indices(channel) {
+                let window: String = prod[at..].chars().take(400).collect();
+                assert!(
+                    !window.contains("config_path"),
+                    "a `{channel}` call in tray.rs mentions a config path — paths go to app.log \
+                     (log_app) only, never the activity log (D-29): {window}"
+                );
+            }
+        }
     }
 
     // Tray left-click decision — the fix for "a second tray click brings the window back still

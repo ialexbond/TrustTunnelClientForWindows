@@ -2,7 +2,11 @@
  * CIDR parsing and validation utilities.
  *
  * Frontend first-line validation. Backend (src-tauri/src/ssh/sanitize.rs::validate_cidr)
- * provides defense-in-depth — the two validators must stay synchronized.
+ * provides defense-in-depth — `isValidCidr` alone must stay synchronized with it (it is the
+ * IPv4 CIDR validator for the server-side users CIDR field). The IPv6/IPv4-host helpers below
+ * (isValidIpv4, isValidIpv6, isValidIpv6Cidr, isValidRouteAddress) serve only the local routing-
+ * rule address field (AddRuleInput, MR3-06 / D-17) and have no backend mirror — sanitize.rs does
+ * not validate routing-rule addresses.
  *
  * Semantic: empty string = no CIDR restriction (rules.toml rule omits `cidr =` key).
  *           "0.0.0.0/0" = explicit allow-all (rules.toml writes `cidr = "0.0.0.0/0"`).
@@ -99,4 +103,83 @@ export function describeCidr(s: string): string {
   }
   const endIp = endOctets.join(".");
   return `${startIp} – ${endIp} (${addresses} addresses)`;
+}
+
+/**
+ * Plain IPv4 host address (no CIDR suffix): exactly 4 dot-separated decimal octets, 0-255.
+ * MR3-06 / D-17 — feeds isValidRouteAddress; AddRuleInput's routing-rule field only.
+ */
+export function isValidIpv4(s: string): boolean {
+  const octets = s.split(".");
+  if (octets.length !== 4) return false;
+  for (const oct of octets) {
+    if (oct === "" || !/^\d+$/.test(oct)) return false;
+    const n = Number.parseInt(oct, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 255) return false;
+  }
+  return true;
+}
+
+/**
+ * Hand-rolled structural IPv6 address check — no RFC 4291 embedded-IPv4-tail support (not
+ * needed for a routing-rule field; such input is rejected here, same as before this fix).
+ *
+ * Rule: split on the FIRST "::" (at most one occurrence is legal — a second "::" means the
+ * address is ambiguous and is rejected here via the >1-part split-count check); each side's
+ * groups split on ":"; every group is 1-4 hex digits; a bare address (no "::") has exactly 8
+ * groups, one with "::" has at most 7 (the "::" stands in for one or more all-zero groups).
+ */
+export function isValidIpv6(s: string): boolean {
+  if (s === "") return false;
+  if (!/^[0-9a-fA-F:]+$/.test(s)) return false;
+
+  const doubleColonParts = s.split("::");
+  if (doubleColonParts.length > 2) return false; // more than one "::" — ambiguous, reject
+
+  const parseGroups = (part: string): string[] | null => {
+    if (part === "") return [];
+    const groups = part.split(":");
+    for (const g of groups) {
+      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null; // empty or >4 hex digits
+    }
+    return groups;
+  };
+
+  if (doubleColonParts.length === 2) {
+    const [left, right] = doubleColonParts;
+    const leftGroups = parseGroups(left);
+    const rightGroups = parseGroups(right);
+    if (leftGroups === null || rightGroups === null) return false;
+    return leftGroups.length + rightGroups.length <= 7;
+  }
+
+  const groups = parseGroups(doubleColonParts[0]);
+  return groups !== null && groups.length === 8;
+}
+
+/**
+ * IPv6 subnet: exactly one "/", left side a valid IPv6 address, right side a decimal prefix
+ * length 0-128. MR3-06 / D-17.
+ */
+export function isValidIpv6Cidr(s: string): boolean {
+  const slashIndex = s.indexOf("/");
+  if (slashIndex === -1 || s.indexOf("/", slashIndex + 1) !== -1) return false;
+  const ip = s.slice(0, slashIndex);
+  const prefixStr = s.slice(slashIndex + 1);
+  if (ip === "" || prefixStr === "" || !isValidIpv6(ip)) return false;
+  if (!/^\d+$/.test(prefixStr)) return false;
+  const prefix = Number.parseInt(prefixStr, 10);
+  return Number.isFinite(prefix) && prefix >= 0 && prefix <= 128;
+}
+
+/**
+ * The single decision AddRuleInput's validateEntry defers to for any digits/dots/colons/slash
+ * input: a plain IPv4 host, an IPv4 CIDR (via isValidCidr — non-empty only, empty string has a
+ * different meaning in the users-CIDR field this validator also serves), a plain IPv6 host, or
+ * an IPv6 subnet. MR3-06 / D-17 / D-19.
+ */
+export function isValidRouteAddress(s: string): boolean {
+  return (
+    isValidIpv4(s) || (s !== "" && isValidCidr(s)) || isValidIpv6(s) || isValidIpv6Cidr(s)
+  );
 }

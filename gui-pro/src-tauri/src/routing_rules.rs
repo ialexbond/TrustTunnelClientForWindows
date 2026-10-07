@@ -39,7 +39,7 @@ pub struct RuleEntry {
 /// it answers with silence rather than NXDOMAIN (so Windows simply re-asks through another
 /// adapter), and its connection-refusal gate compares IP only. It never blocked anything — the
 /// core logged not one `[ROUTE] BLOCKED` in thirteen days of real logs. Full analysis in
-/// `.planning/phases/30.1-*/30.1-BLOCKING-DIAGNOSIS.md`; if the feature ever returns it returns as
+/// `.planning/milestones/v3.0-phases/30.1-*/30.1-BLOCKING-DIAGNOSIS.md`; if the feature ever returns it returns as
 /// a filtering DNS on the user's own server (`.planning/research/site-blocking-approaches/`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingRules {
@@ -1411,7 +1411,7 @@ mod tests {
     // a name by DROPPING its DNS query, it answers with SILENCE rather than NXDOMAIN (so Windows
     // simply re-asks through another adapter), and its connection-refusal gate compares IP only.
     // Thirteen days of the logs contain not one `[ROUTE] BLOCKED`. Full analysis in
-    // `.planning/phases/30.1-*/30.1-BLOCKING-DIAGNOSIS.md`.
+    // `.planning/milestones/v3.0-phases/30.1-*/30.1-BLOCKING-DIAGNOSIS.md`.
     //
     // REMOVING a feature has two failure modes and these tests pin one each, because either alone
     // ships a real defect:

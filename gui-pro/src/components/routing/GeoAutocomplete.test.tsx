@@ -208,4 +208,161 @@ describe("GeoAutocomplete", () => {
     fireEvent.mouseEnter(ruOption);
     expect(ruOption).toHaveAttribute("aria-selected", "true");
   });
+
+  // ── D-18/D-19: Enter inserts the exact typed value when it is a known value ──
+  describe("Enter: exact typed value beats the automatic highlight (D-18)", () => {
+    const ivory = ["ua", "uk", "us"];
+
+    it("query 'uk' -> Enter inserts geoip:uk, not the highlighted geoip:ua", () => {
+      render(
+        <GeoAutocomplete
+          prefix="geoip"
+          query="uk"
+          categories={ivory}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.keyDown(document, { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledWith("geoip:uk");
+      expect(onSelect).not.toHaveBeenCalledWith("geoip:ua");
+    });
+
+    it("query 'UK' (case-insensitive) -> Enter inserts the canonical geoip:uk", () => {
+      render(
+        <GeoAutocomplete
+          prefix="geoip"
+          query="UK"
+          categories={ivory}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.keyDown(document, { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledWith("geoip:uk");
+    });
+
+    it("query 'u' (not exact) -> Enter inserts the highlighted suggestion as today", () => {
+      render(
+        <GeoAutocomplete
+          prefix="geoip"
+          query="u"
+          categories={ivory}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      // filtered = ["ua", "uk", "us"] (alphabetical, all start with "u"); first is highlighted.
+      fireEvent.keyDown(document, { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledWith("geoip:ua");
+    });
+
+    it("a keystroke followed immediately by Enter acts on the LATEST query, not the previous render's list", () => {
+      const { rerender } = render(
+        <GeoAutocomplete
+          prefix="geoip"
+          query="u"
+          categories={ivory}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      // Simulate a fast rerender (query changed to "uk") immediately followed by Enter, before
+      // any effect/timeout from the "u" render has had a chance to run.
+      rerender(
+        <GeoAutocomplete
+          prefix="geoip"
+          query="uk"
+          categories={ivory}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.keyDown(document, { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledWith("geoip:uk");
+      expect(onSelect).not.toHaveBeenCalledWith("geoip:ua");
+    });
+
+    it("an explicit ArrowDown choice after the last keystroke is honoured over the exact-value rule", () => {
+      render(
+        <GeoAutocomplete
+          prefix="geosite"
+          query="google"
+          categories={["google", "google-cn"]}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      // filtered = ["google", "google-cn"]; "google" is an exact match AND is highlighted by
+      // default (index 0). Move to "google-cn" with ArrowDown — that explicit pick wins.
+      fireEvent.keyDown(document, { key: "ArrowDown" });
+      fireEvent.keyDown(document, { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledWith("geosite:google-cn");
+    });
+
+    it("typing again after an arrow choice resets it — the exact-value rule applies again", () => {
+      const { rerender } = render(
+        <GeoAutocomplete
+          prefix="geosite"
+          query="goog"
+          categories={["google", "google-cn"]}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.keyDown(document, { key: "ArrowDown" }); // picks google-cn (index 1)
+      // The person types one more character — the query changes, so the arrow pick must not
+      // survive: the exact-value rule (query "google" matches a known category exactly) applies.
+      rerender(
+        <GeoAutocomplete
+          prefix="geosite"
+          query="google"
+          categories={["google", "google-cn"]}
+          downloaded={true}
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.keyDown(document, { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledWith("geosite:google");
+    });
+  });
+
+  // ── IN-02 (03-REVIEW.md): activeIndex must never go negative ──
+  it("IN-02: ArrowDown while filtered is empty, then filtered becomes non-empty without the query changing — Enter still selects the first item", () => {
+    const { rerender } = render(
+      <GeoAutocomplete
+        prefix="geoip"
+        query="z"
+        categories={["ru"]}
+        downloaded={true}
+        onSelect={onSelect}
+        onClose={onClose}
+      />,
+    );
+    // filtered = [] here (nothing starts with "z"), so ArrowDown would previously drive
+    // activeIndex to -1 (Math.min(prev + 1, -1)).
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    // categories change WITHOUT the query changing, so the query-keyed reset effect does not
+    // fire and activeIndex stays whatever ArrowDown left it at; filtered becomes non-empty.
+    rerender(
+      <GeoAutocomplete
+        prefix="geoip"
+        query="z"
+        categories={["za"]}
+        downloaded={true}
+        onSelect={onSelect}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("geoip:za");
+  });
 });

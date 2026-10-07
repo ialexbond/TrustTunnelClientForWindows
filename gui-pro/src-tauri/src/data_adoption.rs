@@ -29,7 +29,7 @@
 //!
 //! An earlier adoption existed (`lib::adopt_legacy_data_into`, plan 30.1-08) and was deleted on
 //! 2026-08-28 together with the data-root revert. The full diagnosis is
-//! `.planning/phases/30.1-*/30.1-REGRESSION.md`; the short version, from a real Windows install:
+//! `.planning/milestones/v3.0-phases/30.1-*/30.1-REGRESSION.md`; the short version, from a real Windows install:
 //!
 //! * `configs.json` stores every server as an ABSOLUTE path. The old code copied the manifest as
 //!   a blob, so every entry still named the old root. The path-confinement guard follows the data

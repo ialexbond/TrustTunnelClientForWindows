@@ -1,7 +1,7 @@
 {
   "name": "trusttunnel-gui",
   "private": true,
-  "version": "3.0.0",
+  "version": "3.1.0",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "lint": "eslint src --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "rust:check": "cd src-tauri && cargo clippy -- -D warnings",
+    "rust:check": "cd src-tauri && cargo clippy --all-targets -- -D warnings",
     "rust:fmt": "cd src-tauri && cargo fmt --check",
     "i18n:check": "node ../scripts/i18n-dead-keys.cjs",
     "nsis:check": "node ../scripts/nsis-text-gate.cjs",
@@ -24,7 +24,12 @@
     "pii:test": "node ../scripts/pii-gate.test.cjs",
     "artifact:check": "node ../scripts/artifact-path-gate.cjs src-tauri/target/release/trusttunnel.exe src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe src-tauri/target/release/bundle/nsis",
     "artifact:test": "node ../scripts/artifact-path-gate.test.cjs",
-    "prerelease": "npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run pii:test && npm run pii:check && npm run artifact:test && npm run rust:check && npm run build",
+    "checksum:write": "node ../scripts/checksum-gate.cjs --write src-tauri/target/release/bundle/nsis",
+    "checksum:check": "node ../scripts/checksum-gate.cjs src-tauri/target/release/bundle/nsis",
+    "checksum:test": "node ../scripts/checksum-gate.test.cjs",
+    "label:check": "node ../scripts/build-label-gate.cjs --dist dist --exe src-tauri/target/release/trusttunnel.exe",
+    "label:test": "node ../scripts/build-label-gate.test.cjs",
+    "prerelease": "npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run pii:test && npm run pii:check && npm run artifact:test && npm run checksum:test && npm run label:test && npm run rust:check && npm run label:check && npm run build && npm run checksum:check",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },

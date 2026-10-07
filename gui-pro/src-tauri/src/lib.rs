@@ -2,6 +2,7 @@ mod app_settings;
 mod autostart;
 mod commands;
 mod connectivity;
+mod console_ctrl;
 // Phase 32-04 (D-07) — first-launch adoption of a legacy data root the new install does not read.
 // Declared at RED, before the implementation existed, for a reason that is not bookkeeping: an
 // undeclared `.rs` file is not compiled at all, so `cargo test --lib data_adoption` would have
@@ -90,6 +91,15 @@ const START_MINIMIZED_MARKER: &str = ".start_minimized";
 pub fn init_data_root_early() {
     let webview_data = ssh::user_data_dir().join("webview_data");
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_data);
+}
+
+/// G-03.1-10: `Some(exit code)` when `main()` was started as the one-shot Ctrl+C helper
+/// (`console_ctrl::HELPER_ARG`); `None` for every normal launch. Arguments are read lossily so a
+/// launch with a non-UTF-8 argument can never panic here.
+pub fn ctrl_c_helper_exit_code() -> Option<i32> {
+    console_ctrl::helper_exit_code_from_args(
+        std::env::args_os().map(|a| a.to_string_lossy().into_owned()),
+    )
 }
 
 #[tauri::command]
@@ -257,6 +267,9 @@ pub fn run() {
             // vpn_disconnect and cleared by the next vpn_connect, so a user disconnect
             // wins over an in-flight auto-reconnect (no flip back to Connected).
             user_disconnect_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // G-03.1-7 — generation-keyed count of core restarts after a WinTUN adapter failure.
+            // `(0, 0)`: nothing used; the sidecar reader task's Terminated arm is the only writer.
+            adapter_retry_ledger: Arc::new(Mutex::new((0, 0))),
             // Phase 13 (D-06) — master notifications gate mirror. Starts `true` (the D-06
             // locked default) so the Rust firing gate is correct BEFORE the FE's startup
             // mirror push lands — a safe pre-seed that silences nothing the user did not
@@ -407,16 +420,20 @@ pub fn run() {
             // not a leftover, and telling him those files are safe to delete while asking whether
             // to copy them out is two pieces of advice that contradict each other.
             //
-            // IT CANNOT DELAY THE WINDOW AND IT CANNOT FAIL THE START. Six `metadata()` calls, one
-            // `exists()` and at most one small file read, so it is inline like the sweeps below it
-            // rather than detached. Nothing it does was asked for by anybody, so nothing it fails
-            // at may interrupt anybody: every failure inside it is a line in `app.log`, never a
-            // dialog and never an abort. That is deliberately the opposite of the migration
-            // failure screen, and the difference is what is at stake — a failed migration is the
-            // user's data not arriving, while a failed report is 25 MB of dead bytes staying put.
+            // IT CANNOT DELAY THE WINDOW AND IT CANNOT FAIL THE START. Six `metadata()` calls, at
+            // most six file removals, one `exists()` and at most one small file read, so it is
+            // inline like the sweeps below it rather than detached. Nothing it does was asked for
+            // by anybody, so nothing it fails at may interrupt anybody: every failure inside it is
+            // a line in `app.log`, never a dialog and never an abort — a busy file is retried at
+            // the next launch. That is deliberately the opposite of the migration failure screen,
+            // and the difference is what is at stake — a failed migration is the user's data not
+            // arriving, while a failed removal is 25 MB of dead bytes staying put.
             //
-            // IT REMOVES NOTHING. Owner decision `report-only`, 2026-09-06; the module's own
-            // header carries the reasoning and a test reads its source to keep it true.
+            // IT REMOVES ONLY THE SIX LISTED NAMES. Owner decision 2026-09-23 (WIN-25, D-21)
+            // replaced the earlier `report-only` one: the closed list of the previous version's
+            // binaries is deleted from the data folder, never the running program or its core,
+            // and nothing at all when the program's own folder is unknown. The module's header
+            // carries the reasoning and a test reads its source to keep it true.
             if !adoption_withheld {
                 legacy_sweep::run_startup_report();
             }
@@ -1016,7 +1033,6 @@ pub fn run() {
             commands::ssh_commands::server_update_hosts_allowed_sni,
             commands::ssh_commands::server_export_config_deeplink,
             commands::ssh_commands::server_get_available_versions,
-            commands::ssh_commands::server_upgrade,
             commands::ssh_commands::server_get_stats,
             commands::ssh_commands::server_get_uptime,
             commands::ssh_commands::security_get_status,

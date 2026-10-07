@@ -75,7 +75,7 @@ interface ServerPanelProps {
    * so the Card #8 ArrowUpCircle, bottom-tab pill dot, and ServerTabs
    * pill dot stop depending on a parallel SSH probe that could fall stale
    * after an in-session sidecar downgrade. See
-   * `.planning/phases/19-utilities-service-rename-update-section/19-DIAGNOSIS-card8-arrow.md`.
+   * `.planning/milestones/v3.0-phases/19-utilities-service-rename-update-section/19-DIAGNOSIS-card8-arrow.md`.
    */
   onServerInfoVersionChange?: (version: string) => void;
 }
