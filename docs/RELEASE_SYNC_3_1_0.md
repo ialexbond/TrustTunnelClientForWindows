@@ -10,12 +10,23 @@ The `master` branch now incorporates the published Pro 3.1.0 release and include
 | --- | --- |
 | Previous local master | `0843800b8940e7b2e337f21d2c60e067aa0a1be2` |
 | Recovery branch | `codex/pre-sync-pro-3-1-0-20261007` |
+| Original history before publication cleanup | `codex/pre-publish-pro-3-1-0-20261007`, `122eccbf004aa6f812bae3e07324317513e416a1` |
+| Published-history audit baseline | `140763450cb3b35e44d4e5514a1a87e9c4e0b78c` |
+| Published-history release merge | `ae8064e225680236c9cbe6f7607bda909d7f5014` |
 | Published release merged | `origin/release/tt-win-3.1.0`, `19179709045dc2fa533eac388563fc3e830328ab` |
 | Latest published application | [Pro v3.1.0](https://github.com/ialexbond/TrustTunnelClientForWindows/releases/tag/v3.1.0-pro) |
 | Core generation | Upstream 1.1.7 plus the fork's released changes |
 | Restored lint configuration | Official upstream v1.1.7, `170609c24ca865819fed68437b01c013049bc3fa` |
 
 The release and local branch diverged after `63537d27878c8bc291377a0cf3852041817f60c7`. A merge, rather than a reset, retains both histories. Six conflicts were resolved in `NOTICE`, the root and Pro READMEs, `gui-pro/package.json`, `conanfile.py`, and `net/src/quic_connector.cpp`. Released functionality and dependencies take precedence; the README retains the existing accurate statement about currently downloadable installers.
+
+### Publication privacy cleanup
+
+A check of outgoing Git objects found a previously deleted VPN profile with nonempty credentials at `TrustTunnel-v1.2.1-portable-win64/trusttunnel_client.toml`. Its historical content was not reachable from the inspected `origin` remote refs. Publishing the original local history would have exposed that profile even though the current checkout no longer contains it.
+
+An isolated bare clone was used to remove only that path from unpublished history. No commits or merge relationships were pruned. Existing published master `2d86f47dacea1ebac6fa0d425fd43a831bfa6011` and the Pro 3.1.0 release commit remain unchanged ancestors, allowing a normal fast-forward push. The original local history is retained in the two local recovery branches above; those recovery branches and local milestone tags are not included in publication.
+
+Before documentation updates, the sanitized tip `bd5844fc54f695d9eaffa7a894535caea06251c8` had exactly the same Git tree as the original tip `122eccbf004aa6f812bae3e07324317513e416a1`. Audit source files at the mapped baseline are identical to the original baseline. The report's public source links use the mapped commit while retaining the original identifiers as historical test provenance. No credential value is reproduced in these notes.
 
 ## Integrated changes
 
