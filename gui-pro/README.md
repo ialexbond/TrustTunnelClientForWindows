@@ -70,7 +70,7 @@ core** (`trusttunnel_client-*.exe`). Rust/Tauri only spawns and kills that proce
 implements tunnelling itself.
 
 **Its sources ARE in this repository**, on each version's `release/tt-win-X.Y.Z` branch
-and release tag, and now in the synchronized local `master`. The current release source
+and release tag, and now in the synchronized `master`. The current release source
 is `release/tt-win-3.1.0`. Only the compiled binary is absent (it is gitignored). The shipped
 core is upstream `1.1.7` plus our changes, listed at the top of the root `CHANGELOG.md`,
 synced from upstream on 2026-09-30. Set `TT_CLIENT_VERSION=1.1.7` explicitly when building

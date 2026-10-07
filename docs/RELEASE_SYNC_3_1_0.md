@@ -1,8 +1,8 @@
-# Local master synchronization with Pro 3.1.0
+# Master synchronization with Pro 3.1.0
 
 Date: 2026-10-07 (Asia/Yekaterinburg).
 
-The local `master` now incorporates the published Pro 3.1.0 release and includes the Windows C++ core and build sources. This synchronization retains the previous local history and legacy application directories. It does not install an application or publish changes to GitHub.
+The `master` branch now incorporates the published Pro 3.1.0 release and includes the Windows C++ core and build sources. The initial local synchronization was completed in `b360059eb6ec65a366b47bbedff522e1be295fb3`, retaining the previous local history and legacy application directories. The user subsequently authorized publishing the synchronized branch to `origin/master`. This operation does not install an application.
 
 ## Source and recovery point
 

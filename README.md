@@ -229,7 +229,7 @@ VPN, где достаточно установленного в системе 
 
 ### Ветки репозитория
 
-Local `master` now includes the Pro 3.1.0 application, its tests, and the C++ core/build
+The `master` branch now includes the Pro 3.1.0 application, its tests, and the C++ core/build
 sources restored from `release/tt-win-3.1.0`. The published release remains identified by
 that release branch and its tag. Compiled core binaries are not stored in Git and must
 be built separately. For a release-equivalent core build, set `TT_CLIENT_VERSION=1.1.7`
@@ -290,7 +290,7 @@ machine with no internet at all. Killing `trusttunnel_client.exe` or rebooting c
 This is a fork of [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
 The C++ VPN core comes from upstream and ships as a separate sidecar process, version upstream
 `1.1.7` plus our changes (listed at the top of `CHANGELOG.md`); the GUI is written here. Core sources
-for the current release live on `release/tt-win-3.1.0` and its tag; the synchronized local
+for the current release live on `release/tt-win-3.1.0` and its tag; the synchronized
 `master` also includes those sources. The root `CHANGELOG.md` is the core's changelog, not the application's — its release
 entries are upstream's; the application has its own release notes.
 

@@ -18,7 +18,7 @@ It contains work by two parties, both released under the Apache License 2.0:
         Copyright 2020 AdGuard Software Ltd
 
     Sources live on `release/tt-win-3.1.0`, its release tag, and the synchronized
-    local `master` checkout.
+    `master` checkout.
     This fork carries local changes to that code; they are confined to the
     `trusttunnel/` directory.
 
