@@ -2,7 +2,7 @@
 
 Date: 2026-10-07 (Asia/Yekaterinburg).
 
-The `master` branch now incorporates the published Pro 3.1.0 release and includes the Windows C++ core and build sources. The initial local synchronization was completed in `b360059eb6ec65a366b47bbedff522e1be295fb3`, retaining the previous local history and legacy application directories. The user subsequently authorized publishing the synchronized branch to `origin/master`. This operation does not install an application.
+The `master` branch now incorporates the published Pro 3.1.0 release and includes the Windows C++ core and build sources. The initial local synchronization was completed in `b360059eb6ec65a366b47bbedff522e1be295fb3`, retaining the previous local history. It incorrectly retained the old `gui-app/` source directory; the desktop-layout correction below removes that duplicate so the desktop editions are only `gui-pro/` and `gui-light/`, as in the published release. The user authorized publishing the synchronized branch to `origin/master`. This operation does not install an application.
 
 ## Source and recovery point
 
@@ -40,13 +40,20 @@ Before documentation updates, the sanitized tip `bd5844fc54f695d9eaffa7a894535ca
 - The local project guide's directory table is updated for the retained GUI editions and installer. That local guide is ignored by Git, as it was before synchronization.
 - The [security audit](../WINDOWS_VPN_SECURITY_AUDIT.md) retains its immutable historical baseline and explicitly identifies this later synchronization. The old external-font and launcher regressions are cleared in the current tree. Remaining findings applicable to the published release were not repaired by this merge.
 
-The scope of restoration is Windows and its shared core/build support. Retained Android, Apple, Flutter, Light and legacy GUI work is preserved; those editions are not declared synchronized or independently validated by this operation. The pre-existing untracked Android Gradle cache was left untouched.
+The scope of restoration is Windows and its shared core/build support. Retained Android, Apple, Flutter and Light work is preserved; those editions are not declared synchronized or independently validated by this operation. The pre-existing untracked Android Gradle cache was left untouched.
+
+### Desktop directory correction
+
+The release had already renamed `gui-app/` to `gui-pro/` in commit `fe30af1f45bd005877b4afb90d406470ed683a59`. Keeping the older local directory during the first synchronization reintroduced a duplicate desktop source tree. After the user's layout correction, all 334 tracked files in `gui-app/` were removed in a normal follow-up commit. The retained Pro and Light source/configuration files and the released shared core are unchanged by this correction. Active build workflows and packaging have no dependency on `gui-app/`.
+
+The pre-correction state is recoverable from local branch `codex/pre-remove-legacy-gui-20261007`. Ignored legacy build files were moved outside the repository, preserving them without retaining a third application directory. Historical planning notes and the audit's original scope descriptions retain their original paths; they do not define current build roots. Future release synchronization must preserve the current two-edition layout rather than restore `gui-app/`.
 
 ## Verification
 
 | Check | Result |
 | --- | --- |
 | Exact functional Pro source/config/packaging comparison to release | PASS; only intentional Pro README changes differ |
+| Desktop-layout correction | PASS; only `gui-pro/` and `gui-light/` remain, their source trees are unchanged, and Pro typecheck/lint/4,089 tests/frontend build were rerun successfully |
 | Windows core, Conan, CMake, build-helper and test-source comparison to release | PASS; no missing required release source files |
 | Pro versions and license agreement | PASS |
 | Merge conflict entries and conflict-marker scan | PASS; none remain |
