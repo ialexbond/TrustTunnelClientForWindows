@@ -367,3 +367,29 @@ TEST_F(LocationsPingerOfflineTest, EmptyLocationsFinishesImmediately) {
     ASSERT_TRUE(test_ctx.finished);
     ASSERT_TRUE(test_ctx.results.empty());
 }
+
+TEST_F(LocationsPingerOfflineTest, DestroyFromCallbackWhenPingStartFails) {
+    // name == nullptr causes ping_start to return nullptr (empty name check)
+    VpnEndpoint endpoint = {sockaddr_from_str("1.1.1.1:443"), nullptr};
+    VpnLocation location = {"1", {&endpoint, 1}};
+
+    TestCtx test_ctx = generate_test_ctx();
+    test_ctx.info.locations = {&location, 1};
+
+    test_ctx.pinger.reset(locations_pinger_start(&test_ctx.info,
+            {
+                    [](void *arg, const LocationsPingerResult *result) {
+                        auto *ctx = (TestCtx *) arg;
+                        if (result == nullptr) {
+                            // "Done" signal: destroy pinger while still on the call stack of
+                            // start_location_ping. Without a fix this causes use-after-free.
+                            ctx->pinger.reset();
+                            vpn_event_loop_exit(ctx->loop, Millis{0});
+                        }
+                    },
+                    &test_ctx,
+            },
+            loop.get(), network_manager.get()));
+
+    run_event_loop();
+}

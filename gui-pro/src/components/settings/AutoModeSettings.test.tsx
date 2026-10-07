@@ -63,8 +63,15 @@ describe("AutoModeSettings — the failover promise", () => {
 
     expect(screen.getByRole("switch", { name: FAILOVER_LABEL })).toBeInTheDocument();
     expect(
-      screen.getByText(/приложение один раз попробует переподключиться к текущему серверу/i),
+      screen.getByText(/сразу перейдёт к следующему серверу в списке ниже/i),
     ).toBeInTheDocument();
+
+    // 2026-09-23: the description promised «один раз попробует переподключиться к текущему серверу»,
+    // and this assertion pinned that wording in place. The code gives the origin ZERO attempts on a
+    // server drop with a queue of more than one (`FAILOVER_ORIGIN_ATTEMPTS = 0`, lifecycle.rs), so
+    // the sentence described a retry that never happened. The promise is checked here as a negative
+    // too, because a text that once drifted is the text that drifts again.
+    expect(screen.queryByText(/один раз попроб/i)).not.toBeInTheDocument();
 
     // The retired vocabulary must be gone from the card entirely, label AND description.
     expect(screen.queryByText(/лучшему серверу/i)).not.toBeInTheDocument();

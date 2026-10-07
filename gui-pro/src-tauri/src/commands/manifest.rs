@@ -454,6 +454,36 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, String> {
         .map_err(|e| format!("Failed to parse manifest: {e}"))
 }
 
+/// The path of the entry marked `last_used`, if the manifest marks one.
+///
+/// The window lists the last-used config on top and `markLastUsed` keeps the marker current, so
+/// this is the Rust-visible answer to "which config does the window treat as current". The
+/// tray has no other way to know: it cannot read the window's localStorage.
+pub fn last_used_path_of(manifest: &Manifest) -> Option<String> {
+    manifest
+        .configs
+        .iter()
+        .find(|c| c.last_used)
+        .map(|c| c.path.clone())
+}
+
+/// [`last_used_path_of`] for the manifest in `dir`, kept only when that file still exists.
+///
+/// A marker can outlive its file (the `.toml` was deleted from the folder); handing such a path
+/// to a connect would fail at spawn, so it falls through to `None` and the caller uses its
+/// next fallback. Read-only: no manifest lock is taken, because every writer replaces the
+/// manifest atomically by rename, so a reader sees either the old or the new file, never half.
+pub fn last_used_config_path_in(dir: &Path) -> Option<String> {
+    let manifest = read_manifest(dir).ok()?;
+    last_used_path_of(&manifest).filter(|p| Path::new(p).is_file())
+}
+
+/// [`last_used_config_path_in`] for the per-user data root: the config the tray connects when
+/// no window connect has stored a pointer yet.
+pub fn last_used_config_path() -> Option<String> {
+    last_used_config_path_in(&user_data_dir())
+}
+
 // ─── Config-file predicate + summary (D-14 / D-29) ───────────────────────────
 
 /// Is this `.toml` a TrustTunnel client config? Mirrors `config.rs::auto_detect_config`
@@ -3092,6 +3122,91 @@ included_routes = ["0.0.0.0/0"]
             1,
             "exactly one last_used (the marker is exclusive)"
         );
+        cleanup(&tmp);
+    }
+
+    // ─── G-03.1-5 (03.1-05): the tray's «which config does the window show» answer ───────────
+    //
+    // The window lists the last-used entry on top and `markLastUsed` keeps the marker current,
+    // so the manifest is the one Rust-visible record of the config the window treats as current.
+
+    fn marked_entry(id: &str, path: &Path, last_used: bool) -> ConfigEntry {
+        ConfigEntry {
+            id: id.into(),
+            name: id.to_uppercase(),
+            path: path.to_string_lossy().to_string(),
+            order: 0,
+            last_used,
+            copy: false,
+        }
+    }
+
+    fn manifest_of(configs: Vec<ConfigEntry>) -> Manifest {
+        Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            configs,
+        }
+    }
+
+    #[test]
+    fn last_used_path_of_returns_the_marked_entry_path() {
+        let tmp = tempdir();
+        let a = tmp.join("a.toml");
+        let b = tmp.join("b.toml");
+        let m = manifest_of(vec![marked_entry("a", &a, false), marked_entry("b", &b, true)]);
+        assert_eq!(
+            last_used_path_of(&m),
+            Some(b.to_string_lossy().to_string()),
+            "the entry marked last_used names the config"
+        );
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn last_used_path_of_is_none_when_no_entry_is_marked() {
+        let tmp = tempdir();
+        let m = manifest_of(vec![
+            marked_entry("a", &tmp.join("a.toml"), false),
+            marked_entry("b", &tmp.join("b.toml"), false),
+        ]);
+        assert_eq!(last_used_path_of(&m), None);
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn last_used_path_of_is_none_for_an_empty_manifest() {
+        assert_eq!(last_used_path_of(&manifest_of(vec![])), None);
+    }
+
+    #[test]
+    fn last_used_config_path_in_returns_the_marked_file_when_it_exists() {
+        let tmp = tempdir();
+        let b = tmp.join("b.toml");
+        std::fs::write(&b, "[endpoint]\n").unwrap();
+        let m = manifest_of(vec![marked_entry("a", &tmp.join("a.toml"), false), marked_entry("b", &b, true)]);
+        write_manifest_atomic(&tmp, &m).unwrap();
+        assert_eq!(
+            last_used_config_path_in(&tmp),
+            Some(b.to_string_lossy().to_string())
+        );
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn last_used_config_path_in_falls_through_when_the_marked_file_is_gone() {
+        let tmp = tempdir();
+        // The marker points at a file that was deleted from the folder: the tray must not try to
+        // connect it, so the answer is None and the caller falls back to the folder scan.
+        let m = manifest_of(vec![marked_entry("gone", &tmp.join("gone.toml"), true)]);
+        write_manifest_atomic(&tmp, &m).unwrap();
+        assert_eq!(last_used_config_path_in(&tmp), None);
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn last_used_config_path_in_is_none_without_a_manifest() {
+        let tmp = tempdir();
+        assert_eq!(last_used_config_path_in(&tmp), None);
         cleanup(&tmp);
     }
 

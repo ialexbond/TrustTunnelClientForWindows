@@ -175,6 +175,27 @@ test("12. catches a real global IPv6 and stays silent on the documentation prefi
   }
 });
 
+test("12b. the documentation prefix is recognised with leading zeros, and only it", () => {
+  // `2001:0db8:…` is the same RFC 3849 block as `2001:db8:…` — a validator test that checks the
+  // uncompressed form has to spell it that way. Leading zeros must not hide the prefix...
+  assert.deepStrictEqual(
+    hit('  ["2001:0db8:0000:0000:0000:ff00:0042:8329", true],', "gui-pro/src/x.test.ts"),
+    [],
+    "false positive on the uncompressed documentation address"
+  );
+  // ...and must not widen it: one hex digit off stays a finding in the zero-padded spelling too.
+  assert.deepStrictEqual(
+    values(hit('  let a = "2001:0db9:0005:0021::1";', "gui-pro/src-tauri/src/x.rs"), "ipv6"),
+    ["2001:0db9:0005:0021::1"]
+  );
+});
+
+test("12c. the font licence steward's host is an allowed vendor", () => {
+  // The SIL Open Font License text shipped next to the bundled fonts names its own site; the
+  // licence is reproduced verbatim, so the name cannot be rewritten to a documentation domain.
+  assert.deepStrictEqual(hit("https://openfontlicense.org", "gui-pro/src/shared/styles/fonts/X-OFL.txt"), []);
+});
+
 // ═══ 4. e-mail ═════════════════════════════════════════════════════════════════
 
 test("13. catches an e-mail outside the reserved documentation domains", () => {
@@ -502,6 +523,7 @@ const SYNTHETIC_FIXTURES = new Map([
   ["93.184.216.34", "the address IANA published for example.com — routable, nobody's"],
   ["93.184.215.14", "the same, its later value; routable so the detector must fire"],
   ["2001:db9:5:21::1", "one hex digit off RFC 3849's 2001:db8 — unallocated, hence detectable"],
+  ["2001:0db9:0005:0021::1", "the same unallocated address, zero-padded — proves padding does not widen the allowlist"],
   ["ivan.petrov@gmail.com", "the Russian John-Doe name; no such mailbox is claimed"],
   ["1.2.3.4", "the count-to-four placeholder, used by the baseline arms above"],
 ]);

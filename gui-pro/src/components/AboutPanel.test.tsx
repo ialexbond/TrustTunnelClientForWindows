@@ -5,6 +5,10 @@ import i18n from "../shared/i18n";
 import AboutPanel from "./AboutPanel";
 import type { UpdateInfo } from "../shared/types";
 import { renderWithProviders as render } from "../test/test-utils";
+// The real config file, as text — same import style as shellOpenScope.test.ts. A literal version
+// here went stale at the very first bump (3.0.0 -> 3.1.0) and stayed green by accident; reading the
+// config means a future bump without an updated fallback is red, not silently wrong.
+import tauriConfSource from "../../src-tauri/tauri.conf.json?raw";
 
 /**
  * WHAT THIS FILE IS FOR, AFTER PHASE 30.
@@ -284,8 +288,11 @@ describe("AboutPanel", () => {
 
   it("подставляет замороженную версию продукта, когда проверка ещё не назвала установленную", () => {
     // The fallback lives here and only here: `AboutHero` deliberately takes no default of its own,
-    // so there is one place that decides what «версия неизвестна» renders as.
+    // so there is one place that decides what «версия неизвестна» renders as. Reading it from
+    // tauri.conf.json rather than a literal is why this test enforces D-01 instead of just
+    // recording it.
+    const installedVersion = (JSON.parse(tauriConfSource) as { version: string }).version;
     renderPanel({ currentVersion: "" });
-    expect(screen.getByText(/v3\.0\.0/)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`v${installedVersion.replace(/\./g, "\\.")}`))).toBeInTheDocument();
   });
 });

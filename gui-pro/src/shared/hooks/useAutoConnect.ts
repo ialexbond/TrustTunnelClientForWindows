@@ -36,6 +36,22 @@ interface UseAutoConnectParams {
    * instance; the SnackBar takes plain text), so nothing about the channel is language-aware.
    */
   notify?: (message: string) => void;
+  /**
+   * WR-01 (03.1): the launch connect is a window-side connect of config X like any other, so it
+   * follows the same rule: arm the pending «last used» stamp with X and let App's status effect
+   * settle it (stamp on `connected`, drop on `error` / `disconnected`). Called with the path this
+   * hook is about to hand to `vpn_connect` — the reconciled target, which may be the app-level
+   * active config rather than the manifest marker (WR-05) — immediately before the invoke and never
+   * on a stand-down. Optional, like `seedConfigPing`: Storybook and the standalone tests omit it.
+   */
+  armLastUsedStamp?: (path: string) => void;
+  /**
+   * IN-01 (03.1): the matching drop, called with the path that was armed when `vpn_connect`
+   * rejects, including after the effect was cleaned up (that branch writes no status, so App's
+   * status effect sees no edge). App drops the stamp only while it still names that path. Optional,
+   * like the arm.
+   */
+  dropLastUsedStamp?: (path: string) => void;
 }
 
 // T-22 B3 (boot guard): how long auto-connect-on-launch will WAIT for the local
@@ -133,6 +149,8 @@ export function useAutoConnect({
   setError,
   seedConfigPing,
   notify,
+  armLastUsedStamp,
+  dropLastUsedStamp,
   i18n,
 }: UseAutoConnectParams) {
   // G-32-10: the one-shot latch. It is armed at the TOP OF THE TIMER CALLBACK — the moment the
@@ -398,6 +416,9 @@ export function useAutoConnect({
         return;
       }
 
+      // The path this run armed, set only once the arm below has happened, so the catch drops a
+      // stamp this run owns and never one an earlier failure (before the arm) left to someone else.
+      let armedPath: string | null = null;
       try {
         // Phase 13 (Pitfall 2): mark the pending connect ORIGIN as AutoConnectLaunch RIGHT BEFORE
         // the launch auto-connect, so the next Rust `Connected` edge emits «Автоподключение при
@@ -436,6 +457,13 @@ export function useAutoConnect({
         // seeding it here (the same number the plate shows, measured after `network_ready`) makes the card
         // show the real ping. null → no seed (honest «—», never a fabricated number).
         if (launchPingMs !== null) seedConfigPing?.(lastUsedPath, launchPingMs);
+        // WR-01: this connect is now committed — arm the pending «last used» stamp for the config
+        // it targets. An accepted `vpn_connect` proves nothing about the server (it answers before
+        // routing, spawn and handshake), so the marker moves only when the status effect sees
+        // `connected`; a rejected connect drops the stamp in the catch below. No await sits
+        // between the arm and the invoke, so a stand-down can never leave a stamp armed.
+        armLastUsedStamp?.(lastUsedPath);
+        armedPath = lastUsedPath;
         await invoke("vpn_connect", {
           configPath: lastUsedPath,
           logLevel: config.logLevel,
@@ -446,6 +474,10 @@ export function useAutoConnect({
         // Only the path: no config content, no credentials (D-29).
         logAutoConnect(`autoconnect.connect_invoked path=${lastUsedPath}`);
       } catch (e) {
+        // IN-01: if the refusal came after the arm, drop the stamp BEFORE the cancelled check: a
+        // cancelled run writes no status below, so App's status effect would see no edge and the
+        // stamp would linger. App drops it only while it still names this path.
+        if (armedPath) dropLastUsedStamp?.(armedPath);
         if (cancelled) return;
         // G-32-8: the core refused. The same text already reaches the banner through setError, so
         // writing it down exposes nothing new — but the banner is gone by the time anyone asks.

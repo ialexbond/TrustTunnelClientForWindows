@@ -7,9 +7,9 @@ import { parseReleaseNotes } from "./parseReleaseNotes";
 import realNotes from "../release-notes/RELEASE_NOTES.ru.md?raw";
 
 /**
- * Multi-section samples are hand-written rather than lifted from the real file: the real file has
- * exactly one section by design (no pre-3.0.0 history), so ordering and prefix-collision can only be
- * exercised on a synthetic input.
+ * Multi-section samples are hand-written rather than lifted from the real file: the real file keeps
+ * no pre-3.0.0 history, so ordering and prefix-collision can only be exercised on a synthetic input
+ * (the real file's own sections, since 3.1.0, already exercise multi-section parsing too).
  */
 const TWO_SECTIONS = [
   "## Версия 4.1.0",
@@ -36,6 +36,14 @@ const PREFIX_COLLISION = [
 const EMPTY_BODY = ["## Версия 2.0.0", "", "   ", "\t", "", "## Версия 1.0.0", "", "- есть текст", ""].join("\n");
 
 describe("parseReleaseNotes", () => {
+  it("returns the real 3.1.0 section with its heading stripped and edges trimmed", () => {
+    const body = parseReleaseNotes(realNotes, "3.1.0");
+
+    expect(body).toBeTruthy();
+    expect(body).not.toMatch(/^##\s+Версия/m);
+    expect(body).not.toContain("Версия");
+  });
+
   it("returns the real 3.0.0 section with its heading stripped and edges trimmed", () => {
     const body = parseReleaseNotes(realNotes, "3.0.0");
 
@@ -52,7 +60,8 @@ describe("parseReleaseNotes", () => {
   });
 
   it("matches only on the full exact version string — a prefix never satisfies a longer version", () => {
-    // Against the real file (only 3.0.0 exists): the shorter number must not borrow the longer one.
+    // Against the real file: "3.0" has no heading of its own, so the shorter number must not
+    // borrow either "3.0.0"'s or "3.1.0"'s section.
     expect(parseReleaseNotes(realNotes, "3.0")).toBeNull();
     expect(parseReleaseNotes(realNotes, "3.0.0")).toBeTruthy();
 

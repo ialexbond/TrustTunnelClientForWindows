@@ -1,5 +1,5 @@
-//! What the installer could not remove, found at startup and written into `app.log` — and never
-//! removed.
+//! What the installer could not remove, found at startup and deleted from the data folder — the
+//! six listed names only.
 //!
 //! # Why the application looks at all, when the installer already tried
 //!
@@ -17,24 +17,27 @@
 //! later those files are ordinary files: the processes that held them are gone. So this is the one
 //! place from which the leftovers are visible at all.
 //!
-//! # THIS MODULE DELETES NOTHING, AND THAT IS A PRODUCT DECISION ON RECORD
+//! # THIS MODULE DELETES THE SIX LISTED NAMES, AND THAT REVERSES A PRODUCT DECISION ON RECORD
 //!
-//! 2026-09-06, task 0 of plan 32-FIX-11, option `report-only` («Только сообщать в журнал»). The removal was
-//! offered — a closed six-name allow-list, a parent-folder check and a compiled
-//! disjointness proof — and the report was chosen instead. So this pass looks, says what it found in
-//! words, and stops. Nothing here removes a file, not behind a flag, not behind a setting, and not
-//! as dead code waiting to be switched on; `tests::nothing_in_this_module_removes_a_file` reads
-//! this file's own source and goes red if any removal call appears in it. Adding one needs a new
-//! product decision, not an edit.
-//!
-//! The accepted cost of that answer, stated so nobody repairs it by surprise: the leftovers stay
-//! until somebody deletes them by hand, and the data folder goes on looking as though the program
-//! lives in two places.
+//! 2026-09-06, task 0 of plan 32-FIX-11, option `report-only` («Только сообщать в журнал»): the
+//! removal was offered — the same closed six-name allow-list, the same parent-folder check and the
+//! same compiled disjointness proof this module still uses — and the report was chosen instead.
+//! That answer stood until 2026-09-23, when the owner reversed it for `WIN-25` (milestone 3.1.0):
+//! on a machine where the 3.0.0 installer could not remove the previous version, ~25 MB of the old
+//! program — including its old VPN core — was staying in the data folder forever, next to the
+//! saved configs and passwords, until somebody deleted it by hand. Nobody was going to. The
+//! allow-list, the parent-folder check and the disjointness proof that made the report-only answer
+//! safe to ship are exactly what makes the removal safe to ship now: nothing about WHAT may be
+//! touched changed, only whether touching it is allowed.
+//! `tests::this_module_removes_only_the_listed_names` is what stands guard over that line now — it
+//! reads this file's own source and goes red the moment a removal call appears anywhere outside the
+//! two functions the closed list and the marker basename are allowed to reach. Widening what may be
+//! removed needs a new product decision, not an edit.
 //!
 //! # Why an allow-list of binaries and not a deny-list of data
 //!
-//! The same argument the installer's enumeration makes, and it is not weakened by nothing being
-//! deleted here. The most numerous files in the data folder are the per-server `.toml` configs,
+//! The same argument the installer's enumeration makes, and it is not weakened by the module now
+//! removing files. The most numerous files in the data folder are the per-server `.toml` configs,
 //! and the USER chooses their names — they cannot be enumerated at all. A rule shaped as «leave
 //! the data alone» could therefore never be complete, while a rule shaped as «these six binaries
 //! and nothing else» is complete by construction. The list is closed, it is the same six the
@@ -43,7 +46,7 @@
 //! (`tests::no_name_in_the_projects_user_data_list_can_ever_be_reported_as_a_leftover`).
 //!
 //! That shape is also what keeps the log channel safe. This pass walks the folder that holds
-//! `ssh_credentials.json`. It never enumerates the directory, never opens a file it is reporting,
+//! `ssh_credentials.json`. It never enumerates the directory, never opens a file it is removing,
 //! and only ever prints filenames drawn from its own static list — so no value from the credential
 //! store can reach `app.log` by any input, which is D-29 holding by construction rather than by
 //! care (T-32-11-04).
@@ -53,12 +56,14 @@
 //! It runs on every launch, so the clean path has to be cheap: one `exists()` on the marker, six
 //! `metadata()` calls in the data folder, and exactly one line in `app.log` saying it looked and
 //! found nothing. No directory is enumerated and no file is opened. On a machine with leftovers it
-//! costs the same plus one read of a marker file of at most eight short lines.
+//! costs the same plus one read of a marker file of at most eight short lines, up to six file
+//! removals and, once none of the six remains, one removal of the marker itself.
 //!
-//! The marker is NOT deleted after it is read, which is the one thing the plan asked for that this
-//! build does not do: deleting it is a removal, and the answer forbids removals here. The
-//! consequence is that the same report is written at every launch for as long as the condition
-//! lasts — which is honest, because the condition does last: nothing is clearing those files.
+//! The marker is removed LAST, and only once none of the six listed names remains in the data
+//! folder (D-24): it is the installer's own record of what survived, and it has not finished its
+//! job while one of those six is still sitting there. A name that is busy — held open by something
+//! else — is left for the next launch with one log line and no interruption to startup; the marker
+//! then waits with it, and both are retried together next time.
 
 use std::path::Path;
 
@@ -136,19 +141,39 @@ pub(crate) struct LeftoverReport {
     /// The record was present and could not be read. Path-free, like every other reason this
     /// project puts in front of a person (D-29).
     pub marker_error: Option<String>,
+    /// Names from the closed list that were removed this launch, with the bytes each one held.
+    ///
+    /// 03-04 (WIN-25, D-21): the report-only answer of 2026-09-06 was reversed on 2026-09-23. This
+    /// is the removal counterpart of `stale`, which stays "what was found" regardless of whether it
+    /// could be taken away.
+    pub removed: Vec<(&'static str, u64)>,
+    /// Names from the closed list that were found but could not be removed right now — held open by
+    /// something else. Retried at the next launch (D-24); never a reason to stop startup.
+    pub busy: Vec<&'static str>,
+    /// The installer's marker was removed this launch, because none of the six listed names
+    /// remained in the data folder afterward (D-24).
+    pub marker_removed: bool,
+    /// The marker could not be removed this launch even though the folder was clean — held open by
+    /// something else. Retried at the next launch, like a busy binary; never a panic.
+    pub marker_remove_error: Option<String>,
 }
 
-/// Look for leftovers of a previous installation, say what was found, and change nothing.
+/// Look for leftovers of a previous installation and remove exactly what the closed six-name list
+/// (D-21, D-22) finds in the data folder — everything else there, including every name a user
+/// chose, is left untouched by construction.
 ///
-/// Both roots are PARAMETERS rather than resolved in here, for the reason `sidecar_pid_dir` states
+/// Three roots are PARAMETERS rather than resolved in here, for the reason `sidecar_pid_dir` states
 /// at its own site: under `cargo test --lib` the executable is a test binary somewhere in the build
 /// tree, so a pass that resolved its own inputs could only be asserted about wherever that binary
 /// happened to live. `exe_dir` is `None` when the executable's directory cannot be resolved at all;
-/// that is «I do not know where the program is», and the pass then declines the folder comparison
-/// and the marker, which are the two things that need it.
-pub(crate) fn report_legacy_leftovers(
+/// that is «I do not know where the program is», and the pass then declines the folder comparison,
+/// the marker and the sidecar-core protection, all of which need it. `current_exe` is likewise
+/// `None` when the running executable's own path cannot be resolved, in which case that one
+/// protection is simply absent rather than guessed at.
+pub(crate) fn sweep_legacy_leftovers(
     data_root: &Path,
     exe_dir: Option<&Path>,
+    current_exe: Option<&Path>,
     emit: &mut dyn FnMut(&str),
 ) -> LeftoverReport {
     let mut report = LeftoverReport::default();
@@ -229,31 +254,82 @@ pub(crate) fn report_legacy_leftovers(
     // to see — including a per-server config the user named himself — into a log file (D-29).
     report.stale = stale_binaries_in(data_root);
 
-    if !report.stale.is_empty() {
-        let names: Vec<&str> = report.stale.iter().map(|(n, _)| *n).collect();
-        let bytes: u64 = report.stale.iter().map(|(_, b)| *b).sum();
+    // A path is protected if it coincides with the running executable itself, or with the sidecar
+    // core beside it (D-22) — checked even though the same-folder refusal above already covers the
+    // ordinary case, because the two roots can legitimately differ once the data folder has moved.
+    let mut protected: Vec<&Path> = Vec::new();
+    if let Some(ce) = current_exe {
+        protected.push(ce);
+    }
+    let sidecar_path = exe_dir.map(|d| d.join(crate::commands::vpn::SIDECAR_IMAGE_NAME));
+    if let Some(p) = &sidecar_path {
+        protected.push(p.as_path());
+    }
+    // With the program's folder unknown none of the protections above exists — not the
+    // same-folder refusal, not the sidecar core beside the executable — and on a machine that has
+    // not been through the phase-32 relocation the data folder IS the program's folder, where
+    // removing `wintun.dll` takes the VPN adapter away from the running program. Unknown means
+    // «report, do not touch»: the stale names stay in the report and nothing is removed.
+    let stale_names: Vec<&'static str> = if exe_dir.is_some() {
+        report.stale.iter().map(|(n, _)| *n).collect()
+    } else {
+        emit(
+            "[legacy] the program's own folder could not be determined - leftovers are reported, \
+             nothing is removed",
+        );
+        Vec::new()
+    };
+    for name in stale_names {
+        match remove_listed_leftover(data_root, name, &protected) {
+            RemovalOutcome::Removed(bytes) => report.removed.push((name, bytes)),
+            RemovalOutcome::Busy(_reason) => report.busy.push(name),
+            RemovalOutcome::Absent | RemovalOutcome::Refused => {}
+        }
+    }
+
+    if !report.removed.is_empty() {
+        let names: Vec<&str> = report.removed.iter().map(|(n, _)| *n).collect();
+        let bytes: u64 = report.removed.iter().map(|(_, b)| *b).sum();
         emit(&format!(
-            "[legacy] leftovers of a previous installation are still in the data folder ({}): {} \
+            "[legacy] removed leftovers of a previous installation from the data folder ({}): {} \
              - {} in total",
             folder_for_report(data_root),
             names.join(", "),
             megabytes(bytes)
         ));
-        emit(
-            "[legacy] this version does not use those files; deleting exactly those by hand is \
-             safe, and nothing else in that folder is a leftover - everything else there is your \
-             own data",
-        );
+    }
+    if !report.busy.is_empty() {
+        emit(&format!(
+            "[legacy] could not remove now, in use: {} - retried at the next launch",
+            report.busy.join(", ")
+        ));
     }
 
-    // ── 4. What will and will not happen about it ──────────────────────────────────────────
-    let said_something = report.marker_present || !report.stale.is_empty();
-    if said_something {
-        emit(
-            "[legacy] nothing here is removed automatically: by decision of 2026-09-06 this build \
-             only reports what it found",
-        );
-    } else {
+    // ── 4. The marker's own turn, then the one remaining silent-by-default branch ─────────
+    //
+    // D-24: the marker is removed only once none of the six listed names remains in the data
+    // folder — recomputed fresh here rather than trusted from `report.stale`, because a busy or
+    // protected name from the loop above means the folder is NOT clean even though it was attempted.
+    // A name that stayed for either reason keeps the marker alive right alongside it.
+    if report.marker_present {
+        if let Some(exe) = exe_dir {
+            if stale_binaries_in(data_root).is_empty() {
+                match remove_survivor_marker(exe) {
+                    Ok(()) => report.marker_removed = true,
+                    Err(reason) => {
+                        emit(&format!(
+                            "[legacy] the installer's leftover record could not be removed yet - \
+                             {reason}"
+                        ));
+                        report.marker_remove_error = Some(reason);
+                    }
+                }
+            }
+        }
+    }
+
+    let anything_found = report.marker_present || !report.stale.is_empty();
+    if !anything_found {
         // The clean path, which is almost every launch on almost every machine: ONE line. It is
         // not silence, and that is deliberate — a later absence of these lines only means
         // something if looking normally leaves a trace.
@@ -308,6 +384,52 @@ fn stale_binaries_in(data_root: &Path) -> Vec<(&'static str, u64)> {
     found
 }
 
+/// What happened, or did not, to one listed name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RemovalOutcome {
+    /// Removed, and how many bytes it held.
+    Removed(u64),
+    /// A regular file on the list, in the right folder, that could not be removed right now — held
+    /// open by something else. Retried at the next launch (D-24).
+    Busy(String),
+    /// Nothing of that name was there, or what was there was not a regular file.
+    Absent,
+    /// The name is not on the closed list, or the resolved path coincides with a protected path.
+    Refused,
+}
+
+/// The single site that may ever delete one of the six listed binaries.
+///
+/// Every refusal happens before the filesystem is touched: a name outside [`legacy_binary_names`]
+/// is refused by construction (T-03-04-01), and a path that coincides with `protected` — the
+/// running process's own executable, or the sidecar core beside it — is refused even though its
+/// name is on the list (T-03-04-02). Only a REGULAR file under the resulting path is ever removed:
+/// `symlink_metadata` rather than `metadata` so a symlink, junction or directory planted under one
+/// of these six names is left alone rather than followed or recursed into.
+fn remove_listed_leftover(
+    data_root: &Path,
+    name: &'static str,
+    protected: &[&Path],
+) -> RemovalOutcome {
+    if !legacy_binary_names().contains(&name) {
+        return RemovalOutcome::Refused;
+    }
+    let path = data_root.join(name);
+    if protected.iter().any(|p| crate::data_adoption::same_dir(&path, p)) {
+        return RemovalOutcome::Refused;
+    }
+    match std::fs::symlink_metadata(&path) {
+        Ok(md) if md.is_file() => {
+            let bytes = md.len();
+            match std::fs::remove_file(&path) {
+                Ok(()) => RemovalOutcome::Removed(bytes),
+                Err(e) => RemovalOutcome::Busy(reason_without_path(&e.to_string())),
+            }
+        }
+        _ => RemovalOutcome::Absent,
+    }
+}
+
 /// A size a person reads, not a byte count.
 fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
@@ -359,17 +481,30 @@ fn folder_for_report(dir: &Path) -> String {
         .unwrap_or_else(|| "the application's data folder".to_string())
 }
 
-/// The production entry point: resolve both roots through the accessors that already own them and
-/// report into the application log.
+/// Removes ONLY the installer's own marker, and only its fixed basename beside the executable.
+///
+/// D-24: called from [`sweep_legacy_leftovers`] after every listed name is gone from the data
+/// folder — before that the marker is still doing its job of remembering what survived. A failure
+/// here (the marker file itself busy) is reported and left for the next launch, exactly like a busy
+/// binary; it is never a reason to stop startup.
+fn remove_survivor_marker(exe_dir: &Path) -> Result<(), String> {
+    let marker = exe_dir.join(LEGACY_SURVIVOR_MARKER_BASENAME);
+    std::fs::remove_file(&marker).map_err(|e| reason_without_path(&e.to_string()))
+}
+
+/// The production entry point: resolve all three inputs through the accessors that already own
+/// them, remove what the closed list finds, and report into the application log.
 ///
 /// The data root comes from `ssh::user_data_dir()` — the single accessor every path-confinement
 /// root in this crate derives from — and the program's folder from `sidecar_pid_dir`, which is the
 /// function that already answers «the directory the executable is in» for the pid file the
-/// installer reads. Neither is re-derived here; a second lookup is how the two ends of a path come
-/// to disagree, which this project has already paid for once (D-07).
+/// installer reads. `current_exe` is `std::env::current_exe()` itself, read once and reused for
+/// both: a second lookup is how the two ends of a path come to disagree, which this project has
+/// already paid for once (D-07).
 pub(crate) fn run_startup_report() -> LeftoverReport {
     let data_root = crate::ssh::user_data_dir();
-    let exe_dir = crate::commands::vpn::sidecar_pid_dir(std::env::current_exe().ok());
+    let current_exe = std::env::current_exe().ok();
+    let exe_dir = crate::commands::vpn::sidecar_pid_dir(current_exe.clone());
 
     let mut emit = |line: &str| {
         // Two channels, copied from the adoption's report and for its reason: `log_app` is the
@@ -379,7 +514,7 @@ pub(crate) fn run_startup_report() -> LeftoverReport {
         eprintln!("{line}");
     };
 
-    report_legacy_leftovers(&data_root, exe_dir.as_deref(), &mut emit)
+    sweep_legacy_leftovers(&data_root, exe_dir.as_deref(), current_exe.as_deref(), &mut emit)
 }
 
 #[cfg(test)]
@@ -417,11 +552,15 @@ mod tests {
     }
 
     /// Run the pass over a sandbox and hand back both the report and everything it said.
-    fn run(data_root: &Path, exe_dir: Option<&Path>) -> (LeftoverReport, String) {
+    fn run(
+        data_root: &Path,
+        exe_dir: Option<&Path>,
+        current_exe: Option<&Path>,
+    ) -> (LeftoverReport, String) {
         let mut lines: Vec<String> = Vec::new();
         let report = {
             let mut emit = |l: &str| lines.push(l.to_string());
-            report_legacy_leftovers(data_root, exe_dir, &mut emit)
+            sweep_legacy_leftovers(data_root, exe_dir, current_exe, &mut emit)
         };
         (report, lines.join("\n"))
     }
@@ -442,7 +581,7 @@ mod tests {
         }
         let exe = sandbox("six-exe");
 
-        let (report, log) = run(&root, Some(&exe));
+        let (report, log) = run(&root, Some(&exe), None);
 
         let mut found: Vec<&str> = report.stale.iter().map(|(n, _)| *n).collect();
         found.sort_unstable();
@@ -460,6 +599,35 @@ mod tests {
         }
     }
 
+    /// **When the program cannot tell where it lives, it deletes nothing.**
+    ///
+    /// Every protection the removal has — the same-folder refusal, the sidecar core beside the
+    /// executable, the executable itself — is built from `exe_dir` / `current_exe`. With both
+    /// unknown none of them exists, and on a machine that has not been through the phase-32
+    /// relocation the data folder IS the program's folder: removing `wintun.dll` there takes the
+    /// VPN adapter away from the program that is running. Unknown must mean «report, do not
+    /// touch», never «touch without protection».
+    #[test]
+    fn an_unknown_program_folder_removes_nothing() {
+        let root = sandbox("no-exe");
+        for name in legacy_binary_names() {
+            touch(&root, name, 64);
+        }
+
+        let (report, _log) = run(&root, None, None);
+
+        assert!(
+            report.removed.is_empty(),
+            "the pass removed {:?} without knowing where the program lives — every protection \
+             is missing in that state",
+            report.removed
+        );
+        for name in legacy_binary_names() {
+            assert!(root.join(name).exists(), "{name} must still be on disk");
+        }
+        assert_eq!(report.stale.len(), legacy_binary_names().len(), "still reported, just not touched");
+    }
+
     /// **A clean machine gets one line saying it looked, and no names.**
     ///
     /// Silence and «nothing was found» must not be the same thing in the record. This pass runs at
@@ -472,7 +640,7 @@ mod tests {
         touch(&root, "ssh_credentials.json", 16);
         let exe = sandbox("clean-exe");
 
-        let (report, log) = run(&root, Some(&exe));
+        let (report, log) = run(&root, Some(&exe), None);
 
         assert!(report.stale.is_empty(), "nothing to find, so nothing may be reported found");
         assert!(!report.marker_present);
@@ -504,7 +672,7 @@ mod tests {
             touch(&root, name, 512);
         }
 
-        let (report, log) = run(&root, Some(&root));
+        let (report, log) = run(&root, Some(&root), None);
 
         assert!(report.refused_same_folder, "the equality must be refused, not merely survived");
         assert!(
@@ -519,6 +687,258 @@ mod tests {
             );
         }
         assert!(!log.trim().is_empty(), "a refusal must be reported, not silent");
+    }
+
+    /// **One launch removes exactly the six listed binaries and leaves every other file
+    /// byte-identical — the tracer for D-21/D-22/D-25.**
+    ///
+    /// The folder is shaped like a real one: the six leftovers beside per-server configs, the
+    /// credential store, the rules files and a lookalike name that must NOT be mistaken for the
+    /// real thing (`trusttunnel.exe.bak` is not `trusttunnel.exe`). What must be true afterward:
+    /// the six are gone, everything else is untouched down to the byte, and the report and the log
+    /// agree about what happened.
+    #[test]
+    fn one_launch_removes_the_six_listed_binaries_and_leaves_every_other_file_byte_identical() {
+        let root = sandbox("sweep");
+        for name in legacy_binary_names() {
+            touch(&root, name, 777);
+        }
+        let user_files: &[(&str, &str)] = &[
+            ("server-a.toml", "server-a config content"),
+            ("ssh_credentials.json", "{\"user\":\"redacted\"}"),
+            ("rules.toml", "rule = 1"),
+            ("routing_rules.json", "[]"),
+            ("trusttunnel.exe.bak", "a lookalike name, not the real binary"),
+            ("notes.txt", "keep me"),
+        ];
+        let mut before: Vec<(&str, Vec<u8>)> = Vec::new();
+        for (name, content) in user_files {
+            std::fs::write(root.join(name), content.as_bytes()).expect("user file");
+            before.push((*name, content.as_bytes().to_vec()));
+        }
+        let exe = sandbox("sweep-exe");
+
+        let (report, log) = run(&root, Some(&exe), None);
+
+        for name in legacy_binary_names() {
+            assert!(!root.join(name).exists(), "'{name}' must be gone after one launch");
+        }
+        for (name, want) in &before {
+            let got = std::fs::read(root.join(name))
+                .unwrap_or_else(|e| panic!("'{name}' vanished, and it is the user's own data: {e}"));
+            assert_eq!(got, *want, "'{name}' must be byte-identical after the sweep:\n{log}");
+        }
+
+        let mut removed: Vec<&str> = report.removed.iter().map(|(n, _)| *n).collect();
+        removed.sort_unstable();
+        let mut want_names = legacy_binary_names();
+        want_names.sort_unstable();
+        assert_eq!(removed, want_names, "exactly the six listed names must be reported removed");
+
+        assert_eq!(log.lines().count(), 1, "one launch, one summary line:\n{log}");
+        assert!(log.contains("removed leftovers"), "the line must say what happened:\n{log}");
+        for name in legacy_binary_names() {
+            assert!(log.contains(name), "the summary line must name '{name}':\n{log}");
+        }
+    }
+
+    /// **`remove_listed_leftover` refuses any name outside the closed list, at runtime, before it
+    /// ever touches the filesystem.**
+    ///
+    /// This is the direct unit test of the one function this module ever authorises to delete a
+    /// file — not exercised indirectly through the sweep, which never offers this function an
+    /// off-list name in the first place.
+    #[test]
+    fn an_off_list_name_is_refused_before_touching_the_filesystem() {
+        let root = sandbox("offlist");
+        touch(&root, "ssh_credentials.json", 32);
+
+        let outcome = remove_listed_leftover(&root, "ssh_credentials.json", &[]);
+
+        assert!(
+            matches!(outcome, RemovalOutcome::Refused),
+            "an off-list name must be refused, got {outcome:?}"
+        );
+        assert!(
+            root.join("ssh_credentials.json").exists(),
+            "a refused name must never be removed"
+        );
+    }
+
+    /// **The running executable's own path is never removed, even when it coincides with a listed
+    /// name (D-22, T-32-11-03's argument extended to the removal case).**
+    ///
+    /// Every other listed name still goes; only the one path that would be the running program
+    /// deleting itself is refused.
+    #[test]
+    fn the_running_executables_own_path_is_never_removed_even_when_it_coincides() {
+        let root = sandbox("protected");
+        for name in legacy_binary_names() {
+            touch(&root, name, 64);
+        }
+        let exe = sandbox("protected-exe");
+        let current_exe = root.join(MAIN_BINARY_NAME);
+
+        let (report, _log) = run(&root, Some(&exe), Some(&current_exe));
+
+        assert!(
+            root.join(MAIN_BINARY_NAME).exists(),
+            "the running executable's own path must survive even though its name is listed"
+        );
+        let mut removed: Vec<&str> = report.removed.iter().map(|(n, _)| *n).collect();
+        removed.sort_unstable();
+        let mut want_names: Vec<&str> =
+            legacy_binary_names().into_iter().filter(|n| *n != MAIN_BINARY_NAME).collect();
+        want_names.sort_unstable();
+        assert_eq!(removed, want_names, "every OTHER listed name must still be removed");
+    }
+
+    /// **A busy leftover waits for the next launch; the marker follows it (D-24).**
+    ///
+    /// Windows-only: `share_mode(0)` is the mechanism that makes `remove_file` fail deterministically
+    /// for a file this same process holds open — the product is Windows-only, so this is the whole
+    /// of the busy case. Run 1 removes everything except the held file and reports it busy with one
+    /// log line; the marker survives because one listed name is still there. Run 2, after the handle
+    /// is dropped, removes the last name and the marker goes with it. Run 3 is silent.
+    #[cfg(windows)]
+    #[test]
+    fn a_busy_file_waits_for_the_next_launch_and_the_marker_follows_it() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = sandbox("busy");
+        let exe = sandbox("busy-exe");
+        for name in legacy_binary_names() {
+            touch(&root, name, 32);
+        }
+        let marker_body: String = legacy_binary_names()
+            .into_iter()
+            .map(|n| format!("{}\r\n", root.join(n).display()))
+            .collect();
+        std::fs::write(exe.join(LEGACY_SURVIVOR_MARKER_BASENAME), marker_body).expect("marker");
+
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(root.join("wintun.dll"))
+            .expect("open wintun.dll exclusively");
+
+        let (report1, log1) = run(&root, Some(&exe), None);
+        for name in legacy_binary_names() {
+            if name == "wintun.dll" {
+                assert!(root.join(name).exists(), "the busy file must survive run 1");
+            } else {
+                assert!(!root.join(name).exists(), "'{name}' must be gone after run 1");
+            }
+        }
+        assert_eq!(report1.busy, vec!["wintun.dll"]);
+        let busy_lines: Vec<&str> =
+            log1.lines().filter(|l| l.contains("wintun.dll") && l.contains("in use")).collect();
+        assert_eq!(
+            busy_lines.len(),
+            1,
+            "exactly one line must name the busy file as in use:\n{log1}"
+        );
+        assert!(busy_lines[0].contains("retried"), "the busy line must promise a retry:\n{log1}");
+        assert!(
+            exe.join(LEGACY_SURVIVOR_MARKER_BASENAME).exists(),
+            "the marker must survive while a listed name remains"
+        );
+        assert!(!report1.marker_removed);
+
+        drop(handle);
+
+        let (report2, _log2) = run(&root, Some(&exe), None);
+        assert!(
+            !root.join("wintun.dll").exists(),
+            "the previously busy file must be gone after run 2"
+        );
+        assert_eq!(report2.removed, vec![("wintun.dll", 32u64)]);
+        assert!(report2.marker_removed, "the marker must go once the folder is clean");
+        assert!(!exe.join(LEGACY_SURVIVOR_MARKER_BASENAME).exists());
+
+        let (report3, log3) = run(&root, Some(&exe), None);
+        assert!(report3.stale.is_empty());
+        assert!(!report3.marker_present);
+        assert_eq!(log3.lines().count(), 1, "run 3 must be silent but for one line:\n{log3}");
+        assert!(log3.contains("none found"));
+    }
+
+    /// **A marker naming files that are already gone is removed at once.**
+    ///
+    /// The marker's job is to remember what survived the installer; once nothing it names is stale
+    /// any more, it has already done that job, whether this launch or an earlier one did the actual
+    /// removing.
+    #[test]
+    fn a_marker_naming_files_already_gone_is_removed_in_that_run() {
+        let root = sandbox("marker-clean");
+        let exe = sandbox("marker-clean-exe");
+        let body = format!("{}\r\n", root.join("wintun.dll").display());
+        std::fs::write(exe.join(LEGACY_SURVIVOR_MARKER_BASENAME), body).expect("marker");
+
+        let (report, _log) = run(&root, Some(&exe), None);
+
+        assert!(report.stale.is_empty());
+        assert!(report.marker_removed, "nothing is stale, so a present marker must be removed at once");
+        assert!(!exe.join(LEGACY_SURVIVOR_MARKER_BASENAME).exists());
+    }
+
+    /// **The marker is kept while a listed name still remains, even when that name is merely
+    /// protected rather than busy.**
+    ///
+    /// A cross-platform way to make a listed name "still remain" after an attempted removal, without
+    /// the Windows-only busy mechanism: the protected-path refusal from task 1.
+    #[test]
+    fn a_marker_is_kept_while_a_protected_listed_name_still_remains() {
+        let root = sandbox("marker-protected");
+        let exe = sandbox("marker-protected-exe");
+        touch(&root, MAIN_BINARY_NAME, 16);
+        let body = format!("{}\r\n", root.join(MAIN_BINARY_NAME).display());
+        std::fs::write(exe.join(LEGACY_SURVIVOR_MARKER_BASENAME), body).expect("marker");
+        let current_exe = root.join(MAIN_BINARY_NAME);
+
+        let (report, _log) = run(&root, Some(&exe), Some(&current_exe));
+
+        assert!(root.join(MAIN_BINARY_NAME).exists(), "the protected binary must remain");
+        assert!(
+            !report.marker_removed,
+            "a listed name is still in the data folder, so the marker must stay"
+        );
+        assert!(exe.join(LEGACY_SURVIVOR_MARKER_BASENAME).exists());
+    }
+
+    /// **A marker that cannot itself be removed is reported once and retried next launch — never a
+    /// panic.**
+    #[cfg(windows)]
+    #[test]
+    fn a_marker_that_cannot_be_removed_is_reported_and_retried_next_run() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = sandbox("marker-busy");
+        let exe = sandbox("marker-busy-exe");
+        let marker_path = exe.join(LEGACY_SURVIVOR_MARKER_BASENAME);
+        std::fs::write(&marker_path, "").expect("marker");
+        // FILE_SHARE_READ (0x1): the sweep's own marker READ (step 2, unrelated to this test) must
+        // still succeed, so only the later REMOVE attempt is the one that finds this file busy.
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1)
+            .open(&marker_path)
+            .expect("open marker with read-only sharing");
+
+        let (report, log) = run(&root, Some(&exe), None);
+
+        assert!(report.marker_present);
+        assert!(!report.marker_removed);
+        assert!(
+            report.marker_remove_error.is_some(),
+            "a busy marker must record why it could not go"
+        );
+        assert_eq!(log.lines().count(), 1, "one line, and no panic:\n{log}");
+
+        drop(handle);
+
+        let (report2, _log2) = run(&root, Some(&exe), None);
+        assert!(report2.marker_removed, "retried next run, the marker can finally go");
     }
 
     /// **Every entry of the installer's record is accounted for, and one pointing elsewhere is not
@@ -545,7 +965,7 @@ mod tests {
         );
         std::fs::write(exe.join(LEGACY_SURVIVOR_MARKER_BASENAME), body).expect("marker");
 
-        let (report, log) = run(&root, Some(&exe));
+        let (report, log) = run(&root, Some(&exe), None);
 
         assert!(report.marker_present, "the record is on disk and must be reported as read");
         assert_eq!(
@@ -575,7 +995,7 @@ mod tests {
         std::fs::create_dir_all(exe.join(LEGACY_SURVIVOR_MARKER_BASENAME)).expect("dir marker");
         touch(&root, "wintun.dll", 8);
 
-        let (report, log) = run(&root, Some(&exe));
+        let (report, log) = run(&root, Some(&exe), None);
 
         assert!(report.marker_error.is_some(), "an unreadable record must be reported as such");
         assert_eq!(
@@ -617,7 +1037,7 @@ mod tests {
             touch(&root, name, 8);
         }
         let exe = sandbox("userdata-exe");
-        let (report, log) = run(&root, Some(&exe));
+        let (report, log) = run(&root, Some(&exe), None);
 
         assert!(report.stale.is_empty(), "a folder of pure user data has no leftovers in it");
         for name in user_data {
@@ -645,7 +1065,7 @@ mod tests {
             .collect();
         std::fs::write(exe.join(LEGACY_SURVIVOR_MARKER_BASENAME), body).expect("marker");
 
-        let (report, log) = run(&root, Some(&exe));
+        let (report, log) = run(&root, Some(&exe), None);
 
         assert!(
             report.marker_named.is_empty(),
@@ -670,7 +1090,7 @@ mod tests {
         touch(&root, "wintun.dll", 4096);
         let exe = sandbox("privacy-exe");
 
-        let (_report, log) = run(&root, Some(&exe));
+        let (_report, log) = run(&root, Some(&exe), None);
         assert!(log.contains("wintun.dll"), "the leftover must still be named:\n{log}");
 
         if let Some(profile) = std::env::var_os("USERPROFILE") {
@@ -819,24 +1239,31 @@ mod tests {
         );
     }
 
-    /// **Nothing in this module removes a file.**
+    /// **The compiled guard over D-21's reversal: this module may delete ONLY the six listed names,
+    /// and ONLY through the two functions that are allowed to reach them.**
     ///
-    /// The `report-only` answer (2026-09-06), compiled. A prohibition written only in a
-    /// comment is a prohibition the next reader can undo without noticing they undid anything —
-    /// and what would be undone here is a deletion inside the folder that holds the plaintext
-    /// credential store, on machines with no rehearsal copy anywhere.
+    /// Rewritten from `nothing_in_this_module_removes_a_file` (the `report-only` guard, 2026-09-06)
+    /// when the owner reversed that answer for `WIN-25` (2026-09-23). A prohibition written only in
+    /// a comment is a prohibition the next reader can undo without noticing they undid anything, so
+    /// this rule reads its OWN compiled source rather than trust a comment — the same reason the
+    /// guard it replaces did.
     ///
     /// The needles are assembled from fragments rather than written out, because this rule reads
     /// its OWN source: spelled in full they would appear in the file the assertion scans and the
     /// test would fail on its own wording forever, which is a rule that invalidates itself.
     ///
+    /// Every occurrence of a removal call is attributed to its NEAREST PRECEDING `fn` declaration —
+    /// the source of truth for "which function owns this", not a hand-kept list that could drift
+    /// from the code it describes. An occurrence owned by anything other than the two permitted
+    /// functions is the exact widening this test exists to catch, and it names the intruder.
+    ///
     /// THE SCAN STOPS AT THE TEST MODULE, and that boundary is stated rather than implied. The
-    /// prohibition is about the program: the harness below legitimately creates and clears its own
-    /// sandbox directories, and a rule that could not tell those apart from a deletion in the
-    /// user's folder would be a rule about the wrong thing. Losing the boundary is a FAILURE, not
-    /// a pass — a scan that cannot find where the shipped half ends can say nothing about it.
+    /// prohibition is about the program: the harness in this module legitimately creates and clears
+    /// its own sandbox directories, and a rule that could not tell those apart from a removal in the
+    /// user's folder would be a rule about the wrong thing. Losing the boundary is a FAILURE, not a
+    /// pass — a scan that cannot find where the shipped half ends can say nothing about it.
     #[test]
-    fn nothing_in_this_module_removes_a_file() {
+    fn this_module_removes_only_the_listed_names() {
         const THIS_FILE: &str = include_str!("legacy_sweep.rs");
 
         let boundary = concat!("#[cfg", "(test)]");
@@ -847,23 +1274,81 @@ mod tests {
              harness, so this rule has no subject."
         );
 
-        let banned = [
-            concat!("remove_", "file"),
-            concat!("remove_", "dir"),
-            concat!("Delete", "File"),
-        ];
-        let offenders: Vec<&str> = banned
-            .iter()
-            .copied()
-            .filter(|needle| shipped.contains(needle))
-            .collect();
+        // Directory removal and directory enumeration have no legitimate site anywhere in the
+        // shipped half — neither permitted function ever touches a directory.
+        let dir_needles = [concat!("remove_", "dir"), concat!("read_", "dir")];
+        let dir_offenders: Vec<&str> =
+            dir_needles.iter().copied().filter(|n| shipped.contains(n)).collect();
         assert!(
-            offenders.is_empty(),
-            "this module removes files. That was offered on 2026-09-06 and answered \
-             `report-only`: it reports and it does not delete. Adding a removal is a new product \
-             decision, not an edit — and the folder in question holds the saved configs, the \
-             saved passwords and the browser profile:\n  {}",
-            offenders.join("\n  ")
+            dir_offenders.is_empty(),
+            "this module enumerates or removes a directory, which no permitted removal ever needs:\n  {}",
+            dir_offenders.join("\n  ")
+        );
+
+        let win_needle = concat!("Delete", "File");
+        assert!(
+            !shipped.contains(win_needle),
+            "a Windows API removal call appears outside the two permitted functions"
+        );
+
+        // Every file-removal call, wherever it sits, is attributed to its nearest preceding `fn`.
+        let file_needle = concat!("remove_", "file");
+        let allowed = ["remove_listed_leftover", "remove_survivor_marker"];
+        let mut owners: Vec<&str> = Vec::new();
+        let mut search_from = 0usize;
+        while let Some(rel) = shipped[search_from..].find(file_needle) {
+            let at = search_from + rel;
+            let before = &shipped[..at];
+            let fn_at =
+                before.rfind("fn ").expect("CANNOT MEASURE: a removal call sits before any `fn`");
+            let after_fn = &before[fn_at + 3..];
+            let name_end = after_fn.find('(').unwrap_or(after_fn.len());
+            owners.push(after_fn[..name_end].trim());
+            search_from = at + file_needle.len();
+        }
+
+        let intruders: Vec<&str> = owners.iter().copied().filter(|o| !allowed.contains(o)).collect();
+        assert!(
+            intruders.is_empty(),
+            "a removal call belongs to {intruders:?}, which is not one of the two functions this \
+             module permits to remove a file ({allowed:?}). Adding a removal anywhere else is \
+             exactly the widening D-23's guard exists to catch."
+        );
+        for name in allowed {
+            assert_eq!(
+                owners.iter().filter(|o| **o == name).count(),
+                1,
+                "{name} must contain exactly one removal call; owners found: {owners:?}"
+            );
+        }
+        assert_eq!(owners.len(), 2, "exactly two removal calls total; owners found: {owners:?}");
+
+        let fn_body = |name: &str| -> &str {
+            let at = shipped.find(&format!("fn {name}")).unwrap_or_else(|| {
+                panic!("CANNOT MEASURE: `fn {name}` was not found in the shipped half")
+            });
+            let after = &shipped[at..];
+            let next_fn = after[3..].find("\nfn ").map(|i| i + 3).unwrap_or(after.len());
+            &after[..next_fn]
+        };
+
+        let listed_body = fn_body("remove_listed_leftover");
+        assert!(
+            listed_body.contains("legacy_binary_names()"),
+            "remove_listed_leftover must refuse by consulting legacy_binary_names(), the one \
+             closed list this whole module rests on"
+        );
+
+        let marker_body = fn_body("remove_survivor_marker");
+        assert!(
+            marker_body.contains("LEGACY_SURVIVOR_MARKER_BASENAME"),
+            "remove_survivor_marker must remove only the marker's own fixed basename"
+        );
+        assert_eq!(
+            marker_body.matches(".join(").count(),
+            1,
+            "remove_survivor_marker must build exactly one path — the marker beside the \
+             executable — and nothing else"
         );
     }
 }

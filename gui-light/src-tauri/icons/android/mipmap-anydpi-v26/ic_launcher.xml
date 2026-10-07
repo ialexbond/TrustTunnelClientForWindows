@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"> <!-- pii-gate-allow: Required public Android XML namespace, not a private host. -->
   <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
   <background android:drawable="@color/ic_launcher_background"/>
 </adaptive-icon>

@@ -768,7 +768,7 @@ pub(crate) fn build_pidfile_record() -> &'static str {
 /// on transient network failures.
 ///
 /// CONF-M-05 (T-04-06): pulls install.sh from `TRUSTTUNNEL_INSTALL_SH_TAG` (a
-/// release tag, never `refs/heads/master`) and verifies it against the in-repo
+/// pinned release tag, never a live branch) and verifies it against the in-repo
 /// `TRUSTTUNNEL_INSTALL_SH_SHA256` via `sha256sum -c` before executing. The temp
 /// script is always removed, and a non-zero result surfaces a clear marker.
 ///
@@ -923,7 +923,7 @@ async fn deploy_install_binary(
     let stop_cmd = format!("{sudo}systemctl stop trusttunnel 2>/dev/null; sleep 1; true");
     exec_command(handle, app, &stop_cmd).await.ok();
 
-    // CONF-M-05 — fetch install.sh from a PINNED release tag (not refs/heads/master)
+    // CONF-M-05 — fetch install.sh from a PINNED release tag, never a live branch,
     // and verify it against the in-repo SHA-256 before running it. A breaking or
     // malicious upstream change to the script no longer silently reaches the server:
     // the `sha256sum -c` fails the install with a clear error instead.
@@ -1790,6 +1790,12 @@ pub async fn diagnose_server(
 mod tests {
     use super::*;
 
+    /// D-11 (SRV-08): the live-branch git ref prefix, assembled from fragments so this
+    /// module's own source never spells it out contiguously — `no_source_file_fetches_from_a_live_branch`
+    /// below scans every `.rs` file under `src/`, INCLUDING this one, and the full prefix
+    /// written out here would make the guard flag its own test module.
+    const LIVE_BRANCH: &str = concat!("refs/", "heads/");
+
     fn test_settings() -> EndpointSettings {
         EndpointSettings {
             listen_address: "0.0.0.0:443".to_string(),
@@ -2534,11 +2540,11 @@ mod tests {
 
     #[test]
     fn test_install_command_pins_tag_not_master() {
-        // CONF-M-05: install.sh must be fetched from a release tag, not master.
+        // CONF-M-05: install.sh must be fetched from a release tag, never a live branch.
         let cmd = build_install_command("sudo ");
         assert!(
-            !cmd.contains("refs/heads/master"),
-            "install.sh must not be fetched from refs/heads/master"
+            !cmd.contains(LIVE_BRANCH),
+            "install.sh must not be fetched from a live branch"
         );
         assert!(
             cmd.contains(&format!(
@@ -2574,6 +2580,64 @@ mod tests {
                 .chars()
                 .all(|c| c.is_ascii_hexdigit() && (!c.is_alphabetic() || c.is_lowercase())),
             "pinned SHA-256 must be 64 lowercase hex chars"
+        );
+    }
+
+    /// D-11 (SRV-08): the two CONF-M-05 tests above only ever read
+    /// `build_install_command`'s own output — that scope is exactly how `server_upgrade`
+    /// (a sibling command in `ssh/server/server_version.rs` that fetched install.sh from
+    /// a live branch and piped it into `sh`) survived undetected: the guard read the
+    /// neighbouring, correct function and nothing else. This test widens the guard to every
+    /// `.rs` file under the crate's `src/`, so a live-branch fetch anywhere in the backend
+    /// goes red, not just inside this one module.
+    #[test]
+    fn no_source_file_fetches_from_a_live_branch() {
+        let src_root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+
+        fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let entries = match std::fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => return,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_rs_files(&path, out);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let mut files = Vec::new();
+        collect_rs_files(src_root, &mut files);
+
+        assert!(
+            files.len() >= 50,
+            "CANNOT MEASURE: only found {} .rs files under {}. The backend source tree \
+             could not be read, so this rule has no subject — a vacuous pass is refused.",
+            files.len(),
+            src_root.display()
+        );
+
+        let offenders: Vec<String> = files
+            .iter()
+            .filter_map(|path| {
+                let contents = std::fs::read_to_string(path).ok()?;
+                if contents.contains(LIVE_BRANCH) {
+                    Some(path.strip_prefix(src_root).unwrap_or(path).display().to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(
+            offenders.is_empty(),
+            "CONF-M-05 (SRV-08): these files fetch from a live branch instead of the \
+             pinned release tag + checksum path — never fetch-and-pipe from a mutable ref \
+             into a shell:\n  {}",
+            offenders.join("\n  ")
         );
     }
 

@@ -69,10 +69,12 @@ The tunnel, the WinTUN adapter, route interception and the killswitch belong to 
 core** (`trusttunnel_client-*.exe`). Rust/Tauri only spawns and kills that process — it never
 implements tunnelling itself.
 
-**Its sources ARE in this repository**, on the `release/tt-win-3.0.0` branch and in the release tags;
-they were removed from `master` when that branch was trimmed to the application. Only the compiled
-binary is absent (it is gitignored) — build it with the recipe in the root `CLAUDE.md`. The shipped
-core version is `1.1.5`, synced from upstream on 2026-09-04.
+**Its sources ARE in this repository**, on each version's `release/tt-win-X.Y.Z` branch
+and release tag, and now in the synchronized local `master`. The current release source
+is `release/tt-win-3.1.0`. Only the compiled binary is absent (it is gitignored). The shipped
+core is upstream `1.1.7` plus our changes, listed at the top of the root `CHANGELOG.md`,
+synced from upstream on 2026-09-30. Set `TT_CLIENT_VERSION=1.1.7` explicitly when building
+this core; see [release synchronization notes](../docs/RELEASE_SYNC_3_1_0.md).
 
 > This paragraph used to say the sources were "not in this repository", and the sentence sat on the
 > very branch that carries them. It was true before the core sync and has been wrong since.

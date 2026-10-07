@@ -138,7 +138,7 @@ VPN-серверу лежит в его `.toml`-конфиге открытым 
 | | Pro | Light |
 |---|---|---|
 | Можно скачать | да | **нет**, файлы прежних выпусков удалены |
-| Последняя версия | `3.0.0` | `2.7.0` |
+| Последняя версия | `3.1.0` | `2.7.0` |
 | Подключение к VPN | да | да |
 | Маршрутизация (что идёт через VPN, что напрямую) | да | да |
 | Управление своим сервером по SSH | да | нет |
@@ -222,19 +222,23 @@ VPN, где достаточно установленного в системе 
 отключение интернета. Графическое приложение написано с нуля здесь, в исходном проекте его нет.
 
 Ядро работает отдельным процессом и закрывается вместе с приложением. Сейчас поставляется версия
-ядра `1.1.5`; с номерами версий изданий она никак не связана.
+ядра upstream `1.1.7` с нашими правками (список — в начале `CHANGELOG.md`); с номерами версий изданий
+она никак не связана.
 
 Приложение — Tauri 2, интерфейс на React 19 и TypeScript, нативная часть на Rust.
 
 ### Ветки репозитория
 
-На `master` лежит только само приложение и его проверки. Исходники C++-ядра и сборочная система
-лежат на `release/tt-win-3.0.0` и в тегах выпусков; полное дерево берите оттуда. Собранный бинарник
-ядра в репозитории не хранится, его нужно собрать.
+Local `master` now includes the Pro 3.1.0 application, its tests, and the C++ core/build
+sources restored from `release/tt-win-3.1.0`. The published release remains identified by
+that release branch and its tag. Compiled core binaries are not stored in Git and must
+be built separately. For a release-equivalent core build, set `TT_CLIENT_VERSION=1.1.7`
+explicitly; the GUI version is 3.1.0. See [release synchronization notes](docs/RELEASE_SYNC_3_1_0.md).
 
 `CHANGELOG.md` в корне — это журнал изменений C++-ядра, а не приложения (записи с `0.90.4` за август
-2022 по `1.1.5` за сентябрь 2026). Что изменилось в самом приложении, написано в описании каждого
-выпуска и в окне «Что нового».
+2022 по `1.1.7` за сентябрь 2026), скопированный из апстрима как есть: изменения самого форка в эти
+записи не попадают, они перечислены отдельно в начале файла. Что изменилось в самом приложении,
+написано в описании каждого выпуска и в окне «Что нового».
 
 ## Лицензия
 
@@ -284,10 +288,11 @@ If the core process is killed hard or crashes, its firewall filters can outlive 
 machine with no internet at all. Killing `trusttunnel_client.exe` or rebooting clears it.
 
 This is a fork of [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
-The C++ VPN core comes from upstream and ships as a separate sidecar process, version `1.1.5`; the
-GUI is written here. Core sources live on the `release/tt-win-3.0.0` branch and in the release tags,
-not on `master`. The root `CHANGELOG.md` is the core's changelog, not the application's; the
-application has its own release notes.
+The C++ VPN core comes from upstream and ships as a separate sidecar process, version upstream
+`1.1.7` plus our changes (listed at the top of `CHANGELOG.md`); the GUI is written here. Core sources
+for the current release live on `release/tt-win-3.1.0` and its tag; the synchronized local
+`master` also includes those sources. The root `CHANGELOG.md` is the core's changelog, not the application's — its release
+entries are upstream's; the application has its own release notes.
 
 Everything here, core and application alike, is under the Apache License 2.0 (`LICENSE`). `NOTICE`
 records who holds what: the C++ core and the protocol are `Copyright 2020 AdGuard Software Ltd`, the
