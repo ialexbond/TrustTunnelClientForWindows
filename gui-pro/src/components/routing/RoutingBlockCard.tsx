@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect, useImperativeHandle, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Shield, Zap } from "lucide-react";
 import { Card } from "../../shared/ui";
@@ -8,6 +8,7 @@ import { AddRuleInput } from "./AddRuleInput";
 import type { RuleEntry, RouteAction, GeoDataStatus, GeoDataIndex, IplistGroup } from "./useRoutingState";
 
 interface RoutingBlockCardProps {
+  ref?: Ref<RoutingBlockCardHandle>;
   action: RouteAction;
   vpnMode?: string;
   entries: RuleEntry[];
@@ -18,6 +19,10 @@ interface RoutingBlockCardProps {
   onRemove: (action: RouteAction, id: string) => void;
   onMove: (fromAction: RouteAction, toAction: RouteAction, id: string) => void;
   onEnsureGroupCache: (groupId: string) => void | Promise<void>;
+}
+
+export interface RoutingBlockCardHandle {
+  revealAddedEntry: (previousIds: ReadonlySet<string>) => void;
 }
 
 // Каждый блок несёт свою цветовую идентичность НЕ левой акцентной полоской (баннед AI-артефакт,
@@ -73,6 +78,7 @@ function groupChipLabel(entry: RuleEntry, iplistGroups: IplistGroup[]): string {
 }
 
 export function RoutingBlockCard({
+  ref: revealHandleRef,
   action,
   vpnMode,
   entries,
@@ -86,6 +92,27 @@ export function RoutingBlockCard({
 }: RoutingBlockCardProps) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const pendingRevealRef = useRef<ReadonlySet<string> | null>(null);
+
+  useImperativeHandle(revealHandleRef, () => ({
+    revealAddedEntry(previousIds) {
+      pendingRevealRef.current = previousIds;
+      setCollapsed(false);
+    },
+  }), []);
+
+  useLayoutEffect(() => {
+    const previousIds = pendingRevealRef.current;
+    if (!previousIds) return;
+    if (!entries.some((entry) => !previousIds.has(entry.id))) {
+      pendingRevealRef.current = null;
+      return;
+    }
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+    pendingRevealRef.current = null;
+  }, [entries, collapsed]);
 
   // In "general" mode (all through VPN) the "proxy" block is redundant.
   // In "selective" mode (all direct) the "direct" block is redundant.
@@ -160,7 +187,12 @@ export function RoutingBlockCard({
               (domain / ip / cidr / geoip) keep their RuleEntryRow look. A preset-added or
               manually-added group thus appears as a single movable chip. */}
           {entries.length > 0 ? (
-            <div className="space-y-0.5 max-h-[240px] overflow-y-auto">
+            <div
+              ref={listRef}
+              role="region"
+              aria-label={t(config.titleKey)}
+              className="space-y-0.5 max-h-[240px] overflow-y-auto scroll-visible routing-list-scrollbar"
+            >
               {entries.map((entry) =>
                 entry.type === "geosite" || entry.type === "iplist_group" ? (
                   <GroupChip

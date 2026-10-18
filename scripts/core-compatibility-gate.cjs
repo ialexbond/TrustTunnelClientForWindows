@@ -9,6 +9,7 @@ const { spawnSync } = require("node:child_process");
 
 const EXPECTED_VERSION = "1.1.11";
 const EXPECTED_POLICY_VERSION = "1";
+const EXPECTED_ENDPOINT_PROBE_VERSION = "1";
 const DEFAULT_CORE = path.join(__dirname, "..", "gui-pro", "src-tauri",
   "trusttunnel_client-x86_64-pc-windows-msvc.exe");
 
@@ -81,9 +82,18 @@ function verifyCore(filePath = DEFAULT_CORE, options = {}) {
   if (policy !== EXPECTED_POLICY_VERSION) {
     throw new Error(`the bundled core must support routing policy ${EXPECTED_POLICY_VERSION}`);
   }
+  if (!/(?:^|[\s,])--endpoint-probe-version(?:[\s,=]|$)/m.test(help)
+      || !/(?:^|[\s,])--probe-endpoint(?:[\s,=]|$)/m.test(help)) {
+    throw new Error("the bundled core does not advertise the protected endpoint probe capability");
+  }
+  const endpointProbe = query(filePath, "--endpoint-probe-version", probe);
+  if (endpointProbe !== EXPECTED_ENDPOINT_PROBE_VERSION) {
+    throw new Error(`the bundled core must support endpoint probe ${EXPECTED_ENDPOINT_PROBE_VERSION}`);
+  }
   return {
     version: EXPECTED_VERSION,
     policyVersion: EXPECTED_POLICY_VERSION,
+    endpointProbeVersion: EXPECTED_ENDPOINT_PROBE_VERSION,
     sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
   };
 }
@@ -95,7 +105,7 @@ if (require.main === module) {
   } else {
     try {
       const result = verifyCore(process.argv[2] ? path.resolve(process.argv[2]) : DEFAULT_CORE);
-      console.log(`core-compatibility: PASS; core ${result.version}; routing policy ${result.policyVersion}; SHA-256 ${result.sha256}`);
+      console.log(`core-compatibility: PASS; core ${result.version}; routing policy ${result.policyVersion}; endpoint probe ${result.endpointProbeVersion}; SHA-256 ${result.sha256}`);
     } catch (error) {
       console.error(`core-compatibility: FAIL; ${error.message}`);
       process.exitCode = 1;

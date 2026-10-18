@@ -23,6 +23,9 @@ continues to contain core 1.1.7 until a new matched GUI/core package is released
 - Connection diagnostics report the actual requested/final action instead of swapped labels.
 - Certificate verification preserves a structured not-yet-valid cause for the GUI while
   retaining certificate trust checks. It does not accept an invalid certificate.
+- A read-only, one-shot physical TCP endpoint probe reports server latency without
+  accepting the tunnel's early TCP acknowledgement as a remote server response. It
+  does not initialize a VPN session or modify routes, DNS or firewall policy.
 - The remainder: a settings re-export in `trusttunnel/settings/src/lib.rs`, setup-wizard lint fixes and a Windows-only build dependency under `trusttunnel/setup_wizard/`, and a comment in `conanfile.py`.
 
 All notable changes to this project will be documented in this file.
