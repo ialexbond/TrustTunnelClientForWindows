@@ -51,6 +51,13 @@ struct TrustTunnelConfig {
         bool change_system_dns = true;
         bool use_existing = false;
         std::optional<std::string> netns;
+
+        /**
+         * Complete the legacy Windows full-IPv4 tunnel's IPv6 capture in memory when protection is enabled.
+         * Explicit IPv6 scopes, custom IPv4 scopes and excluded routes remain authoritative. The stored profile
+         * is never rewritten. Local IPv6 control and LAN ranges stay outside the added capture.
+         */
+        [[nodiscard]] TunListener with_windows_ipv6_protection(bool killswitch_enabled) const;
     };
 
     using Listener = std::variant<SocksListener, TunListener>;

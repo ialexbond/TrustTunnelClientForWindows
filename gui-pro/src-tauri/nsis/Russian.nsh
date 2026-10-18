@@ -55,3 +55,5 @@ LangString installRefreshingIconCache ${LANG_RUSSIAN} "Обновление кэ
 LangString uninstallDataKept ${LANG_RUSSIAN} "Данные пользователя сохраняются"
 LangString uninstallCleaningRegistry ${LANG_RUSSIAN} "Очистка записей в реестре..."
 LangString uninstallRemovingUpdateFiles ${LANG_RUSSIAN} "Удаление временных файлов обновления..."
+
+LangString networkGuardReleaseFailed ${LANG_RUSSIAN} "Не удалось снять защитную блокировку. Откройте приложение и нажмите «Снять блокировку», затем повторите удаление. Если приложение не запускается, сначала переустановите текущую версию."

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <common/logger.h>
 #include <cstdio>
 #include <functional>
@@ -13,6 +14,7 @@
 #include <openssl/err.h>
 #include <openssl/pem.h>
 
+#include "common/cidr_range.h"
 #include "net/tls.h"
 #include "utils.h"
 #include "vpn/trusttunnel/config.h"
@@ -27,6 +29,40 @@ using namespace ag; // NOLINT(google-build-using-namespace)
 
 static constexpr uint32_t DEFAULT_MTU = 1350;
 static const Logger g_logger("TRUSTTUNNEL_CLIENT"); // NOLINT(readability-identifier-naming)
+
+TrustTunnelConfig::TunListener TrustTunnelConfig::TunListener::with_windows_ipv6_protection(
+        bool killswitch_enabled) const {
+    TunListener effective = *this;
+    if (!killswitch_enabled || std::ranges::find(included_routes, "0.0.0.0/0") == included_routes.end()
+            || std::ranges::any_of(included_routes, [](const std::string &route) {
+                   return route.find(':') != std::string::npos;
+               })) {
+        return effective;
+    }
+
+    // Do not use ::/0: the shared route setup intentionally narrows that spelling to 2000::/3.
+    // The two halves also capture NAT64 and future globally routable prefixes. Endpoint IPv6 availability
+    // is checked by the existing tunnel policy; an unavailable VPN destination is rejected, never bypassed.
+    effective.included_routes.emplace_back("::/1");
+    effective.included_routes.emplace_back("8000::/1");
+
+    for (const char *local : {"::1/128", "fe80::/10", "ff00::/8", "fc00::/7"}) {
+        const CidrRange local_range{local};
+        bool already_excluded = std::ranges::any_of(excluded_routes, [&local_range](const std::string &route) {
+            // CidrRange expects a numeric prefix; avoid turning a malformed user route into an exception.
+            auto parts = utils::split2_by(route, '/');
+            if (!parts[1].empty() && !utils::to_integer<size_t>(parts[1]).has_value()) {
+                return false;
+            }
+            const CidrRange excluded{route};
+            return excluded.valid() && excluded.contains(local_range);
+        });
+        if (!already_excluded) {
+            effective.excluded_routes.emplace_back(local);
+        }
+    }
+    return effective;
+}
 
 static const std::unordered_map<std::string_view, VpnUpstreamProtocol> UPSTREAM_PROTO_MAP = {
         {"auto", VPN_UP_AUTO},

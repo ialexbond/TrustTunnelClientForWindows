@@ -55,3 +55,5 @@ LangString installRefreshingIconCache ${LANG_ENGLISH} "Refreshing icon cache..."
 LangString uninstallDataKept ${LANG_ENGLISH} "Keeping user data"
 LangString uninstallCleaningRegistry ${LANG_ENGLISH} "Cleaning registry entries..."
 LangString uninstallRemovingUpdateFiles ${LANG_ENGLISH} "Removing temporary update files..."
+
+LangString networkGuardReleaseFailed ${LANG_ENGLISH} "Network protection could not be released. Open the app, release the network block, then retry uninstalling. If the app cannot start, reinstall the current version first."

@@ -595,7 +595,7 @@ fn log_decision(d: &EgressDecision, server_ip: Option<IpAddr>, adapters: &[imp::
 
 // ─── Applying the decision ───────────────────────────────────────────────────────────────────
 
-fn runtime_dir() -> PathBuf {
+pub(crate) fn runtime_dir() -> PathBuf {
     crate::ssh::user_data_dir().join(RUNTIME_SUBDIR)
 }
 

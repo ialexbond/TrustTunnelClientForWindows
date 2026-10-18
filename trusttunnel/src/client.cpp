@@ -14,6 +14,9 @@
 #include "net/os_tunnel.h"
 #include "net/tls.h"
 #include "net/utils.h"
+#ifdef _WIN32
+#include "net/windows_network_guard.h"
+#endif
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
 #include "vpn/vpn.h"
@@ -485,22 +488,37 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
     return nullptr;
 #else
 
+    // Legacy Pro profiles contain only the IPv4 default. Complete their capture at runtime,
+    // without changing the profile or overriding an explicitly scoped IPv6 configuration.
+#ifdef _WIN32
+    const auto effective_config = config.with_windows_ipv6_protection(m_config.killswitch_enabled);
+#else
+    const auto &effective_config = config;
+#endif
     std::vector<const char *> included_routes;
-    included_routes.reserve(config.included_routes.size());
-    for (const auto &route : config.included_routes) {
+    included_routes.reserve(effective_config.included_routes.size());
+    for (const auto &route : effective_config.included_routes) {
         included_routes.emplace_back(route.c_str());
     }
 
-    std::vector<std::string> complete_excluded_routes = config.excluded_routes;
-    for (const auto &endpoint : m_config.location.endpoints) {
-        auto resolved = resolve_endpoint_address(endpoint.address.c_str());
-        if (resolved.empty()) {
-            errlog(m_logger, "Failed to resolve endpoint address for excluded routes: {}", endpoint.address);
-            return nullptr;
-        }
-        for (const auto &addr : resolved) {
-            SocketAddress sa(addr);
-            complete_excluded_routes.emplace_back(sa.host_str());
+    std::vector<std::string> complete_excluded_routes = effective_config.excluded_routes;
+    // A protected Windows transport is pinned to its physical interface. Keep
+    // endpoint IPs captured for other apps rather than opening a global route hole.
+    bool exclude_endpoint_routes = true;
+#ifdef _WIN32
+    exclude_endpoint_routes = !network_guard_strict_socket_protection();
+#endif
+    if (exclude_endpoint_routes) {
+        for (const auto &endpoint : m_config.location.endpoints) {
+            auto resolved = resolve_endpoint_address(endpoint.address.c_str());
+            if (resolved.empty()) {
+                errlog(m_logger, "Failed to resolve endpoint address for excluded routes: {}", endpoint.address);
+                return nullptr;
+            }
+            for (const auto &addr : resolved) {
+                SocketAddress sa(addr);
+                complete_excluded_routes.emplace_back(sa.host_str());
+            }
         }
     }
 

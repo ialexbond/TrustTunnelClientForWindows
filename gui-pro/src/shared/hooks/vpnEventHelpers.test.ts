@@ -20,6 +20,17 @@ describe("vpnEventHelpers — reason-code localization", () => {
     i18n.changeLanguage("ru");
   });
 
+  it.each(["network-guard-failed", "network-guard-active", "network-guard-bootstrap-failed"])("localizes %s on both error channels in both languages", (code) => {
+    for (const language of ["ru", "en"]) {
+      i18n.changeLanguage(language);
+      const localized = makeLocalizeError(i18n)(code);
+      expect(localized).not.toBe(code);
+      expect(localized).not.toMatch(/^errors\./);
+      expect(localizeVpnError(new Error(code), i18n)).toBe(localized);
+      if (language === "ru") expect(localized).toMatch(/[а-яё]/i);
+    }
+  });
+
   it("explains that failed routing preparation cancelled the connection instead of starting old settings", () => {
     const localize = makeLocalizeError(i18n);
     expect(localize("routing-rules-apply-failed")).toMatch(/подключение отменено/i);

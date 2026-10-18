@@ -1472,6 +1472,32 @@ Var TT_LEGACY_SURVIVOR_SEEN
     nsExec::Exec 'taskkill /F /PID $R0'
   Sleep 500
 
+  ; Protection must be removed before its only recovery executable is deleted.
+  ; The composite version query is safe on older cores: --version never starts VPN.
+  IfFileExists "$INSTDIR\trusttunnel_client.exe" 0 tt_guard_uninstall_failed
+  nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --version --network-guard-version'
+  Pop $R0
+  Pop $R1
+  StrCmp $R0 "0" 0 tt_guard_uninstall_failed
+  tt_guard_trim_version:
+    StrCpy $R2 $R1 1 -1
+    StrCmp $R2 "$\r" tt_guard_trim_char
+    StrCmp $R2 "$\n" tt_guard_trim_char tt_guard_version_ready
+  tt_guard_trim_char:
+    StrCpy $R1 $R1 -1
+    Goto tt_guard_trim_version
+  tt_guard_version_ready:
+    StrCmp $R1 "1" 0 tt_guard_uninstall_failed
+  nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --network-guard-release'
+  Pop $R0
+  Pop $R1
+  StrCmp $R0 "0" tt_guard_uninstall_done tt_guard_uninstall_failed
+  tt_guard_uninstall_failed:
+    DetailPrint "$(networkGuardReleaseFailed)"
+    MessageBox MB_ICONSTOP|MB_OK "$(networkGuardReleaseFailed)"
+    Abort
+  tt_guard_uninstall_done:
+
 !macroend
 
 
