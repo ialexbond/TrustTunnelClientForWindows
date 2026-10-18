@@ -43,9 +43,9 @@ A bounded child-process experiment proves the old version hangs on the malformed
 
 ## Matched components
 
-The package requires Pro 3.2.0 and a core built from this fork at version 1.1.11 with routing policy capability 1. A stock official executable omits the fork's process/routing extensions. The previously copied installed 1.1.7 resource is a build-time placeholder only and must not ship.
+The package requires Pro 3.2.0 and a core built from this fork at version 1.1.11 with routing policy capability 1 and endpoint probe capability 1. A stock official executable omits the fork's process/routing extensions. The previously copied installed 1.1.7 resource is a build-time placeholder only and must not ship.
 
-Both Tauri build and bundle hooks check the real x64 PE, `--version`, safe help advertisement, and `--routing-policy-version`. Runtime startup also validates compatibility before reading numeric core errors. Only the explicitly non-distributed installer-rendering CI fixture overrides these hooks because it intentionally contains empty files.
+Both Tauri build and bundle hooks check the real x64 PE, `--version`, safe help advertisement, `--routing-policy-version`, and `--endpoint-probe-version`. Runtime startup also validates routing compatibility before reading numeric core errors; ping independently checks its probe capability before invoking it. Only the explicitly non-distributed installer-rendering CI fixture overrides these hooks because it intentionally contains empty files.
 
 Native dependency family:
 
@@ -55,7 +55,7 @@ Native dependency family:
 
 Use `TT_CLIENT_VERSION=1.1.11` explicitly; GUI release tags must not determine the core version.
 
-## Verification ledger
+## Initial verification ledger
 
 | Check | Observed result |
 | --- | --- |
@@ -74,7 +74,7 @@ The broad native run exposed UDP loopback failures. Independent IPv4/IPv6 Python
 
 The affected DNS and fake-connection tests remain unverified in this environment. Other native cases passed, apart from the shared-file race repaired above, one pre-disabled test and one host-dependent localhost-resolution skip. There is no claimed device-wide routing, outage, reconnect or dual-stack acceptance run of the new installed application. These require a separate controlled acceptance stage.
 
-## Built candidate
+## Initial candidate (before user acceptance)
 
 The real Tauri/NSIS build finished successfully. The verified installer was copied to the user's Desktop, together with its `.exe.sha256` checksum file. Nothing was installed or published.
 
@@ -89,7 +89,57 @@ The actual package was extracted without running it. The core and WinTUN payload
 
 Actual core compatibility, raw-artifact privacy, extracted-payload privacy, build-label, post-build NSIS and checksum gates all pass. The neutral native sources match 648 files at `147b094a9`; the final GUI matches 717 tracked files at `eecf3c993`, allowing only Tauri's Cargo manifest line-ending normalization. The core/GUI package is unsigned by the existing signing configuration; no certificate or signing identity was configured by this work.
 
-The installed 3.1.0 GUI and 1.1.7 core retain their original SHA-256 values. The candidate is ready for controlled acceptance, not declared to have passed device-wide network acceptance. Remaining gaps are the host UDP limitation, pre-existing Rust formatting debt, unchanged development-tool advisories and the separate installation/live-routing stage.
+At creation of this initial candidate, the installed 3.1.0 GUI and 1.1.7 core retained their original SHA-256 values. It was ready for controlled acceptance, without a claim of device-wide network acceptance. The user subsequently installed this candidate and reported the results below.
+
+## User acceptance follow-up
+
+The user confirmed retained settings, changed public IP with VPN, explicit site priority over Russian DIRECT groups, different routes in one browser, process priority over site rules, persistence, and their WebRTC check. Gosuslugi and its login page opened; completed authentication was not reported. A browser-custom DNS resolver location is not independent proof of DNS transport. Physical internet disconnection, forced core crash and IPv6 acceptance remain untested.
+
+Stopping the test server protocol exercised both failover settings. With automatic failover enabled, another server restored service. With it disabled, the application displayed bounded retries; both tested websites were unavailable until the protocol was restarted. Application logs corroborate the retry/recovery sequence. This is consistent with ordinary DNS being blocked before exclusion matching while the endpoint is disconnected and Kill Switch is enabled (`core/src/dns_handler.cpp`), plus old-core shutdown and DNS-cache clearing during GUI reconnect. Explicit DIRECT connections are otherwise allowed by `core/src/vpn_fsm.cpp`. The original checklist incorrectly promised uninterrupted DIRECT websites during this interval; that expectation is withdrawn. These observations are not a complete leak test.
+
+### Ping correction
+
+The user found realistic server latency while disconnected, but 1–3 ms for inactive servers while connected. The routing fix's early TCP acknowledgement was accepted as a remote TCP response by the old connect-only timer. The active endpoint's protected route did not exhibit the same shortcut. The routing fix itself is retained.
+
+Both GUI ping paths now use a one-shot mode in the matched core executable. It selects a physical adapter/source and binds the socket to that interface before measuring the remote TCP handshake. It has no unbound fallback and exits before configuration, VPN-session, DNS, route or firewall initialization. The installed executable path already has the core application's firewall permission; no new firewall exception is added. Process launch and route-selection time are excluded from the reported latency. Safe help/capability checks precede the fork-only flag, with bounded child lifetime and strict versioned JSON. Missing capability, resolution failure or incomplete measurement yields no data; only a completed native connection failure declares the peer unreachable.
+
+A read-only comparison against the active server returned 73–79 ms from the new helper and approximately 73–77 ms from ordinary TCP. The helper was still in the neutral build path, so correct inactive-server measurement under the installed core's application identity requires a user retest after installing the updated pair.
+
+### Routing list correction
+
+DIRECT, VPN and saved-process lists reuse the existing visible-scrollbar styling, with a bounded list height and a theme-aware thumb. A successful explicit addition reveals its new row in that list; preset and process-picker additions are included. Passive updates, duplicate additions and removals do not jump. The page, unrelated lists and keyboard focus remain unchanged. Isolated browser checks cover dark/light themes and 900/1280 px widths without opening the installed application or invoking real VPN commands.
+
+### Follow-up verification
+
+| Check | Observed result |
+| --- | --- |
+| Frontend | 254 files / 4,099 tests pass; typecheck, lint and production Vite build pass |
+| Ping backend | 26 self-contained Rust tests pass, none ignored; includes delayed real measurement versus synthetic fast accept, DNS failure and helper deadlines |
+| Rust static checks | Final `cargo check --locked --all-targets` and `cargo clippy --locked --all-targets -- -D warnings` pass with unchanged source hashes |
+| Core compatibility gate | 19 fixture cases pass; actual new core reports 1.1.11 / policy 1 / endpoint probe 1; previous candidate core is rejected for missing probe support |
+| Native probe | 6 native cases and 9 real CLI checks pass; neutral resource SHA-256 `5a31893b84daeec241e1718b2e8f1632c7ed14d207020c8fbe5d43305cf09183` |
+| Visual acceptance | Visible scrollbars and new-row reveal observed in a mocked browser; target-only scroll, focus retention and duplicate no-jump checked |
+| UI detector | One final scoped detector run, no findings |
+| Translation/source checks | Translation-key check and source privacy gate pass; new native units pass strict clang-format checking |
+
+User acceptance of these ping/scroll corrections remains pending installation and retest. Passing automated checks do not overwrite the user's original issue reports. The standalone checklist is maintained privately in `.planning/uat/pro-3.2.0-UAT.md`, without inventing a development phase.
+
+## Updated candidate after UAT fixes
+
+Source fix: `35e2852fd30fba70a8a55ba167fe94f0785d0b5c`. The neutral build inputs match the tested Rust, GUI, gate and native sources; only Tauri's expected Cargo manifest line-ending normalization is accepted. Release documentation is not a compiler or packaging input.
+
+The rebuilt NSIS installer replaces the initial candidate on the Desktop under the same 3.2.0 filename, with an updated adjacent `.exe.sha256`. The known initial installer and its checksum were archived privately before replacement. The installed initial 3.2.0 GUI/core pair retains the pre-fix hashes above; the agent has not installed this replacement or interrupted the connection.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TrustTunnel Client Pro_3.2.0_x64-setup.exe` | 9,794,263 | `02c5a0ef9feaac8987050e7ac184cbcdc0aa48afd266677f1703bec049351f0f` |
+| `trusttunnel.exe` | 18,990,592 | `5dda0d2b104035158294e48f924172aa41f52189eed364cdc5233012f375ca7d` |
+| `trusttunnel_client.exe` | 15,623,680 | `5a31893b84daeec241e1718b2e8f1632c7ed14d207020c8fbe5d43305cf09183` |
+| `wintun.dll` | 427,552 | `e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce` |
+
+Actual core compatibility, raw and extracted artifact privacy, build label, post-build NSIS, generated checksums and checksum verification all pass. The installer was extracted without running it; core and WinTUN payloads match their build inputs exactly, and the GUI comparison allows only Tauri's expected `UNK` to `NSS` bundle marker. The executable contains the current `main-CSU5UFox.js` frontend. The existing unsigned configuration is unchanged. No push, tag, public release or installation was performed.
+
+Connected/disconnected measurements for inactive servers from the newly installed core path, plus the user's scrollbar/new-row checks, remain pending. The previous UDP environment limitation, development-tool advisories, Rust formatting debt and broader crash/IPv6 acceptance limits remain unchanged.
 
 ## Recovery and run-owned resources
 
