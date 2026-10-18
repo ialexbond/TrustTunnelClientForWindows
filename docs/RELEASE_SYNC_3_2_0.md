@@ -186,6 +186,8 @@ The real Tauri/NSIS build and all compatibility, raw/extracted privacy, build-la
 
 ## IPv6 and process-crash protection follow-up
 
+The persistent crash-protection candidate in this subsection was superseded by the user's explicit choice in [GUI session lifetime correction](#gui-session-lifetime-correction). Its hashes and test records are historical; it is not the current recommended installer.
+
 Source fix: `f1d82c50b`. This candidate adds a Windows filtering barrier with a lifetime independent of the GUI and VPN child process. It applies when Kill Switch is enabled; existing profiles that explicitly disable it are not rewritten or silently enabled. The source changes do not claim that every saved profile is protected.
 
 For a conventional full IPv4 TUN configuration without explicit IPv6 scope, effective runtime configuration adds both IPv6 half-space routes and local IPv6 exclusions. This covers the entire IPv6 address space rather than the older global-unicast subset. Explicit custom scopes and exclusions remain authoritative. New configuration templates include these routes; existing profile bytes and MTU values are preserved. If the endpoint cannot carry IPv6, protected IPv6 is blocked rather than sent through the physical uplink.
@@ -227,6 +229,50 @@ The production Tauri/NSIS build succeeds. Actual core compatibility, raw and ext
 | Packaged `wintun.dll` | 427,552 | `e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce` |
 
 The verified installer and adjacent `.exe.sha256` replace the known previous `5381bc52...` candidate on the Desktop. That predecessor and checksum were privately archived before replacement. The existing unsigned GUI/core/installer configuration remains unchanged; WinTUN retains its vendor signature. No installation, active VPN change, push, tag or publication was performed. This same-version candidate requires the controlled acceptance cases above before a general leak-containment claim.
+
+## GUI session lifetime correction
+
+Source fix: `36bddfde02e1bfe10c88ad66d780668b5b4538b8`.
+
+The user rejected persistent blocking as unsuitable for a nontechnical audience and explicitly chose protection only while the GUI is running. A VPN-core failure must retain protection while that GUI session remains open. Closing or crashing the entire GUI must remove the blocking rules automatically. Ordinary internet access after complete GUI termination can expose the ISP address; this is the approved product tradeoff, not an all-state privacy guarantee.
+
+The native capability is now 2. A resident `--network-guard-session` helper owns all new base filters through a dynamic WFP session. Its provider and sublayer are static, nonblocking metadata, created through a separate nondynamic engine so the normal core's dynamic TUN permits can reference them across sessions. All new actual filters have zero persistence flags. Helper input closure or process termination removes its base filters; Windows/BFE restart removes the remaining harmless metadata. No persistent blocking policy, background service or recovery task is created.
+
+The GUI must assign the helper to an owned kill-on-close Windows Job before it can send an arm request. The same helper processes bounded status/arm/release commands across server changes, with atomic rearm and the existing operation lease/generation checks. The VPN core runs in its own owned job and additionally waits for the exact GUI startup token before reading configuration or touching networking. The token is sent only after successful job assignment. GUI death before assignment closes the input without starting networking; GUI death afterwards closes the owning job handles. Windows GUI sessions now reject job-assignment failure rather than accepting the old PID-file-only cleanup fallback.
+
+A generation- and helper-identity-checked backend handler stops a protected connection if its resident helper unexpectedly dies. An idle, unarmed helper's termination is harmless and must not show a protection failure. Normal Quit attempts bounded Disconnect cleanup and then honors exit even on IPC failure; job lifetime provides the final automatic cleanup. The in-app recovery button is named Continue without VPN and explains that protection lasts while the app is open. IPv6 coverage, existing route/process priority, MTU and saved-profile preservation remain unchanged.
+
+The new executable retains a separate legacy cleanup command that can delete only fully verified version 1 objects, including recognized disabled legacy filters after reboot. The installer runs this cleanup after copying the new core to its installed identity and before optional GUI launch, so migration does not depend on a working GUI. Startup also performs migration before connection preparation. Current session filters use distinct identifiers and are never removed through that legacy command. Uninstall supports both capability versions, bounds cleanup retries, and requires a confirmed unarmed result before deleting the recovery executable.
+
+Validation covers the dynamic-rule plan and transactions, native startup-token rejection before configuration, resident protocol/rearm/release and cancellation races, real Windows kill-on-close behavior using an innocuous test process, stale helper-failure events, and the existing routing/IPv6 regressions. Live WFP mutation, real VPN crash packet capture, and installed dual-stack/reboot acceptance remain unperformed in this environment. A kernel job fixture is evidence of process ownership, not a substitute for those complete network tests.
+
+| Check | Observed result |
+| --- | --- |
+| Native core | 113 tests pass, including 17 guard/protocol/lifetime cases and the existing IPv6, configuration, routing, certificate and probe selections |
+| Real safe native handshake | Closed input, wrong token and oversized input all exit before configuration/network setup |
+| Rust guard | 27 cases pass, including real Windows owner termination without Rust cleanup, resident EOF/rearm, cancellation and harmless idle-helper death |
+| Rust lifecycle | Sidecar 46, lifecycle 70, VPN 77, supervisor 38 and job handle 2 pass; counts overlap with other selected runs |
+| Rust static checks | Final locked all-target check and strict Clippy pass |
+| Frontend | 4,128 tests / 255 files pass, with final wording; typecheck, lint and translations pass |
+| Build capability gate | 28 fixtures pass; capability 1 and missing or similarly named startup/session flags are rejected; probes never invoke mutating modes |
+| Source checks | Source privacy and diff checks pass; four changed native units pass strict clang-format checking |
+
+The final matched native core is SHA-256 `a7f90161a523838b086c50a5d1506192b22353b96acbdfb6596b92c1b8a000bd`. Both build resources match that receipt. Private source snapshots, logs and receipts are under `release-3.2.0/session-guard` in the task's visualization directory. No live VPN state, firewall policy, installed binary or saved profile was changed for these checks.
+
+### Rebuilt session-protection candidate
+
+The real production Tauri/NSIS build and all measured core compatibility, raw/extracted privacy, build-label, post-build NSIS and checksum gates pass. All 745 GUI/script inputs and 12 changed native inputs match the tested source snapshot, allowing only Tauri's Cargo manifest line-ending normalization. Extracted core and WinTUN match exactly; the GUI differs only by the expected Tauri `UNK` to `NSS` bundle marker. The embedded frontend is `main-Bcuew-y4.js`.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TrustTunnel Client Pro_3.2.0_x64-setup.exe` | 9,936,330 | `5838694f72bf69809802d5b633c348a285be180a59009056999b90b83fe1327e` |
+| Packaged `trusttunnel.exe` | 19,215,872 | `c9d9fc93b732ace5b57cba72bb7af34433c9bcc95dc6ae3a93297a56269dc2db` |
+| Packaged `trusttunnel_client.exe` | 15,872,000 | `a7f90161a523838b086c50a5d1506192b22353b96acbdfb6596b92c1b8a000bd` |
+| Packaged `wintun.dll` | 427,552 | `e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce` |
+
+The verified installer and adjacent checksum replace the known `73e8c6db...` persistent-protection candidate on the Desktop. That previous installer/checksum are privately archived. The existing unsigned application/installer configuration is unchanged. No installation, publication, push or tag was performed. The pending live network acceptance above remains separate from automated/package verification.
+
+Final preservation comparison confirms all nine saved settings/configuration files retain exact bytes, sizes and modification times, and both installed executable hashes remain unchanged. The actual generated NSIS script copies the core before the post-install legacy cleanup; optional GUI launch occurs afterwards on the finish page. Desktop installer/checksum and archived predecessor/checksum are independently verified.
 
 ## Recovery and run-owned resources
 
