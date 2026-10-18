@@ -10,7 +10,7 @@
 //!
 //! # Why one bare line does NOT deliver that
 //!
-//! The C++ core (frozen, not ours) decides an entry's match mode at PARSE time
+//! The C++ core decides an entry's match mode at PARSE time
 //! (`core/src/domain_filter.cpp:74-82`):
 //!
 //! ```text

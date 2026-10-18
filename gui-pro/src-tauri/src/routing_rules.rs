@@ -96,79 +96,6 @@ fn carry_forward_legacy_keys(previous: &str, next: &mut serde_json::Value) {
     }
 }
 
-// ─── Default private/local exclusions (T-33) ────────
-//
-// In "general" mode every destination goes THROUGH the VPN tunnel except for
-// the `direct` bypass list. Standard split-tunnel VPNs additionally keep
-// private/local traffic OFF the tunnel by default — otherwise Docker's and
-// WSL's INTERNAL networking (172.16.0.0/12 for Docker, link-local /
-// private ranges for WSL/Hyper-V) gets routed into the tunnel, the host can
-// no longer reach its own VM/containers, and Docker fails to start while the
-// VPN is connected (see .planning/debug/docker-system-hang-on-connect.md).
-//
-// These CIDRs are added as an ADDITIVE baseline to the bypass set so LAN /
-// Docker / WSL keep working while connected. They never override an explicit
-// user rule: a default entry is skipped if the user forced that exact CIDR
-// THROUGH the VPN via `proxy` (see `build_general_exclusions`).
-const DEFAULT_PRIVATE_EXCLUSIONS: &[&str] = &[
-    // RFC1918 private IPv4 (covers Docker bridge 172.17.0.0/16 + WSL/Hyper-V NAT).
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    // Loopback.
-    "127.0.0.0/8",
-    // Link-local IPv4 (incl. WSL/Hyper-V auto-config and APIPA).
-    "169.254.0.0/16",
-    // IPv6 loopback / unique-local (ULA) / link-local.
-    "::1/128",
-    "fc00::/7",
-    "fe80::/10",
-];
-
-/// Build the final exclusions (bypass) list for "general" mode.
-///
-/// Starts from the user's resolved `direct` entries, then APPENDS the
-/// `DEFAULT_PRIVATE_EXCLUSIONS` baseline (T-33) so Docker/WSL/LAN bypass the
-/// tunnel by default. The override rule preserves user intent:
-///
-/// * A default-private CIDR is skipped if the user forced that **exact** CIDR
-///   through the VPN via `proxy` — the user's explicit "route through VPN"
-///   rule wins, so the CIDR stays tunnelled. Override granularity is
-///   exact-string CIDR match (simple and predictable): forcing
-///   `192.168.0.0/16` through VPN does NOT keep `192.168.1.0/24` excluded,
-///   and vice-versa.
-/// * A default-private CIDR already present in `direct` is not duplicated.
-///
-/// User `direct` entries are always preserved as-is (the baseline is additive
-/// only — it never removes or reorders user rules).
-fn build_general_exclusions(direct_entries: &[String], proxy_entries: &[String]) -> Vec<String> {
-    // Non-empty user direct entries form the base bypass set, order preserved.
-    let mut result: Vec<String> = direct_entries
-        .iter()
-        .filter(|e| !e.is_empty())
-        .cloned()
-        .collect();
-
-    // Exact-string set of what the user forced THROUGH the VPN (override signal)
-    // and of what is already a bypass entry (dedup guard).
-    let forced_through_vpn: HashSet<&str> =
-        proxy_entries.iter().map(|s| s.as_str()).collect();
-    let mut already_present: HashSet<String> = result.iter().cloned().collect();
-
-    for &cidr in DEFAULT_PRIVATE_EXCLUSIONS {
-        // User rule wins: keep this private range tunnelled if explicitly proxied.
-        if forced_through_vpn.contains(cidr) {
-            continue;
-        }
-        // Never duplicate a CIDR the user already listed as direct.
-        if already_present.insert(cidr.to_string()) {
-            result.push(cidr.to_string());
-        }
-    }
-
-    result
-}
-
 impl Default for RoutingRules {
     fn default() -> Self {
         Self {
@@ -473,9 +400,7 @@ pub fn resolve_and_apply_reporting(
     let proxy_entries = resolve_entries_collecting(&rules.proxy, state, &mut unresolved)?;
 
     // Item 13: tell the user WHICH entries are not in force, on the channel the connect already
-    // uses for its own warning line six lines further down the caller. The resolve still SUCCEEDS
-    // and the connect still proceeds — the reasoning for that asymmetry with D-02 is written out
-    // at `resolve_entries_collecting`.
+    // uses for its own warning line six lines further down the caller. The collected names are shown before the complete policy is refused below.
     if let (Some(app), Some(notice)) = (app, unresolved_entries_notice(&unresolved)) {
         use tauri::Emitter;
         crate::logging::log_app("WARN", &format!("[routing] {notice}"));
@@ -484,6 +409,10 @@ pub fn resolve_and_apply_reporting(
             serde_json::json!({ "message": notice, "level": "warn" }),
         )
         .ok();
+    }
+
+    if !crate::routing_policy::resolution_is_complete(&unresolved) {
+        return Err("One or more routing lists could not be resolved; refusing a partial policy".to_string());
     }
 
     // Read the vpn_mode chosen by the user in Settings (don't override it!)
@@ -505,15 +434,17 @@ pub fn resolve_and_apply_reporting(
     // - "selective": everything direct, EXCEPT proxy entries (they go through VPN)
     //   → exclusions = proxy entries. Private nets already bypass in this mode,
     //     so no default-private baseline is added here.
-    let resolved_exclusions: Vec<String> = if vpn_mode == "selective" {
-        proxy_entries
-            .iter()
-            .filter(|e| !e.is_empty())
-            .cloned()
-            .collect()
-    } else {
-        build_general_exclusions(&direct_entries, &proxy_entries)
+    let explicit_entries = |entries: &[RuleEntry]| -> Vec<String> {
+        entries.iter().flat_map(|entry| match entry.entry_type.as_str() {
+            "domain" => crate::domain_scope::expand_domain_rule(&entry.value),
+            "ip" | "cidr" => vec![entry.value.clone()],
+            _ => Vec::new(),
+        }).collect()
     };
+    let resolved_exclusions = crate::routing_policy::build_policy(
+        &vpn_mode, &direct_entries, &proxy_entries,
+        &explicit_entries(&rules.direct), &explicit_entries(&rules.proxy),
+    );
 
     let exclusions_content = resolved_exclusions.join("\n");
 
@@ -692,14 +623,9 @@ fn unresolved_entries_notice(unresolved: &[String]) -> Option<String> {
 /// has no console attached, so that print went nowhere: the app knew a preset had stopped routing
 /// and threw the fact away, while the chip naming that preset stayed on screen looking active.
 ///
-/// **Why this does NOT abort the connect, when D-02 does.** The two look like the same question and
-/// are not. A rules file that will not parse means the app does not know WHAT the user asked for —
-/// there is no honest way to proceed, so the connect refuses. A geo entry that will not resolve
-/// means the app knows exactly what was asked and could not fulfil ONE item of it, most often
-/// because a geodata `.dat` is mid-update or was never downloaded. Refusing every connect over that
-/// would take the user's whole tunnel away for a partial and usually self-healing gap — a worse
-/// trade than telling them which entries are not in force. Different severities, different answers,
-/// and the difference is written down here rather than left for a reader to infer.
+/// A collector can return partial entries for diagnostics. The application must refuse the
+/// complete policy if this list is nonempty: omitting one protected group can silently select
+/// DIRECT, even when every other group resolved correctly.
 ///
 /// `unresolved` is appended to, never cleared, so one call site can accumulate across the direct
 /// and proxy lists.
@@ -868,6 +794,13 @@ fn update_toml_config(
     // Use forward slashes to avoid TOML escaping issues with backslashes on Windows
     doc["exclusions"] = value(Array::new());
     doc["exclusions_file"] = value(exclusions_file_path().to_string_lossy().replace('\\', "/"));
+    if crate::routing_policy::requires_override_support(exclusions) {
+        doc["routing_policy_version"] = value(1);
+        // Inspect a fresh TLS/QUIC connection before choosing DIRECT when DNS is external.
+        doc["exclusions_tcp_early_ack_enabled"] = value(true);
+    } else {
+        doc.remove("routing_policy_version");
+    }
 
     // SITE BLOCKING IS GONE (2026-09-03), and these two removals are LEGACY CLEANUP rather than
     // leftovers of the feature. A config written by any earlier build still carries
@@ -948,6 +881,7 @@ pub fn update_vpn_mode(config_path: String, mode: String) -> Result<(), String> 
 
 #[cfg(test)]
 mod tests {
+    use crate::routing_policy::{build_general_exclusions, DEFAULT_PRIVATE_EXCLUSIONS};
     use super::*;
 
     fn v(items: &[&str]) -> Vec<String> {

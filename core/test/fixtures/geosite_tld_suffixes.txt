@@ -1,0 +1,4 @@
+ru
+*.ru
+xn--p1ai
+*.xn--p1ai

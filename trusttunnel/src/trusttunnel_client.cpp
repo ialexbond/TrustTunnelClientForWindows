@@ -22,6 +22,7 @@
 #include "vpn/trusttunnel/auto_network_monitor.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
+#include "vpn/trusttunnel/connection_info.h"
 #include "vpn/trusttunnel/version.h"
 
 #ifdef __APPLE__
@@ -118,6 +119,7 @@ int main(int argc, char **argv) {
     // clang-format off
     args.add_options()
             ("v,version", "Print version")
+            ("routing-policy-version", "Print supported Windows routing policy format")
             ("s", "Skip verify certificate", cxxopts::value<bool>()->default_value("false"))
             ("c,config", "Config file name.", cxxopts::value<std::string>()->default_value(std::string(DEFAULT_CONFIG_FILE)))
             ("l,loglevel", "Logging level. Possible values: error, warn, info, debug, trace.", cxxopts::value<std::string>()->default_value("info"))
@@ -132,6 +134,10 @@ int main(int argc, char **argv) {
     // clang-format on
 
     auto result = args.parse(argc, argv);
+    if (result.count("routing-policy-version")) {
+        std::cout << "1\n";
+        return 0;
+    }
     if (result.count("version")) {
         std::cout << args.program() << " " TRUSTTUNNEL_VERSION << '\n';
         return 0;
@@ -343,22 +349,9 @@ static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback() 
 
 static std::function<void(VpnConnectionInfoEvent *)> get_connection_info_callback() {
     return [](VpnConnectionInfoEvent *event) {
-        std::string src = SocketAddress(*event->src).host_str(/*ipv6_brackets=*/true);
-        std::string proto = event->proto == IPPROTO_TCP ? "TCP" : "UDP";
-        std::string dst;
-        if (event->domain) {
-            dst = event->domain;
-        }
-        if (event->dst) {
-            dst = AG_FMT("{}({})", dst, src);
-        }
-        auto action = magic_enum::enum_name(event->action);
-
-        std::string log_message;
-
-        log_message = fmt::format("{}, {} -> {}. Action: {}", proto, src, dst, action);
-
-        dbglog(g_logger, "{}", log_message);
+        // This is the core's final action, not the application's preliminary DEFAULT decision.
+        // Keep both socket ports so an OS ownership snapshot can identify the network process.
+        dbglog(g_logger, "[ROUTE] Final {}", ConnectionInfo::to_json(event, true));
     };
 }
 

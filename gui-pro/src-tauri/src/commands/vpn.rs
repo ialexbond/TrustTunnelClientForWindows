@@ -1957,11 +1957,10 @@ pub async fn vpn_connect(
         geodata_state.as_ref(),
         Some(&app),
     ) {
-        eprintln!("[vpn_connect] Warning: failed to resolve routing rules: {e}");
-        app.emit("vpn-log", VpnLogPayload {
-            message: format!("Warning: routing rules resolve failed: {e}"),
-            level: "warn".into(),
-        }).ok();
+        crate::logging::log_app("ERROR", &format!("[vpn_connect] routing policy preparation failed: {e}"));
+        let reason = crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON;
+        set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+        return Err(reason.to_string());
     }
 
     // Egress guard (net_egress.rs): if the core's own interface picker would choose a foreign
@@ -2352,6 +2351,8 @@ pub async fn respawn_sidecar(
                 "WARN",
                 &format!("[reconnect] routing rules resolve failed: {e}"),
             );
+            record_failure_cause(&state, crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON);
+            return;
         }
     }
 

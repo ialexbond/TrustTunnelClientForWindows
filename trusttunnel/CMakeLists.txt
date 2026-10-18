@@ -313,3 +313,4 @@ include(${VPN_LIB_DIR}/cmake/add_unit_test.cmake)
 set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
 
 add_unit_test(test_persistent_ring_buffer "${TEST_DIR}" "" TRUE TRUE)
+add_unit_test(test_config_routing "${TEST_DIR}" "" TRUE TRUE)
