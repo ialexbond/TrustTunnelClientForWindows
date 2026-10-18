@@ -713,10 +713,10 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
             }
         }
 
-        // Log final routing decision
+        // The core's domain policy runs after this preliminary application action.
         std::string_view log_app = resolved_app.empty() ? safe_to_string_view(event->app_name) : resolved_app;
-        const char *action_names[] = {"DEFAULT", "PROXY", "BYPASS", "REJECT", "FORCE_BYPASS", "FORCE_REDIRECT"};
-        tracelog(m_logger, "[ROUTE] Decision: {} -> {} (app={})", dst_str, action_names[action], log_app);
+        tracelog(m_logger, "[ROUTE] Requested action: {} -> {} (app={})", dst_str, magic_enum::enum_name(action),
+                log_app);
 
         info->action = action;
         if (!resolved_app.empty()) {

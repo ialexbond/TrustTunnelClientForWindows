@@ -340,6 +340,9 @@ static std::variant<TunnelDomainLookupAction, DomainExtractorResult> domain_look
     return TDLA_DONE;
 }
 
+constexpr VpnConnectAction vpn_mode_to_action(VpnMode mode);
+constexpr VpnConnectAction invert_action(VpnConnectAction action);
+
 static TunnelDomainLookupAction pass_through_domain_lookup(
         Tunnel *tunnel, VpnConnection *conn, DomainExtractorPacketDirection dir, const uint8_t *data, size_t length) {
     DomainExtractor *domain_extractor = &conn->domain_extractor;
@@ -362,14 +365,22 @@ static TunnelDomainLookupAction pass_through_domain_lookup(
     case DES_NOTFOUND:
         log_conn(tunnel, conn, dbg, "Gave up to find domain name");
         domain_extractor->reset();
+        if (conn->flags.test(CONNF_SUSPECT_EXCLUSION)) {
+            conn->action = VPN_CA_FORCE_REDIRECT;
+            action = TDLA_SHUTDOWN;
+        }
         break;
     case DES_FOUND: {
         log_conn(tunnel, conn, dbg, "Found domain in {} data: {}", (dir == DEPD_OUTGOING) ? "outgoing" : "incoming",
                 r.domain);
-        if (DFMS_EXCLUSION == filter->match_domain(r.domain)) {
+        // Cache the name before checking the address: explicit domain overrides must beat GeoIP.
+        filter->add_resolved_tag(conn->make_tag(), r.domain);
+        auto match = filter->match_tag(conn->make_tag());
+        if (match.status == DFMS_EXCLUSION || match.status == DFMS_DEFAULT_OVERRIDE) {
+            auto default_action = vpn_mode_to_action(filter->get_mode());
+            conn->action = match.status == DFMS_DEFAULT_OVERRIDE ? default_action : invert_action(default_action);
             action = TDLA_SHUTDOWN;
         }
-        filter->add_resolved_tag(conn->make_tag(), std::move(r.domain));
         domain_extractor->reset();
         break;
     }
@@ -1026,6 +1037,10 @@ std::optional<VpnConnectAction> Tunnel::finalize_connect_action(ConnectRequestRe
         case DFMS_DEFAULT:
             conn->action = request_result.action;
             break;
+        case DFMS_DEFAULT_OVERRIDE:
+            conn->action = vpn_mode_to_action(filter->get_mode());
+            report_connection_info(this, conn, filter_result.domain ? filter_result.domain->c_str() : nullptr);
+            break;
         case DFMS_EXCLUSION: {
             log_conn(this, conn, dbg, "Connection will be excluded");
             conn->action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
@@ -1037,6 +1052,9 @@ std::optional<VpnConnectAction> Tunnel::finalize_connect_action(ConnectRequestRe
             if (is_domain_scannable_port(this, dst->port())) {
                 log_conn(this, conn, dbg, "Connection may target excluded host");
                 conn->flags.set(CONNF_SUSPECT_EXCLUSION);
+            } else {
+                // An unidentifiable target might be an explicit VPN exception; prefer VPN.
+                conn->action = VPN_CA_FORCE_REDIRECT;
             }
             break;
         }
@@ -1051,6 +1069,10 @@ std::optional<VpnConnectAction> Tunnel::finalize_connect_action(ConnectRequestRe
 #endif
         case DFMS_DEFAULT:
             conn->action = request_result.action;
+            break;
+        case DFMS_DEFAULT_OVERRIDE:
+            conn->action = vpn_mode_to_action(filter->get_mode());
+            report_connection_info(this, conn, dst->name.c_str());
             break;
         case DFMS_EXCLUSION:
             conn->action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
@@ -1084,6 +1106,9 @@ static std::optional<SocketAddress> select_resolved_destination_address(
             case DFMS_EXCLUSION:
                 log_conn(self, conn, dbg, "Resolved address matches exclusions");
                 action = invert_action(vpn_mode_to_action(self->vpn->domain_filter.get_mode()));
+                break;
+            case DFMS_DEFAULT_OVERRIDE:
+                action = vpn_mode_to_action(self->vpn->domain_filter.get_mode());
                 break;
             }
         }
@@ -1168,10 +1193,14 @@ static void on_destination_resolve_result(void *arg, VpnDnsResolveId id, VpnDnsR
             log_conn(self, conn, dbg, "Resolved address matches exclusions");
             action = invert_action(vpn_mode_to_action(self->vpn->domain_filter.get_mode()));
             break;
+        case DFMS_DEFAULT_OVERRIDE:
+            action = vpn_mode_to_action(self->vpn->domain_filter.get_mode());
+            break;
         }
     }
 
     std::shared_ptr<ServerUpstream> upstream = select_upstream(self, action, nullptr);
+    conn->action = action;
     conn->upstream = upstream;
     conn->addr.dst = address;
     if (upstream != nullptr) {
@@ -1204,6 +1233,7 @@ static bool need_resolve_hostname(const Tunnel *self, VpnConnectAction action, c
     case VPN_CA_DEFAULT:
         switch (self->vpn->domain_filter.match_domain(dst->name)) {
         case DFMS_DEFAULT:
+        case DFMS_DEFAULT_OVERRIDE:
             action = vpn_mode_to_action(self->vpn->domain_filter.get_mode());
             break;
         case DFMS_EXCLUSION:
@@ -1696,7 +1726,6 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
                 break;
             }
             case TDLA_SHUTDOWN:
-                conn->action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
                 conn->flags.reset(CONNF_LOOKINGUP_DOMAIN);
                 migrate_to_another_upstream = true;
                 break;
@@ -1863,6 +1892,9 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
                 break;
             case DFMS_EXCLUSION:
                 action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
+                break;
+            case DFMS_DEFAULT_OVERRIDE:
+                action = vpn_mode_to_action(this->vpn->domain_filter.get_mode());
                 break;
             }
             if (std::shared_ptr<ServerUpstream> upstream = select_upstream(this, action, nullptr);

@@ -274,7 +274,7 @@ describe("ProcessFilterSection", () => {
 
   it("shows only mode description when processMode is only", () => {
     renderSection({ processMode: "only" });
-    expect(screen.getByText(/Только выбранные процессы будут использовать VPN/)).toBeInTheDocument();
+    expect(screen.getByText(/Выбранные программы всегда используют VPN\. Остальные следуют правилам сайтов и IP-адресов\./)).toBeInTheDocument();
   });
 
   it("removes second process when its remove button is clicked", () => {

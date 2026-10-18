@@ -2,6 +2,7 @@
 
 #include <bitset>
 #include <chrono>
+#include <memory>
 #include <set>
 #include <string>
 #include <string_view>
@@ -32,6 +33,8 @@ enum DomainFilterMatchStatus {
     DFMS_EXCLUSION,
     /// Connection is not matched, but it potentially targets the excluded host
     DFMS_SUSPECT_EXCLUSION,
+    /// A policy directive restores the mode's default route ahead of ordinary exclusions.
+    DFMS_DEFAULT_OVERRIDE,
 };
 
 struct DomainFilterMatchResult {
@@ -120,6 +123,11 @@ private:
     std::unordered_set<SocketAddress> m_addresses;
     std::unordered_set<uint16_t> m_ports_only;
     ag::CidrRangeSet m_cidr_ranges;
+    std::unique_ptr<DomainFilter> m_default_overrides;
+    std::unique_ptr<DomainFilter> m_explicit_exclusions;
+    std::unique_ptr<DomainFilter> m_explicit_defaults;
+    [[nodiscard]] std::optional<size_t> matched_domain_length(std::string_view domain) const;
+    [[nodiscard]] std::optional<DomainFilterMatchStatus> match_explicit_domain(std::string_view domain) const;
     ag::LruTimeoutCache<ag::SockAddrTag, std::string> m_resolved_tags{DEFAULT_CACHE_SIZE, DEFAULT_TAG_TTL};
     ag::LruTimeoutCache<SocketAddress, uint8_t> m_exclusion_suspects{DEFAULT_CACHE_SIZE, DEFAULT_TAG_TTL};
     ag::Logger m_log{"DOMAIN_FILTER"};

@@ -570,7 +570,10 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
             &geodata_state,
             Some(&app),
         ) {
-            eprintln!("[tray_vpn_connect] Warning: routing rules resolve failed: {e}");
+            crate::logging::log_app("ERROR", &format!("[tray] routing policy preparation failed: {e}"));
+            let reason = crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON;
+            set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+            return;
         }
 
         // Reset flags

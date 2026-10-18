@@ -174,6 +174,8 @@ pub const RECOVERY_TIMEOUT_REASON: &str = "recovery-timeout";
 ///
 /// TERMINAL (see `is_terminal_reason`): the file is byte-identical on every retry.
 pub const ROUTING_RULES_UNREADABLE_REASON: &str = "routing-rules-unreadable";
+/// Resolving/writing routing policy failed; never spawn a stale policy after this error.
+pub const ROUTING_RULES_APPLY_FAILED_REASON: &str = "routing-rules-apply-failed";
 
 /// The fixed English status reason written when Windows did not create the WinTUN adapter for the
 /// core and the automatic retries (`ADAPTER_RETRY_MAX_ATTEMPTS`) are used up.
@@ -657,6 +659,7 @@ pub fn is_terminal_reason(reason: &str) -> bool {
         // whose allowlist stays narrow precisely so a sidecar English string cannot ride this
         // list onto a Russian screen.
         | ROUTING_RULES_UNREADABLE_REASON
+          | ROUTING_RULES_APPLY_FAILED_REASON
     )
 }
 

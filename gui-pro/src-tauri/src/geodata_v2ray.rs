@@ -492,7 +492,18 @@ fn format_cidr(entry: &CidrEntry) -> Option<String> {
 ///   the only shapes the core understands are the two above.
 fn format_geo_domain(domain: &GeoDomain) -> Vec<String> {
     match domain.domain_type {
-        2 => crate::domain_scope::expand_domain_rule(&domain.value),
+        2 => {
+            // GeoSite Domain is a suffix even when it is a single label (ru, xn--p1ai).
+            // The hand-typed-domain guard deliberately treats dotless input differently.
+            if !domain.value.contains('.') {
+                if let Ok(label) = idna::domain_to_ascii(&domain.value) {
+                    if !label.is_empty() && label.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
+                        return vec![label.clone(), format!("*.{label}")];
+                    }
+                }
+            }
+            crate::domain_scope::expand_domain_rule(&domain.value)
+        }
         3 => vec![domain.value.clone()],
         _ => Vec::new(),
     }
@@ -1272,6 +1283,18 @@ pub fn start_geodata_watcher(app: tauri::AppHandle, state: Arc<GeoDataState>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn geosite_tld_suffixes_keep_their_wildcard_scope() {
+        let mut entries = super::format_geo_domain(&super::GeoDomain {
+            domain_type: 2, value: "ru".to_string(),
+        });
+        entries.extend(super::format_geo_domain(&super::GeoDomain {
+            domain_type: 2, value: "рф".to_string(),
+        }));
+        assert_eq!(entries.join("\n"),
+            include_str!("../../../core/test/fixtures/geosite_tld_suffixes.txt").trim_end());
+    }
+
     use super::*;
 
     // ─── protobuf fixture builders ──────────────────

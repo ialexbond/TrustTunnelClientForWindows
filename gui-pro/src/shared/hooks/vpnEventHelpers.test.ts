@@ -20,6 +20,14 @@ describe("vpnEventHelpers — reason-code localization", () => {
     i18n.changeLanguage("ru");
   });
 
+  it("explains that failed routing preparation cancelled the connection instead of starting old settings", () => {
+    const localize = makeLocalizeError(i18n);
+    expect(localize("routing-rules-apply-failed")).toMatch(/подключение отменено/i);
+    expect(localize("routing-rules-apply-failed")).toMatch(/старые настройки/i);
+    i18n.changeLanguage("en");
+    expect(localize("routing-rules-apply-failed")).toMatch(/connection was cancelled/i);
+  });
+
   it("maps the exhausted-queue code to its own key, not the reconnect-gave-up one", () => {
     // The exact token `connectivity::FAILOVER_EXHAUSTED_REASON` writes.
     expect(REASON_CODE_I18N["failover-exhausted"]).toBe("errors.failover_exhausted");

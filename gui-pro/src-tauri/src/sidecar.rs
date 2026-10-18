@@ -410,6 +410,32 @@ pub async fn spawn_trusttunnel(
 ) -> Result<SidecarChild, Box<dyn std::error::Error>> {
     let shell = app.shell();
 
+    // Old cores ignore !entries. Refuse the mixed GUI/core pair before starting a tunnel.
+    let policy_text = std::fs::read_to_string(config_path)
+        .map_err(|_| "Could not read routing policy metadata")?;
+    let policy_doc: toml::Value = policy_text.parse()
+        .map_err(|_| "Could not parse routing policy metadata")?;
+    if let Some(version) = policy_doc.get("routing_policy_version").and_then(toml::Value::as_integer) {
+        if version != 1 {
+            return Err("Unsupported routing policy version".into());
+        }
+        let binary = std::env::current_exe()?.with_file_name(if cfg!(windows) {
+            "trusttunnel_client.exe"
+        } else {
+            "trusttunnel_client"
+        });
+        let mut probe = tokio::process::Command::new(binary);
+        probe.arg("--help").kill_on_drop(true);
+        #[cfg(windows)]
+        probe.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        let output = tokio::time::timeout(std::time::Duration::from_secs(5), probe.output()).await
+            .map_err(|_| "VPN engine compatibility check timed out")??;
+        if !output.status.success()
+            || !crate::routing_policy::core_supports_overrides(&String::from_utf8_lossy(&output.stdout)) {
+            return Err("This routing policy needs the matching updated VPN engine. Reinstall the matching application build.".into());
+        }
+    }
+
     eprintln!("[sidecar] Spawning trusttunnel_client with args: -c {config_path} -l {log_level}");
     // G-03.1-10: never start a core while an earlier one is still running its own cleanup — it
     // would reuse the adapter that cleanup is about to remove (see CORE_STOPS_IN_FLIGHT).

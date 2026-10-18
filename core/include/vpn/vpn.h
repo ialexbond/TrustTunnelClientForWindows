@@ -519,6 +519,9 @@ typedef struct {
      *      - 1.1.1.1:1 [feed::beef] www.example.com
      *      - [deaf::beef]:12 *.example.com
      *      - *:80 *:443
+     *  Windows routing policy v1: `!entry` restores the default route ahead of group exclusions.
+     *  `+entry` (explicit exclusion) and `^entry` (explicit default) outrank all group entries.
+     *  More specific explicit domains win; process FORCE actions outrank all site rules.
      */
     ag::VpnStr exclusions;
     /**

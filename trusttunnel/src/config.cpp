@@ -1,6 +1,7 @@
 #include <common/logger.h>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <sstream>
@@ -310,48 +311,42 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
         }
     }
 
-    // Load exclusions from external file (avoids TOML size limits for large domain/IP lists)
-    if (auto ef = config["exclusions_file"].value<std::string>(); ef.has_value() && !ef->empty()) {
-        if (FILE *f = std::fopen(ef->c_str(), "r"); f != nullptr) {
-            std::fseek(f, 0, SEEK_END);
-            long sz = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
-            if (sz > 0) {
-                std::string content(static_cast<size_t>(sz), '\0');
-                std::fread(content.data(), 1, static_cast<size_t>(sz), f);
-                result.exclusions += content;
-            }
-            std::fclose(f);
-            infolog(g_logger, "Loaded exclusions from file: {} ({} bytes)", *ef, sz > 0 ? sz : 0);
-        } else {
-            warnlog(g_logger, "Failed to open exclusions_file: {}", *ef);
+    // A configured but unreadable rule file is a policy failure, not an empty policy.
+    auto load_file_content = [](const toml::table &cfg, const char *key) -> std::optional<std::string> {
+        auto path = cfg[key].value<std::string>();
+        if (!path || path->empty()) {
+            return std::string{};
         }
-    }
-
-    // Load process filter files (newline-separated process names)
-    auto load_file_content = [](const toml::table &cfg, const char *key) -> std::string {
-        if (auto path = cfg[key].value<std::string>(); path.has_value() && !path->empty()) {
-            if (FILE *f = std::fopen(path->c_str(), "r"); f != nullptr) {
-                std::fseek(f, 0, SEEK_END);
-                long sz = std::ftell(f);
-                std::fseek(f, 0, SEEK_SET);
-                std::string content;
-                if (sz > 0) {
-                    content.resize(static_cast<size_t>(sz), '\0');
-                    std::fread(content.data(), 1, static_cast<size_t>(sz), f);
-                }
-                std::fclose(f);
-                infolog(g_logger, "Loaded process filter from {}: {} ({} bytes)", key, *path, sz > 0 ? sz : 0);
-                return content;
-            } else {
-                warnlog(g_logger, "Failed to open {}: {}", key, *path);
-            }
+        std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path->c_str(), "rb"), &std::fclose);
+        if (!file || std::fseek(file.get(), 0, SEEK_END) != 0) {
+            errlog(g_logger, "Failed to read configured routing file: {}", key);
+            return std::nullopt;
         }
-        return {};
+        long size = std::ftell(file.get());
+        if (size < 0 || std::fseek(file.get(), 0, SEEK_SET) != 0) {
+            errlog(g_logger, "Failed to seek configured routing file: {}", key);
+            return std::nullopt;
+        }
+        std::string content(static_cast<size_t>(size), '\0');
+        if ((size > 0 && std::fread(content.data(), 1, content.size(), file.get()) != content.size())
+                || std::ferror(file.get())) {
+            errlog(g_logger, "Incomplete configured routing file: {}", key);
+            return std::nullopt;
+        }
+        infolog(g_logger, "Loaded routing file {} ({} bytes)", key, content.size());
+        return content;
     };
-    result.process_direct = load_file_content(config, "process_direct_file");
-    result.process_proxy = load_file_content(config, "process_proxy_file");
-    result.process_block = load_file_content(config, "process_block_file");
+    auto exclusions = load_file_content(config, "exclusions_file");
+    auto direct = load_file_content(config, "process_direct_file");
+    auto proxy = load_file_content(config, "process_proxy_file");
+    auto block = load_file_content(config, "process_block_file");
+    if (!exclusions || !direct || !proxy || !block) {
+        return std::nullopt;
+    }
+    result.exclusions += *exclusions;
+    result.process_direct = std::move(*direct);
+    result.process_proxy = std::move(*proxy);
+    result.process_block = std::move(*block);
 
     if (const auto *x = config["dns_upstreams"].as_array(); x != nullptr) {
         result.legacy_dns_upstreams.reserve(x->size());

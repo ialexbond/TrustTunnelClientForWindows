@@ -954,6 +954,9 @@ pub fn give_up_reason(queue_exhausted: bool) -> &'static str {
 /// is worth.
 pub fn terminal_reason_for_give_up(recorded: Option<&str>, queue_exhausted: bool) -> &'static str {
     match recorded {
+        Some(c) if c == crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON => {
+            crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON
+        }
         Some(c) if c == crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON => {
             crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON
         }
@@ -3457,6 +3460,14 @@ mod detection_cadence_tests {
 
 #[cfg(test)]
 mod reconnect_supervisor_tests {
+    #[test]
+    fn routing_preparation_failure_is_terminal_and_preserved() {
+        let reason = crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON;
+        assert!(crate::lifecycle::is_terminal_reason(reason));
+        assert_eq!(super::terminal_reason_for_give_up(Some(reason), false), reason);
+        assert_eq!(super::terminal_reason_for_give_up(Some(reason), true), reason);
+    }
+
     use super::*;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
