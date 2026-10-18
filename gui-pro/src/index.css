@@ -186,16 +186,9 @@ input[type="number"] {
   width: 0;
 }
 
-/* Routing lists keep an obvious grip even before the pointer reaches the list. */
+/* Routing lists keep a stable gutter and use the shared, softer scrollbar colors. */
 .routing-list-scrollbar {
   scrollbar-gutter: stable;
-  scrollbar-color: var(--color-text-muted) transparent;
-}
-.routing-list-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-text-muted);
-}
-.routing-list-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
 }
 
 /* Non-scrolling container */
