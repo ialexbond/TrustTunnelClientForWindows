@@ -184,6 +184,50 @@ Resting pixels are unchanged: light `(204, 204, 202)` and dark `(60, 60, 60)`. H
 
 The real Tauri/NSIS build and all compatibility, raw/extracted privacy, build-label, NSIS and checksum gates pass. New Desktop `TrustTunnel Client Pro_3.2.0_x64-setup.exe`: 9,797,545 bytes, SHA-256 `5381bc52f838743a32816ac2405002e90f3a2f99c6500ce312474f0261b70a7d`, with a verified adjacent checksum. Extracted GUI SHA-256 `bc03601048e1a32017d4ef9ca27c8255067be574d018a526bb043be41d62915a` matches the build output after the expected Tauri bundle-marker normalization; the frontend is `main-F85d2wz-.js`. Core/WinTUN retain their previous hashes. The prior `0470bdbe...` installer is privately archived. Six saved profiles and installed executable hashes are unchanged; no installation or publication was performed. Private pixel evidence and package receipts are under `release-3.2.0/scrollbar-hover`.
 
+## IPv6 and process-crash protection follow-up
+
+Source fix: `f1d82c50b`. This candidate adds a Windows filtering barrier with a lifetime independent of the GUI and VPN child process. It applies when Kill Switch is enabled; existing profiles that explicitly disable it are not rewritten or silently enabled. The source changes do not claim that every saved profile is protected.
+
+For a conventional full IPv4 TUN configuration without explicit IPv6 scope, effective runtime configuration adds both IPv6 half-space routes and local IPv6 exclusions. This covers the entire IPv6 address space rather than the older global-unicast subset. Explicit custom scopes and exclusions remain authoritative. New configuration templates include these routes; existing profile bytes and MTU values are preserved. If the endpoint cannot carry IPv6, protected IPv6 is blocked rather than sent through the physical uplink.
+
+The persistent Windows barrier protects the configured capture scopes in both address families. A temporary permit is limited to the current tunnel interface and its exact address and is installed before exposing TUN routes/DNS. Core termination removes that permit but retains the persistent deny rules. The matched core executable has its own narrowly scoped transport identity; protected transport must bind both its physical source address and interface. Endpoint addresses no longer become blanket physical-route exceptions while this guard is active. Approved process/site DIRECT forwarding continues through the healthy core. Local and explicit public-route exclusions retain their intended scope; local-router DNS cannot bypass the protected DNS path.
+
+Reconnection bootstrap uses bounded DNS queries issued by the matched core on a selected physical interface. Numeric endpoint addresses are written only to a temporary runtime copy; saved endpoint names, TLS identity and credentials remain unchanged. Capability checks precede helper flags. A serialized operation lease, confirmed helper termination and connection-generation checks prevent a cancelled/late arm or stale disconnect from changing a newer session's protection. A retained guard prevents automatic downgrade to a profile with Kill Switch disabled.
+
+Unexpected child/GUI termination, retry exhaustion and ordinary startup do not release the guard. Explicit Disconnect, explicit Quit and confirmed uninstall can release it after the owned core stops. A global recovery banner offers the existing Disconnect path through the localized release button when protection remains active without a connected session. Failed release stays visible; uninstall aborts before deleting the recovery executable. No blanket GUI or endpoint-IP firewall permission was added.
+
+### Verification and remaining acceptance
+
+| Check | Observed result |
+| --- | --- |
+| Native core | 111 cases pass: guard planning/fake transaction tests 15, configuration 7, IPv6 tunnel 3, matcher 67, certificates 13, endpoint probe 6 |
+| Native protocol | Version/help, guard capability, both safe composite-version argument orders and invalid resolver requests pass without mutating WFP |
+| Rust | Guard module 17, lifecycle 70, sidecar 46, VPN commands 75 and reconnect supervisor 38 pass; overlapping guard-filtered run 43 passes |
+| Configuration preservation | Final post-annotation configuration/template rerun 37 passes; existing custom/omitted MTU and explicit route scopes covered |
+| Rust static checks | Locked all-target check and strict all-target Clippy pass |
+| Frontend | 4,128 tests in 255 files pass; typecheck, lint and translation checks pass; final production frontend builds |
+| Recovery UI | Busy, failure, duplicate-click and event races covered; light/dark and narrow/wide mocked-browser previews inspected; one scoped detector run has no findings |
+| Compatibility/privacy | 23 core-gate fixtures pass; source privacy gate passes with explicit annotations for the required IPv6 half-space literal |
+| Build inputs | 745 GUI/script inputs match the neutral build snapshot, allowing only Cargo manifest line endings; all 12 changed native input hashes match the final native receipt |
+| Current installation/data | Nine saved configuration/routing/application/settings files retain bytes, sizes and modification times; installed GUI/core hashes remain unchanged |
+
+The final neutral native core is SHA-256 `18b3aba1b86b6f403ad0af0afc00f5443596908b6f788f9b805f515061bfed5d`. Both the production GUI resource and the package verifier are pinned to that tested native receipt. Private evidence is under `release-3.2.0/fail-closed` in the task's visualization directory.
+
+No destructive crash, live WFP mutation, independent packet-containment capture or cold-DNS reconnect acceptance was performed on this user's active connection. An isolated Windows VM was unavailable to the effective execution token. Established-flow behavior during abrupt process death, live dual-stack routing, and recovery therefore still require controlled Windows acceptance after installation. Persistence across BFE service restart or OS reboot is not claimed by this run. Automated/fake-API tests are not substitutes for those network observations. Earlier user acceptance applies to the older installed candidate, not to this new security build.
+
+### Rebuilt security candidate
+
+The production Tauri/NSIS build succeeds. Actual core compatibility, raw and extracted artifact privacy, build-label, post-build NSIS and checksum gates pass. The package verifier independently rechecks the 745 GUI/script inputs, 12 changed native inputs and exact tested core hash. Extracted core and WinTUN match their inputs byte for byte; the GUI comparison permits only the expected Tauri `UNK` to `NSS` bundle marker. The embedded frontend is `main-DTZcF_g3.js`.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TrustTunnel Client Pro_3.2.0_x64-setup.exe` | 9,884,393 | `73e8c6db55ed1ae97565a16c324d6d76f1caaa77775288bdc8a4257714a8c77e` |
+| Packaged `trusttunnel.exe` | 19,111,936 | `fcaa3fd2548aa6f295dc4879fe6511f385e96c081572e6b33252a1a667dde316` |
+| Packaged `trusttunnel_client.exe` | 15,872,000 | `18b3aba1b86b6f403ad0af0afc00f5443596908b6f788f9b805f515061bfed5d` |
+| Packaged `wintun.dll` | 427,552 | `e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce` |
+
+The verified installer and adjacent `.exe.sha256` replace the known previous `5381bc52...` candidate on the Desktop. That predecessor and checksum were privately archived before replacement. The existing unsigned GUI/core/installer configuration remains unchanged; WinTUN retains its vendor signature. No installation, active VPN change, push, tag or publication was performed. This same-version candidate requires the controlled acceptance cases above before a general leak-containment claim.
+
 ## Recovery and run-owned resources
 
 The pre-upgrade routing patch is committed independently, followed by baseline ancestry and official-release merge commits. Reverting only the later release work restores the original development baseline without changing installed files.
