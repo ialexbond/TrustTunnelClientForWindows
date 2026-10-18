@@ -32,15 +32,10 @@ class VpnLibsConan(ConanFile):
     exports_sources = patch_files
 
     def requirements(self):
-        # Pins come from upstream v1.1.7. Our 2026-05-24 local bump
-        # (dns-libs 2.8.44 / native_libs_common 8.1.27) is gone: it was a workaround for
-        # tags AdGuard had deleted, and it never built — 2.8.44 itself requires
-        # native_libs_common/8.0.27, so Conan refused the graph as a version conflict.
-        # v1.1.7's pins are coherent: dns-libs 2.10.2 itself requires
-        # native_libs_common/8.1.52 and openssl/boring-2026-05-08, so all three
-        # move together — see the openssl pin below.
-        self.requires("dns-libs/2.10.2@adguard/oss", transitive_headers=True)
-        self.requires("native_libs_common/8.1.52@adguard/oss", transitive_headers=True)
+        # Keep the official v1.1.11 dependency family together. Windows uses
+        # BoringSSL; the OpenSSL 4.0.2 branch below applies only to MIPS.
+        self.requires("dns-libs/2.10.2-6-gc68d7dde@adguard/oss", transitive_headers=True)
+        self.requires("native_libs_common/8.1.54@adguard/oss", transitive_headers=True)
 
         self.requires("brotli/1.1.0", transitive_headers=True)
         self.requires("cxxopts/3.1.1", transitive_headers=True)
@@ -57,7 +52,7 @@ class VpnLibsConan(ConanFile):
         if "mips" not in str(self.settings.arch):
             self.requires("openssl/boring-2026-05-08@adguard/oss", transitive_headers=True, force=True)
         else:
-            self.requires("openssl/3.1.5-quic1@adguard/oss", transitive_headers=True, force=True)
+            self.requires("openssl/4.0.2@adguard/oss", transitive_headers=True, force=True)
 
     def build_requirements(self):
         self.test_requires("gtest/1.14.0")
