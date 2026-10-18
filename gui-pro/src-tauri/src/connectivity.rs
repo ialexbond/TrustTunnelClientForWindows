@@ -987,7 +987,7 @@ pub enum SupervisorOutcome {
     /// All `RECONNECT_MAX_ATTEMPTS` failed — caller surfaces the terminal Error
     /// carrying `RECONNECT_GAVE_UP_REASON`.
     GaveUp,
-    /// A failure requiring user intervention, such as an incorrect wall clock.
+    /// A local failure shared by every server, such as an incompatible engine.
     /// Stop the whole failover walk and preserve the recorded diagnosis.
     TerminalFailure,
     /// The user disconnected, or the captured generation was advanced by a manual
@@ -1099,13 +1099,10 @@ where
         // loop and surface the honest Error now, instead of burning the remaining
         // attempts. Only the specific never-recoverable reasons match; transient
         // failures fall through to the normal retry path below.
-        if matches!(
-            failure_reason.as_deref(),
-            Some(
-                crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON
-                    | crate::lifecycle::CORE_VERSION_MISMATCH_REASON
-            )
-        ) {
+        // A future certificate can belong to this server alone. Its terminal
+        // classification below stops retries of this candidate, then permits
+        // the bounded walk to try another saved server.
+        if failure_reason.as_deref() == Some(crate::lifecycle::CORE_VERSION_MISMATCH_REASON) {
             return SupervisorOutcome::TerminalFailure;
         }
         if failure_reason
@@ -3904,58 +3901,87 @@ mod reconnect_supervisor_tests {
         assert_eq!(sleeps.get(), 0);
     }
 
-    #[tokio::test]
-    async fn core_1111_clock_and_version_errors_stop_all_retry_and_failover_attempts() {
-        let clock_reason = crate::sidecar::core_exit_error_reason(
-            "2026-10-18 12:00:00 ERROR Error: 8 certificate is not yet valid password=private",
+    async fn run_core_1111_candidates(
+        reasons: &[Option<&'static str>],
+    ) -> (FailoverWalkResult, u32, u32, u32) {
+        let candidates = Cell::new(0u32);
+        let attempts = Cell::new(0u32);
+        let sleeps = Cell::new(0u32);
+        let result = run_failover_walk(
+            reasons.len(),
+            |index| {
+                candidates.set(candidates.get() + 1);
+                let reason = reasons[index];
+                let attempts = &attempts;
+                let sleeps = &sleeps;
+                async move {
+                    run_reconnect_loop(
+                        7,
+                        crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+                        |_attempt| {
+                            attempts.set(attempts.get() + 1);
+                            async move {
+                                (reason.is_none(), Duration::ZERO, reason.map(str::to_owned))
+                            }
+                        },
+                        || false,
+                        || 7,
+                        |_attempt| {},
+                        || {
+                            sleeps.set(sleeps.get() + 1);
+                            async {}
+                        },
+                    )
+                    .await
+                }
+            },
+            || true,
         )
-        .expect("the paired core's clock error must be understood");
-        for reason in [clock_reason, crate::lifecycle::CORE_VERSION_MISMATCH_REASON] {
-            assert!(crate::lifecycle::is_terminal_reason(reason));
-            assert_eq!(
-                crate::lifecycle::never_connected_exit_reason(false, false, true, Some(reason)),
-                Some(reason),
-            );
-            let candidates = Cell::new(0u32);
-            let attempts = Cell::new(0u32);
-            let sleeps = Cell::new(0u32);
-            let result = run_failover_walk(
-                4,
-                |_index| {
-                    candidates.set(candidates.get() + 1);
-                    let attempts = &attempts;
-                    let sleeps = &sleeps;
-                    async move {
-                        run_reconnect_loop(
-                            7,
-                            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
-                            |_attempt| {
-                                attempts.set(attempts.get() + 1);
-                                async move { (false, Duration::ZERO, Some(reason.to_string())) }
-                            },
-                            || false,
-                            || 7,
-                            |_attempt| {},
-                            || {
-                                sleeps.set(sleeps.get() + 1);
-                                async {}
-                            },
-                        )
-                        .await
-                    }
-                },
-                || true,
-            )
-            .await;
-            assert_eq!(result.outcome, SupervisorOutcome::TerminalFailure);
-            assert!(!result.queue_exhausted);
-            assert_eq!(candidates.get(), 1);
-            assert_eq!(attempts.get(), 1);
-            assert_eq!(sleeps.get(), 0);
-            for exhausted in [false, true] {
-                assert_eq!(terminal_reason_for_give_up(Some(reason), exhausted), reason);
-            }
+        .await;
+        (result, candidates.get(), attempts.get(), sleeps.get())
+    }
+
+    #[tokio::test]
+    async fn core_1111_future_certificate_skips_the_failed_server_and_recovers_on_the_next() {
+        let reason = crate::sidecar::core_exit_error_reason("Error: 8 certificate is not yet valid")
+            .expect("the paired core's certificate-time error must be understood");
+        assert!(crate::lifecycle::is_terminal_reason(reason));
+        let (result, candidates, attempts, sleeps) =
+            run_core_1111_candidates(&[Some(reason), None, None]).await;
+        assert_eq!(result.outcome, SupervisorOutcome::Recovered);
+        assert_eq!(result.candidate_index, 1);
+        assert!(!result.queue_exhausted);
+        assert_eq!((candidates, attempts, sleeps), (2, 2, 0));
+    }
+
+    #[tokio::test]
+    async fn core_1111_all_future_certificates_finish_one_pass_and_keep_the_diagnosis() {
+        let reason = crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON;
+        let (result, candidates, attempts, sleeps) =
+            run_core_1111_candidates(&[Some(reason), Some(reason), Some(reason)]).await;
+        assert_eq!(result.outcome, SupervisorOutcome::GaveUp);
+        assert_eq!(result.candidate_index, 2);
+        assert!(result.queue_exhausted);
+        assert_eq!((candidates, attempts, sleeps), (3, 3, 0));
+        assert_eq!(
+            crate::lifecycle::never_connected_exit_reason(false, false, true, Some(reason)),
+            Some(reason),
+        );
+        for exhausted in [false, true] {
+            assert_eq!(terminal_reason_for_give_up(Some(reason), exhausted), reason);
         }
+    }
+
+    #[tokio::test]
+    async fn core_1111_version_mismatch_stops_before_trying_any_other_server() {
+        let reason = crate::lifecycle::CORE_VERSION_MISMATCH_REASON;
+        let (result, candidates, attempts, sleeps) =
+            run_core_1111_candidates(&[Some(reason), None, None]).await;
+        assert_eq!(result.outcome, SupervisorOutcome::TerminalFailure);
+        assert_eq!(result.candidate_index, 0);
+        assert!(!result.queue_exhausted);
+        assert_eq!((candidates, attempts, sleeps), (1, 1, 0));
+        assert_eq!(terminal_reason_for_give_up(Some(reason), false), reason);
     }
 
     #[test]
