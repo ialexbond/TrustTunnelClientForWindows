@@ -214,6 +214,13 @@ ag::VpnError ag::VpnWinTunnel::init(
     m_if_index = get_wintun_adapter_index(m_wintun_adapter);
     CidrRange ipv4_address = tunnel_utils::get_address_for_index(settings->ipv4_address, m_if_index);
     CidrRange ipv6_address = tunnel_utils::get_address_for_index(settings->ipv6_address, m_if_index);
+    // Assigning a unicast address can itself create an on-link route. Install the
+    // core-owned permit first, before exposing either addresses, routes or DNS.
+    NET_LUID_LH guard_luid{};
+    WintunGetAdapterLUID(m_wintun_adapter, &guard_luid);
+    if (!m_network_guard.activate(guard_luid.Value, ipv4_address, ipv6_address)) {
+        return {-1, "Unable to protect the WinTun interface"};
+    }
     m_wintun_session = create_wintun_session(ipv4_address, ipv6_address, m_wintun_adapter,
             win_settings->zerocopy ? WINTUN_RING_CAPACITY_ZEROCOPY : WINTUN_RING_CAPACITY);
     if (m_wintun_session == nullptr) {
@@ -422,6 +429,7 @@ bool ag::VpnWinTunnel::setup_routes(std::span<const CidrRange> ipv4_routes, std:
 
 void ag::VpnWinTunnel::deinit() {
     stop_recv_packets(); // for case when it wasn't called manually
+    m_network_guard.reset();
     close_wintun(m_wintun_session, m_wintun_adapter);
     m_wintun_session = nullptr;
     m_wintun_adapter = nullptr;
@@ -559,15 +567,28 @@ static bool protect_with_unicast_if(evutil_socket_t fd, const ag::SocketAddress 
 }
 
 bool ag::vpn_win_socket_protect(evutil_socket_t fd, const sockaddr *addr) {
+    const bool strict = network_guard_strict_socket_protection();
     uint32_t bound_if = vpn_network_manager_get_outbound_interface();
     if (bound_if == 0) {
-        return !vpn_network_manager_get_tunnel_active();
+        return !strict && !vpn_network_manager_get_tunnel_active();
+    }
+    bool physical = false;
+    if (strict) {
+        MIB_IF_ROW2 row{};
+        row.InterfaceIndex = bound_if;
+        physical = GetIfEntry2(&row) == ERROR_SUCCESS && row.OperStatus == IfOperStatusUp
+                && (row.Type == IF_TYPE_ETHERNET_CSMACD || row.Type == IF_TYPE_IEEE80211 || row.Type == 243
+                        || row.Type == 244);
+        if (!physical) {
+            return false;
+        }
     }
 
     ag::SocketAddress sa(addr);
     const bool bind_protect_success = protect_with_bind(fd, &sa, bound_if);
     const bool unicast_protect_success = protect_with_unicast_if(fd, &sa, bound_if);
-    if (!bind_protect_success && !unicast_protect_success) {
+    if (!network_guard_socket_protection_result(
+                strict, bound_if, physical, bind_protect_success, unicast_protect_success)) {
         warnlog(logger, "Failed to protect socket");
         return false;
     }

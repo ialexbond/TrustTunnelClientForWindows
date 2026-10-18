@@ -223,6 +223,18 @@ describe("App", () => {
     expect(document.querySelector(".h-screen.flex")).toBeInTheDocument();
   });
 
+  it("keeps persistent network recovery available across tabs without releasing it on startup", async () => {
+    const defaultInvoke = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation((command, args, options) => command === "network_guard_status"
+      ? Promise.resolve(true)
+      : defaultInvoke(command, args, options));
+    await act(async () => { render(<App />); });
+    expect(screen.getByRole("button", { name: "Снять блокировку" })).toBeInTheDocument();
+    await gotoSettings();
+    expect(screen.getByRole("button", { name: "Снять блокировку" })).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("vpn_disconnect");
+  });
+
   it("shows tab navigation", async () => {
     await act(async () => {
       render(<App />);

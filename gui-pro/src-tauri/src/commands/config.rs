@@ -788,8 +788,14 @@ fn default_tun_table() -> toml_edit::Table {
     tun.insert("change_system_dns", toml_edit::value(true));
     let mut inc = toml_edit::Array::new();
     inc.push("0.0.0.0/0");
+    inc.push("::/1");
+    inc.push("8000::/1"); // pii-gate-allow: Required IPv6 half-space route, not a server address.
     tun.insert("included_routes", toml_edit::value(inc));
-    tun.insert("excluded_routes", toml_edit::value(toml_edit::Array::new()));
+    let mut exc = toml_edit::Array::new();
+    for route in ["::1/128", "fe80::/10", "ff00::/8", "fc00::/7"] {
+        exc.push(route);
+    }
+    tun.insert("excluded_routes", toml_edit::value(exc));
     tun
 }
 
@@ -1567,6 +1573,46 @@ excluded_routes = []
 
         assert_eq!(parsed["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
         assert_eq!(parsed["endpoint"]["hostname"].as_str(), Some("vpn.example.com"));
+    }
+
+    #[test]
+    fn default_tun_table_captures_ipv6_and_preserves_local_control() {
+        let tun = default_tun_table();
+        let included: Vec<_> = tun["included_routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|route| route.as_str().unwrap())
+            .collect();
+        let excluded: Vec<_> = tun["excluded_routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|route| route.as_str().unwrap())
+            .collect();
+        assert_eq!(included, ["0.0.0.0/0", "::/1", "8000::/1"]); // pii-gate-allow: Required IPv6 half-space route, not a server address.
+        assert_eq!(excluded, ["::1/128", "fe80::/10", "ff00::/8", "fc00::/7"]);
+    }
+
+    #[test]
+    fn config_edit_preserves_existing_route_scopes_without_ipv6_migration() {
+        for included in [
+            "[]",
+            "[\"0.0.0.0/0\"]",
+            "[\"192.0.2.0/24\"]",
+            "[\"0.0.0.0/0\", \"2001:db8::/32\"]",
+        ] {
+            let existing = format!(
+                "[endpoint]\nhostname = \"vpn.example.com\"\nname = \"Old\"\n\
+                 [listener.tun]\nmtu_size = 1280\nincluded_routes = {included}\n\
+                 excluded_routes = [\"2001:db8:1::/48\", \"192.0.2.1/32\"]\n"
+            );
+            let before: toml::Value = toml::from_str(&existing).unwrap();
+            let out = apply_config_edit(&existing, &serde_json::json!({ "endpoint": { "name": "Renamed" } })).unwrap();
+            let after: toml::Value = toml::from_str(&out).unwrap();
+            assert_eq!(after["listener"]["tun"], before["listener"]["tun"]);
+            assert!(normalize_config_socks_to_tun(&existing).is_none());
+        }
     }
 
     #[test]

@@ -31,6 +31,7 @@
 #endif
 
 #ifdef _WIN32
+#include "net/windows_network_guard.h"
 #include <filesystem>
 #endif
 
@@ -114,6 +115,17 @@ static void setup_sighandler() {
 }
 
 int main(int argc, char **argv) {
+#ifdef _WIN32
+    // Legacy-safe uninstaller capability probe: old cores recognize --version,
+    // and this exact composite never reaches config loading or any WFP operation.
+    if (argc == 3
+            && ((std::string_view(argv[1]) == "--version" && std::string_view(argv[2]) == "--network-guard-version")
+                    || (std::string_view(argv[2]) == "--version"
+                            && std::string_view(argv[1]) == "--network-guard-version"))) {
+        std::cout << "1\n";
+        return 0;
+    }
+#endif
     setup_sighandler();
 
     cxxopts::Options args("trusttunnel_client", "TrustTunnel console client");
@@ -130,6 +142,11 @@ int main(int argc, char **argv) {
             ("h,help", "Print usage");
 #ifdef _WIN32
     args.add_options()
+            ("network-guard-version", "Print supported persistent Windows network guard format")
+            ("network-guard-status", "Read persistent Windows network guard state")
+            ("network-guard-arm", "Arm persistent Windows network guard for a TUN config", cxxopts::value<std::string>())
+            ("network-guard-release", "Release persistent Windows network guard after disconnect")
+            ("network-guard-resolve", "Resolve an endpoint using core-owned physical DNS sockets", cxxopts::value<std::string>())
             ("service-install", "Install as Windows service", cxxopts::value<bool>()->default_value("false"))
             ("service-uninstall", "Uninstall Windows service", cxxopts::value<bool>()->default_value("false"));
     args.add_options("internal")
@@ -169,6 +186,50 @@ int main(int argc, char **argv) {
     }
 
 #ifdef _WIN32
+    // Explicit one-shot helpers return before profile parsing and tunnel/service creation.
+    // No diagnostic or startup path may silently release persistent crash protection.
+    if (result.count("network-guard-version")) {
+        std::cout << "1\n";
+        return 0;
+    }
+    if (result.count("network-guard-resolve")) {
+        Logger::set_log_level(LOG_LEVEL_ERROR);
+        Logger::set_callback([](LogLevel, std::string_view) {});
+        auto resolved = WindowsNetworkGuard::resolve(result["network-guard-resolve"].as<std::string>());
+        std::cout << resolved.to_json() << '\n';
+        return resolved.error ? 1 : 0;
+    }
+    if (result.count("network-guard-status") || result.count("network-guard-arm")
+            || result.count("network-guard-release")) {
+        if (result.count("network-guard-status") + result.count("network-guard-arm")
+                        + result.count("network-guard-release")
+                != 1) {
+            std::cout << NetworkGuardResult{false, true, "network-guard-invalid-operation"}.to_json() << '\n';
+            return 1;
+        }
+        NetworkGuardResult state;
+        if (result.count("network-guard-arm")) {
+            // Do not expose a config path, server credentials or parser diagnostics in
+            // this privileged helper's output. Persistent state is untouched on error.
+            Logger::set_log_level(LOG_LEVEL_ERROR);
+            Logger::set_callback([](LogLevel, std::string_view) {});
+            auto parsed = toml::parse_file(result["network-guard-arm"].as<std::string>());
+            auto config = parsed ? TrustTunnelConfig::build_config(parsed.table()) : std::nullopt;
+            if (!config || !config->killswitch_enabled
+                    || !std::holds_alternative<TrustTunnelConfig::TunListener>(config->listener)) {
+                state = {false, true, "network-guard-invalid-config"};
+            } else {
+                auto tun =
+                        std::get<TrustTunnelConfig::TunListener>(config->listener).with_windows_ipv6_protection(true);
+                state = WindowsNetworkGuard::arm({tun.included_routes, tun.excluded_routes});
+            }
+        } else {
+            state = result.count("network-guard-status") ? WindowsNetworkGuard::status()
+                                                         : WindowsNetworkGuard::release();
+        }
+        std::cout << state.to_json() << '\n';
+        return state.success ? 0 : 1;
+    }
     if (result.count("service-install") && result.count("service-uninstall")) {
         errlog(g_logger, "--service-install and --service-uninstall are mutually exclusive");
         return 1;
@@ -204,6 +265,20 @@ int run_client(const cxxopts::ParseResult &cli_args) {
         return 1;
     }
     ag::Logger::set_log_level(config.loglevel);
+
+#ifdef _WIN32
+    if (std::holds_alternative<TrustTunnelConfig::TunListener>(config.listener)) {
+        // This is the normal client path only. Never change persistent state here.
+        // Under a retained guard, endpoint transports must bypass routes using BOTH
+        // a physical source and interface pin, rather than a global endpoint-IP hole.
+        auto guard = WindowsNetworkGuard::status();
+        if (!guard.success || (guard.armed && !config.killswitch_enabled)) {
+            errlog(g_logger, "Unable to validate persistent network protection");
+            return 1;
+        }
+        network_guard_set_strict_socket_protection(guard.armed);
+    }
+#endif
 
     vpn_post_quantum_group_set_enabled(config.post_quantum_group_enabled);
 

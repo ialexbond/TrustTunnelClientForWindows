@@ -35,6 +35,7 @@ mod processes;
 mod routing_policy;
 mod routing_rules;
 mod net_egress;
+mod network_guard;
 mod sidecar;
 pub mod ssh;
 // The logon Scheduled Task behind «Запуск вместе с Windows». Windows-only by its own inner
@@ -557,16 +558,7 @@ pub fn run() {
                         "disconnect" => {
                             tray::tray_vpn_disconnect(app.clone());
                         }
-                        "quit" => {
-                            if let Some(state) = app.try_state::<AppState>() {
-                                // R4: signal shutdown (intent + generation bump) BEFORE
-                                // the kill so a live reconnect supervisor cooperatively
-                                // bails and can't respawn a sidecar after the user quit.
-                                begin_shutdown(&state);
-                                kill_sidecar_from_state(&state);
-                            }
-                            app.exit(0);
-                        }
+                        "quit" => tray::tray_menu_action(app.clone(), "quit".to_owned()),
                         _ => {}
                     }
                 })
@@ -949,6 +941,7 @@ pub fn run() {
             logging::open_logs_folder,
             commands::vpn::vpn_connect,
             commands::vpn::vpn_disconnect,
+            network_guard::network_guard_status,
             commands::vpn::check_vpn_status_full,
             commands::vpn::clear_vpn_error,
             commands::vpn::test_sidecar,

@@ -695,8 +695,7 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
                 spawn_connect_timeout_watchdog(&app, connect_generation);
             }
             Err(e) => {
-                if e == crate::lifecycle::CORE_VERSION_MISMATCH_REASON
-                    && !crate::lifecycle::respawn_may_store(
+                if !crate::lifecycle::respawn_may_store(
                         connect_generation,
                         state.connection_generation.load(Ordering::SeqCst),
                         state.user_disconnect_requested.load(Ordering::SeqCst),
@@ -870,13 +869,19 @@ pub fn tray_menu_action(app: tauri::AppHandle, action: String) {
         // menu can never hand back a window that is visible but still minimized.
         "show" => restore_main_window_to_front(&app),
         "quit" => {
-            if let Some(state) = app.try_state::<AppState>() {
-                // R4: signal shutdown (intent + generation bump) before the kill so a
-                // live reconnect supervisor can't respawn a sidecar after the user quit.
-                crate::commands::begin_shutdown(&state);
-                crate::commands::kill_sidecar_from_state(&state);
-            }
-            app.exit(0);
+            // Explicit quit includes a real, serialized disconnect. Generic
+            // Exit/drop/crash cleanup must never release retained protection.
+            tauri::async_runtime::spawn(async move {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if crate::commands::vpn::vpn_disconnect(app.clone(), state).await.is_err() {
+                        return;
+                    }
+                    if let Some(state) = app.try_state::<AppState>() {
+                        crate::commands::begin_shutdown(&state);
+                    }
+                }
+                app.exit(0);
+            });
         }
         _ => {}
     }
@@ -1019,13 +1024,14 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             Some(state) => Some(Arc::clone(&state.lifecycle_flow).lock_owned().await),
             None => None,
         };
+        let mut stop_failed = false;
         if let Some(child) = child {
             // D-08 lifecycle marker (8): sidecar killed on exit (tray quit path) —
             // fixed phrase, DEV-gated (D-11). Our own child C_A — killing it is idempotent (a
             // newer session's stale-sweep may have already reaped it), so it is safe to run
             // regardless of the generation guard below.
             sidecar::emit_killed_on_exit_marker(&app_clone);
-            sidecar::kill_sidecar(child).await.ok();
+            stop_failed = sidecar::kill_sidecar(child).await.is_err();
         }
         // Re-look up state inside the 'static task and route through the mutator.
         if let Some(state) = app_clone.try_state::<AppState>() {
@@ -1069,6 +1075,21 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             // AUDIT-2026-06-11 #5 / FIX-A (RC-2): restore the pre-VPN system DNS, exactly like
             // `vpn_disconnect`. The hard-killed sidecar never restores it itself.
             crate::dns_guard::restore_system_dns();
+            if stop_failed {
+                set_vpn_status(&app_clone, &state, VpnStatus::Error, Some("disconnect-failed".to_owned()));
+                if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
+                return;
+            }
+            let guard_released = match crate::network_guard::release_after_disconnect(
+                &app_clone, &state, teardown_generation,
+            ).await {
+                Ok(released) => released,
+                Err(reason) => {
+                    set_vpn_status(&app_clone, &state, VpnStatus::Error, Some(reason.to_string()));
+                    if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
+                    return;
+                }
+            };
             // AUDIT-2026-06-11 #7: on the empty-slot path only write Disconnected
             // when the session is genuinely active (the supervisor/recovery states a
             // tray «Отмена» is cancelling). A settled Disconnected/Error stays put —
@@ -1076,7 +1097,7 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             // R2-1 (Fable-5 re-review): `Disconnecting` is ACTIVE here too — when a rapid twin tray
             // disconnect already wrote «Отключение» and THIS surviving actor's slot is empty, the
             // settling Disconnected must still be written, else the wire strands on «Отключение».
-            let write_disconnected = had_child || {
+            let write_disconnected = had_child || guard_released || {
                 let status_now = *state
                     .vpn_status
                     .lock()

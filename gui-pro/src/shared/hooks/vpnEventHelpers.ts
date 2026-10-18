@@ -48,6 +48,9 @@ export const REASON_CODE_I18N: Record<string, string> = {
   // file's own bytes. The token is the whole payload (D-09/D-29).
   "routing-rules-unreadable": "errors.routing_rules_unreadable",
   "routing-rules-apply-failed": "errors.routing_rules_apply_failed",
+  "network-guard-failed": "errors.network_guard_failed",
+  "network-guard-active": "errors.network_guard_active",
+  "network-guard-bootstrap-failed": "errors.network_guard_bootstrap_failed",
   // 30.1 regression defect 1: the CA-2 path-confinement guard refused the connect because the
   // `.toml` is not inside the folder the app keeps its configs in. The backend never contacted
   // the server, so the generic «Не удалось выполнить подключение к серверу» this used to fall

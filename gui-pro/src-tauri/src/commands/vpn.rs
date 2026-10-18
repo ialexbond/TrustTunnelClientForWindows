@@ -2086,6 +2086,18 @@ pub async fn vpn_connect(
     let child = sidecar::spawn_trusttunnel(&app, spawn_config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
         .await
         .map_err(|e| {
+            if !crate::lifecycle::respawn_may_store(
+                connect_generation,
+                state.connection_generation.load(Ordering::SeqCst),
+                state.user_disconnect_requested.load(Ordering::SeqCst),
+            ) {
+                return "connect-superseded".to_string();
+            }
+            if let Some(reason) = crate::network_guard::spawn_failure_reason(&e.to_string()) {
+                record_failure_cause(&state, reason);
+                set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+                return reason.to_string();
+            }
             if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON {
                 let reason = crate::lifecycle::CORE_VERSION_MISMATCH_REASON;
                 if crate::lifecycle::respawn_may_store(
@@ -2436,6 +2448,16 @@ pub async fn respawn_sidecar(
     {
         Ok(c) => c,
         Err(e) => {
+            if let Some(reason) = crate::network_guard::spawn_failure_reason(&e.to_string()) {
+                if crate::lifecycle::respawn_may_store(
+                    captured_generation,
+                    state.connection_generation.load(Ordering::SeqCst),
+                    state.user_disconnect_requested.load(Ordering::SeqCst),
+                ) {
+                    record_failure_cause(&state, reason);
+                    set_vpn_status(app, &state, VpnStatus::Error, Some(reason.to_string()));
+                }
+            }
             if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON
                 && crate::lifecycle::respawn_may_store(
                     captured_generation,
@@ -2682,7 +2704,7 @@ pub async fn vpn_disconnect(
     // the session being torn down sees a generation mismatch and neutralizes itself
     // (Codex HIGH stale-actor guard) — a user disconnect must never be fought, and
     // the watchdog must never kill the next session a fast reconnect may start.
-    state.connection_generation.fetch_add(1, Ordering::SeqCst);
+    let disconnect_generation = state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
 
     // 3.3 R-SERIAL (F13/F14): the intent preamble above (disconnecting + durable intent + generation
     // bump) runs FIRST as a fast SYNC cancel signal — an in-flight vpn_connect sees it and bails.
@@ -2791,10 +2813,21 @@ pub async fn vpn_disconnect(
         return Err(err);
     }
 
+    let guard_released = match crate::network_guard::release_after_disconnect(
+        &app, &state, disconnect_generation,
+    ).await {
+        Ok(released) => released,
+        Err(reason) => {
+            set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+            if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
+            return Err(reason.to_string());
+        }
+    };
+
     // F-4 (Fable-5): gate the final settled Disconnected the same way — a no-op disconnect writes no
     // wire status at all (a kill failure is only reachable when had_child, so the Error path above is
     // always a real teardown and stays unconditional).
-    if is_real_teardown {
+    if is_real_teardown || guard_released {
         set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
     }
 

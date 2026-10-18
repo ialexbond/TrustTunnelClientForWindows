@@ -388,6 +388,9 @@ fn handle_fatal_markers(
 pub struct SidecarChild {
     pub child: CommandChild,
     pub disconnecting: Arc<Mutex<bool>>,
+    // Retain the password-bearing numeric bootstrap copy until the core exits.
+    #[allow(dead_code)]
+    pub guard_runtime_config: Option<crate::network_guard::RuntimeConfig>,
     /// RAII handle to the KILL_ON_JOB_CLOSE Job Object this sidecar is assigned
     /// to (D-06 / STATUS-04). Keeping it alive == the OS kill stays armed for the
     /// connection's lifetime; dropping the `SidecarChild` (on kill or session
@@ -501,10 +504,26 @@ pub async fn spawn_trusttunnel(
         }
     }
 
-    eprintln!("[sidecar] Spawning trusttunnel_client with args: -c {config_path} -l {log_level}");
+    let mut protection = crate::network_guard::prepare_spawn(
+        app, &binary, std::path::Path::new(config_path), session_generation,
+    ).await?;
+    let guarded_path = protection.config_path(std::path::Path::new(config_path))
+        .to_string_lossy().into_owned();
+    let config_path = guarded_path.as_str();
+    eprintln!("[sidecar] Spawning trusttunnel_client with prepared configuration");
     // G-03.1-10: never start a core while an earlier one is still running its own cleanup — it
     // would reuse the adapter that cleanup is about to remove (see CORE_STOPS_IN_FLIGHT).
     wait_for_core_stops_in_flight().await;
+    let current = app.try_state::<AppState>().is_some_and(|state| {
+        crate::lifecycle::respawn_may_store(
+            session_generation,
+            state.connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+            state.user_disconnect_requested.load(std::sync::atomic::Ordering::SeqCst),
+        )
+    });
+    if !current {
+        return Err("connect-superseded".into());
+    }
     // G-03.1-10: the core must inherit "Ctrl+C enabled", or `kill_sidecar`'s graceful stop never
     // reaches its SIGINT handler (console_ctrl.rs).
     crate::console_ctrl::prepare_spawn();
@@ -1194,7 +1213,10 @@ pub async fn spawn_trusttunnel(
     // `job` is kept alive here for the connection's lifetime — dropping the
     // SidecarChild (on kill / session end) closes the handle once and arms the
     // OS kill. No manual CloseHandle anywhere (OwnedJobHandle::drop owns it).
-    Ok(SidecarChild { child, disconnecting: disc_for_child, job })
+    Ok(SidecarChild {
+        child, disconnecting: disc_for_child, job,
+        guard_runtime_config: protection.take_runtime(),
+    })
 }
 
 /// How long the sidecar is given to run its OWN cleanup-on-exit (WFP / route /
@@ -1464,10 +1486,10 @@ pub fn stop_sidecar_on_exit(sidecar: SidecarChild) {
 
 /// Tear down the session's sidecar (T-22 B1 + B2).
 ///
-/// CRITICAL invariant: the sidecar PROCESS owns the WinTUN adapter, the routing
-/// hijack AND the fail-closed killswitch (WFP filters / routes) in C++. Rust has NO
-/// independent path to remove those filters — the ONLY way they are torn down is the
-/// sidecar running its OWN cleanup-on-exit. A hard `TerminateProcess` (what the old
+/// The sidecar owns the WinTUN adapter, routes and dynamic tunnel allowance.
+/// The independent persistent network guard is deliberately NOT removed here;
+/// only a serialized explicit user disconnect can release that separate barrier.
+/// Graceful core cleanup remains necessary for its adapter/DNS state. A hard `TerminateProcess` (what the old
 /// code did FIRST, and what the KILL_ON_JOB_CLOSE Job Object does on app death) gives
 /// the sidecar NO chance to run that cleanup, so a hard-only kill can LEAK the
 /// all-traffic killswitch block (the T-22 "Docker hang" / "boot stall" mechanism).
