@@ -869,13 +869,14 @@ pub fn tray_menu_action(app: tauri::AppHandle, action: String) {
         // menu can never hand back a window that is visible but still minimized.
         "show" => restore_main_window_to_front(&app),
         "quit" => {
-            // Explicit quit includes a real, serialized disconnect. Generic
-            // Exit/drop/crash cleanup must never release retained protection.
+            // Try normal serialized cleanup, then always honor Quit. Session-owned
+            // jobs remove both core and guard on process exit, including IPC failure.
             tauri::async_runtime::spawn(async move {
                 if let Some(state) = app.try_state::<AppState>() {
-                    if crate::commands::vpn::vpn_disconnect(app.clone(), state).await.is_err() {
-                        return;
-                    }
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        crate::commands::vpn::vpn_disconnect(app.clone(), state),
+                    ).await;
                     if let Some(state) = app.try_state::<AppState>() {
                         crate::commands::begin_shutdown(&state);
                     }

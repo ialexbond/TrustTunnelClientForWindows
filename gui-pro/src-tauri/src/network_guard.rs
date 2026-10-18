@@ -1,5 +1,5 @@
-//! Product-owned protection survives both GUI and core process termination.
-//! Only an explicit disconnect may release it; automatic cleanup never does.
+//! GUI-owned protection survives a core crash while the GUI is running.
+//! A strict Windows kill-on-close job ends the resident guardian when the GUI exits or crashes.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -7,13 +7,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
 use tauri::{Emitter, Manager};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::commands::AppState;
@@ -54,6 +54,7 @@ enum GuardCommand {
     Status,
     Arm(PathBuf),
     Release,
+    LegacyRelease,
     Resolve(String),
 }
 
@@ -63,6 +64,7 @@ trait GuardExecutor: Send + Sync {
 
 struct NativeExecutor {
     binary: PathBuf,
+    app: Option<tauri::AppHandle>,
 }
 
 struct HelperOutput {
@@ -135,6 +137,12 @@ async fn bounded_output(
 impl GuardExecutor for NativeExecutor {
     fn query(&self, request: GuardCommand) -> GuardFuture<'_, String> {
         Box::pin(async move {
+            if matches!(
+                request,
+                GuardCommand::Status | GuardCommand::Arm(_) | GuardCommand::Release
+            ) {
+                return resident_query(&self.binary, self.app.as_ref(), request).await;
+            }
             let help = request == GuardCommand::Help;
             let mut command = tokio::process::Command::new(&self.binary);
             match request {
@@ -144,18 +152,14 @@ impl GuardExecutor for NativeExecutor {
                 GuardCommand::Version => {
                     command.arg("--network-guard-version");
                 }
-                GuardCommand::Status => {
-                    command.arg("--network-guard-status");
-                }
-                GuardCommand::Arm(path) => {
-                    command.arg("--network-guard-arm").arg(path);
-                }
-                GuardCommand::Release => {
+                // This command only removes the old persistent namespace during authorized migration.
+                GuardCommand::LegacyRelease => {
                     command.arg("--network-guard-release");
                 }
                 GuardCommand::Resolve(host) => {
                     command.arg("--network-guard-resolve").arg(host);
                 }
+                _ => return Err(FAILED),
             }
             command
                 .stdin(Stdio::null())
@@ -168,6 +172,263 @@ impl GuardExecutor for NativeExecutor {
             bounded_output(NativeProcess(child), help, HELPER_TIMEOUT).await
         })
     }
+}
+
+struct ResidentHelper {
+    id: u64,
+    armed: bool,
+    child: tokio::process::Child,
+    input: tokio::process::ChildStdin,
+    output: BufReader<tokio::process::ChildStdout>,
+    _job: crate::job_object::OwnedJobHandle,
+}
+
+#[derive(Default)]
+struct ResidentState {
+    helper: Option<ResidentHelper>,
+    failed: Option<u64>,
+}
+
+fn resident_state() -> &'static Mutex<ResidentState> {
+    static STATE: OnceLock<Mutex<ResidentState>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(ResidentState::default()))
+}
+
+fn unarmed_reply() -> String {
+    r#"{"version":2,"armed":false}"#.to_owned()
+}
+
+async fn read_resident_line(
+    reader: &mut (impl tokio::io::AsyncRead + Unpin),
+) -> Result<String, &'static str> {
+    let mut bytes = Vec::new();
+    for _ in 0..=OUTPUT_LIMIT {
+        match reader.read_u8().await.map_err(|_| FAILED)? {
+            b'\n' => return String::from_utf8(bytes).map_err(|_| FAILED),
+            byte => bytes.push(byte),
+        }
+    }
+    Err(FAILED)
+}
+
+fn resident_command(request: &GuardCommand) -> Result<String, &'static str> {
+    match request {
+        GuardCommand::Status => Ok("S\n".to_owned()),
+        GuardCommand::Release => Ok("R\n".to_owned()),
+        GuardCommand::Arm(path) => {
+            let path = path.to_str().ok_or(FAILED)?;
+            if path.is_empty() || path.len() > 32768 || path.chars().any(char::is_control) {
+                return Err(FAILED);
+            }
+            Ok(format!("A {path}\n"))
+        }
+        _ => Err(FAILED),
+    }
+}
+
+impl ResidentHelper {
+    async fn start(binary: &Path) -> Result<Self, &'static str> {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let mut command = tokio::process::Command::new(binary);
+        command
+            .arg("--network-guard-session")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000);
+        let mut child = command.spawn().map_err(|_| FAILED)?;
+        let job = child.id().ok_or(FAILED).and_then(|pid| {
+            crate::job_object::assign_to_kill_on_close_job(pid).map_err(|_| FAILED)
+        });
+        let job = match job {
+            Ok(job) => job,
+            Err(_) => {
+                let mut process = NativeProcess(child);
+                while process.terminate_and_reap().await.is_err() {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                return Err(FAILED);
+            }
+        };
+        // The helper is unarmed until A. Job assignment is mandatory before a command can be sent.
+        let streams = (child.stdin.take(), child.stdout.take());
+        let (Some(input), Some(output)) = streams else {
+            drop(job);
+            let mut process = NativeProcess(child);
+            while process.terminate_and_reap().await.is_err() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            return Err(FAILED);
+        };
+        let mut helper = Self {
+            id: NEXT_ID.fetch_add(1, Ordering::SeqCst),
+            armed: false,
+            child,
+            input,
+            output: BufReader::new(output),
+            _job: job,
+        };
+        let ready =
+            tokio::time::timeout(HELPER_TIMEOUT, read_resident_line(&mut helper.output)).await;
+        if !matches!(ready, Ok(Ok(ref reply)) if parse_state(reply) == Ok(false)) {
+            helper.terminate().await;
+            return Err(FAILED);
+        }
+        Ok(helper)
+    }
+
+    async fn exchange(&mut self, command: &str) -> Result<String, &'static str> {
+        let reply = exchange_resident(&mut self.input, &mut self.output, command).await?;
+        self.armed = parse_report(&reply)?.armed;
+        Ok(reply)
+    }
+
+    async fn terminate(self) {
+        let Self {
+            child,
+            input,
+            output,
+            _job,
+            ..
+        } = self;
+        drop(input);
+        drop(output);
+        drop(_job);
+        let mut process = NativeProcess(child);
+        while process.terminate_and_reap().await.is_err() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+}
+
+async fn exchange_resident(
+    input: &mut (impl tokio::io::AsyncWrite + Unpin),
+    output: &mut (impl tokio::io::AsyncRead + Unpin),
+    command: &str,
+) -> Result<String, &'static str> {
+    tokio::time::timeout(HELPER_TIMEOUT, async {
+        input
+            .write_all(command.as_bytes())
+            .await
+            .map_err(|_| FAILED)?;
+        input.flush().await.map_err(|_| FAILED)?;
+        let reply = read_resident_line(output).await?;
+        parse_report(&reply)?;
+        Ok(reply)
+    })
+    .await
+    .map_err(|_| FAILED)?
+}
+
+async fn resident_query(
+    binary: &Path,
+    app: Option<&tauri::AppHandle>,
+    request: GuardCommand,
+) -> Result<String, &'static str> {
+    let command = resident_command(&request)?;
+    let mut state = resident_state().lock().await;
+    if state.helper.is_none() {
+        if request == GuardCommand::Release {
+            state.failed = None;
+            return Ok(unarmed_reply());
+        }
+        if state.failed.is_some() {
+            return Err(FAILED);
+        }
+        if request == GuardCommand::Status {
+            return Ok(unarmed_reply());
+        }
+        let helper = ResidentHelper::start(binary).await?;
+        let id = helper.id;
+        state.helper = Some(helper);
+        if let Some(app) = app {
+            start_heartbeat(app.clone(), id);
+        }
+    }
+    let helper = state.helper.as_mut().ok_or(FAILED)?;
+    let result = helper.exchange(&command).await;
+    if result.is_ok() {
+        return result;
+    }
+    let helper = state.helper.take().ok_or(FAILED)?;
+    let id = helper.id;
+    let armed = helper.armed;
+    helper.terminate().await;
+    let (reply, notify) = finish_resident_failure(&mut state, id, armed, Some(&request));
+    drop(state);
+    if let Some(app) = app.filter(|_| notify) {
+        emit_helper_failure(app, id).await;
+    }
+    reply
+}
+
+fn finish_resident_failure(
+    state: &mut ResidentState,
+    id: u64,
+    armed: bool,
+    request: Option<&GuardCommand>,
+) -> (Result<String, &'static str>, bool) {
+    // Losing an idle, already released helper must not cancel an unrelated KS-off connection.
+    // A missing A reply is uncertain even when the previous confirmed state was unarmed.
+    if armed || matches!(request, Some(GuardCommand::Arm(_))) {
+        state.failed = Some(id);
+        (Err(FAILED), true)
+    } else {
+        state.failed = None;
+        (Ok(unarmed_reply()), false)
+    }
+}
+
+async fn emit_helper_failure(app: &tauri::AppHandle, session_id: u64) {
+    let resident = resident_state().lock().await;
+    if resident.failed != Some(session_id) || resident.helper.is_some() {
+        return;
+    }
+    emit(app, false);
+    if let Some(state) = app.try_state::<AppState>() {
+        let generation = state.connection_generation.load(Ordering::SeqCst);
+        let _ = app.emit(
+            "network-guard-helper-failed",
+            serde_json::json!({ "generation": generation, "session_id": session_id }),
+        );
+    }
+}
+
+fn start_heartbeat(app: tauri::AppHandle, session_id: u64) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let mut state = resident_state().lock().await;
+            let Some(helper) = state
+                .helper
+                .as_mut()
+                .filter(|helper| helper.id == session_id)
+            else {
+                return;
+            };
+            if matches!(helper.child.try_wait(), Ok(None)) {
+                continue;
+            }
+            let Some(helper) = state.helper.take() else {
+                return;
+            };
+            let armed = helper.armed;
+            helper.terminate().await;
+            let (_, notify) = finish_resident_failure(&mut state, session_id, armed, None);
+            drop(state);
+            if notify {
+                emit_helper_failure(&app, session_id).await;
+            }
+            return;
+        }
+    });
+}
+
+pub async fn failure_is_current(session_id: u64) -> bool {
+    let state = resident_state().lock().await;
+    state.failed == Some(session_id) && state.helper.is_none()
 }
 
 struct GuardSession {
@@ -204,6 +465,8 @@ impl GuardSession {
 struct GuardState {
     version: u8,
     armed: bool,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,14 +476,25 @@ struct ResolvedHost {
     addresses: Vec<IpAddr>,
 }
 
-fn parse_state(text: &str) -> Result<bool, &'static str> {
+fn parse_report(text: &str) -> Result<GuardState, &'static str> {
     let reply: GuardState = serde_json::from_str(text).map_err(|_| FAILED)?;
-    (reply.version == 1).then_some(reply.armed).ok_or(FAILED)
+    if reply.version != 2 {
+        return Err(FAILED);
+    }
+    Ok(reply)
+}
+
+fn parse_state(text: &str) -> Result<bool, &'static str> {
+    let reply = parse_report(text)?;
+    if reply.error.is_some() {
+        return Err(FAILED);
+    }
+    Ok(reply.armed)
 }
 
 fn parse_addresses(text: &str) -> Result<Vec<IpAddr>, &'static str> {
     let reply: ResolvedHost = serde_json::from_str(text).map_err(|_| BOOTSTRAP_FAILED)?;
-    if reply.version != 1 || reply.addresses.is_empty() || reply.addresses.len() > MAX_ADDRESSES {
+    if reply.version != 2 || reply.addresses.is_empty() || reply.addresses.len() > MAX_ADDRESSES {
         return Err(BOOTSTRAP_FAILED);
     }
     Ok(reply.addresses)
@@ -259,7 +533,8 @@ async fn verify(session: &GuardSession, current: &impl Fn() -> bool) -> Result<(
     for flag in [
         "--network-guard-version",
         "--network-guard-status",
-        "--network-guard-arm",
+        "--network-guard-session",
+        "--gui-session",
         "--network-guard-release",
         "--network-guard-resolve",
     ] {
@@ -269,7 +544,7 @@ async fn verify(session: &GuardSession, current: &impl Fn() -> bool) -> Result<(
     }
     let version = session.query(GuardCommand::Version).await?;
     require_current(current)?;
-    if version.trim() != "1" {
+    if version.trim() != "2" {
         return Err(FAILED);
     }
     Ok(())
@@ -283,13 +558,14 @@ fn emit(app: &tauri::AppHandle, armed: bool) {
 }
 
 #[tauri::command]
-pub async fn network_guard_status() -> Result<bool, String> {
+pub async fn network_guard_status(app: tauri::AppHandle) -> Result<bool, String> {
     if !cfg!(windows) {
         return Ok(false);
     }
     let session = GuardSession::begin(
         Arc::new(NativeExecutor {
             binary: core_binary().map_err(str::to_owned)?,
+            app: Some(app.clone()),
         }),
         operation_gate(),
     )
@@ -302,6 +578,34 @@ pub async fn network_guard_status() -> Result<bool, String> {
             .map_err(str::to_owned)?,
     )
     .map_err(str::to_owned)
+}
+
+/// Remove old persistent protection before auto-connect. The current resident namespace is never released here.
+pub async fn migrate_legacy_on_startup(app: &tauri::AppHandle) -> Result<(), &'static str> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    let session = GuardSession::begin(
+        Arc::new(NativeExecutor {
+            binary: core_binary()?,
+            app: Some(app.clone()),
+        }),
+        operation_gate(),
+    )
+    .await;
+    migrate_with(&session).await
+}
+
+async fn migrate_with(session: &GuardSession) -> Result<(), &'static str> {
+    verify(session, &|| true).await?;
+    let reply = session.query(GuardCommand::LegacyRelease).await?;
+    parse_report(&reply).and_then(|state| {
+        if state.error.is_none() {
+            Ok(())
+        } else {
+            Err(FAILED)
+        }
+    })
 }
 
 pub struct RuntimeConfig {
@@ -431,13 +735,12 @@ async fn prepare_with(
     if !protection_decision(requested, retained)? {
         return Ok(None);
     }
-    let armed = session
+    let reply = session
         .query(GuardCommand::Arm(config_path.to_owned()))
-        .await
-        .and_then(|text| parse_state(&text));
-    // Any uncertain transaction keeps the recovery surface conservative. No failure path releases protection.
-    emit(true);
-    if armed != Ok(true) {
+        .await?;
+    let armed = parse_report(&reply)?;
+    emit(armed.armed);
+    if armed.error.is_some() || !armed.armed {
         return Err(FAILED);
     }
     require_current(current)?;
@@ -485,6 +788,7 @@ pub async fn prepare_spawn(
     let session = GuardSession::begin(
         Arc::new(NativeExecutor {
             binary: binary.to_owned(),
+            app: Some(app.clone()),
         }),
         operation_gate(),
     )
@@ -557,15 +861,13 @@ async fn release_with(
     if !current() {
         return Ok(false);
     }
-    let result = session
-        .query(GuardCommand::Release)
-        .await
-        .and_then(|text| parse_state(&text));
-    if result != Ok(false) {
-        emit(true);
+    let result = session.query(GuardCommand::Release).await?;
+    let reply = parse_report(&result)?;
+    emit(reply.armed);
+    if reply.error.is_some() || reply.armed {
         return Err(FAILED);
     }
-    emit(false);
+
     Ok(retained)
 }
 
@@ -577,6 +879,7 @@ pub async fn release_after_disconnect(
     let session = GuardSession::begin(
         Arc::new(NativeExecutor {
             binary: core_binary()?,
+            app: Some(app.clone()),
         }),
         operation_gate(),
     )
@@ -600,10 +903,10 @@ mod tests {
     use std::sync::Mutex as StdMutex;
     use tokio::sync::Notify;
 
-    const HELP: &str = "--network-guard-version --network-guard-status --network-guard-arm=CONFIG --network-guard-release --network-guard-resolve=HOST";
-    const ARMED: &str = r#"{"version":1,"armed":true}"#;
-    const UNARMED: &str = r#"{"version":1,"armed":false}"#;
-    const RESOLVED: &str = r#"{"version":1,"addresses":["192.0.2.1","2001:db8::1"]}"#;
+    const HELP: &str = "--network-guard-version --network-guard-status --network-guard-session --gui-session --network-guard-release --network-guard-resolve=HOST";
+    const ARMED: &str = r#"{"version":2,"armed":true}"#;
+    const UNARMED: &str = r#"{"version":2,"armed":false}"#;
+    const RESOLVED: &str = r#"{"version":2,"addresses":["192.0.2.1","2001:db8::1"]}"#;
     const CONFIG: &str = "killswitch_enabled = true\n[endpoint]\nhostname = \"identity.example.com\"\ncustom_sni = \"sni.example.com\"\nusername = \"example\"\npassword = \"fixture\"\naddresses = [\"vpn.example.com:443\", \"192.0.2.2:8443\"]\n[listener.tun]\nmtu_size = 1280\nincluded_routes = [\"10.0.0.0/8\"]\nexcluded_routes = [\"10.1.0.0/16\"]\n";
 
     #[derive(Default)]
@@ -673,7 +976,7 @@ mod tests {
     fn verified_status(armed: bool) -> Vec<Step> {
         vec![
             step(GuardCommand::Help, HELP),
-            step(GuardCommand::Version, "1"),
+            step(GuardCommand::Version, "2"),
             step(GuardCommand::Status, if armed { ARMED } else { UNARMED }),
         ]
     }
@@ -714,21 +1017,21 @@ mod tests {
         for text in [
             "{}",
             "null",
-            r#"{"version":2,"armed":false}"#,
-            r#"{"version":1,"armed":false,"error":"partial"}"#,
+            r#"{"version":3,"armed":false}"#,
+            r#"{"version":2,"armed":false,"error":"partial"}"#,
         ] {
             assert!(parse_state(text).is_err());
         }
         assert_eq!(parse_state(ARMED), Ok(true));
         assert_eq!(parse_state(UNARMED), Ok(false));
         for text in [
-            r#"{"version":1,"addresses":[]}"#,
-            r#"{"version":1,"addresses":["example.com"]}"#,
+            r#"{"version":2,"addresses":[]}"#,
+            r#"{"version":2,"addresses":["example.com"]}"#,
         ] {
             assert!(parse_addresses(text).is_err());
         }
         let too_many =
-            serde_json::json!({ "version": 1, "addresses": vec!["192.0.2.1"; MAX_ADDRESSES + 1] });
+            serde_json::json!({ "version": 2, "addresses": vec!["192.0.2.1"; MAX_ADDRESSES + 1] });
         assert!(parse_addresses(&too_many.to_string()).is_err());
     }
 
@@ -764,7 +1067,7 @@ mod tests {
     async fn wrong_capability_version_never_reaches_status_or_arm() {
         let executor = FakeExecutor::new(vec![
             step(GuardCommand::Help, HELP),
-            step(GuardCommand::Version, "2"),
+            step(GuardCommand::Version, "3"),
         ]);
         let session = GuardSession::begin(executor.clone(), Arc::new(Mutex::new(()))).await;
         assert_eq!(verify(&session, &|| true).await, Err(FAILED));
@@ -804,7 +1107,7 @@ mod tests {
             let mut steps = verified_status(false);
             let mut arm = arm_step();
             if failure == "partial-arm" {
-                arm.response = Err(FAILED);
+                arm.response = Ok(r#"{"version":2,"armed":true,"error":"partial"}"#);
             }
             if failure == "arm-false" {
                 arm.response = Ok(UNARMED);
@@ -813,7 +1116,7 @@ mod tests {
             if failure.starts_with("dns-") {
                 let mut dns = step(
                     GuardCommand::Resolve("vpn.example.com".into()),
-                    r#"{"version":1,"addresses":[]}"#,
+                    r#"{"version":2,"addresses":[]}"#,
                 );
                 if failure == "dns-error" {
                     dns.response = Err(FAILED);
@@ -833,7 +1136,7 @@ mod tests {
             )
             .await;
             assert!(result.is_err(), "{failure}");
-            assert_eq!(*emitted.lock().unwrap(), [true]);
+            assert_eq!(*emitted.lock().unwrap(), [failure != "arm-false"]);
             assert!(executor.armed.load(Ordering::SeqCst));
             assert!(!executor.calls().contains(&GuardCommand::Release));
         }
@@ -1125,7 +1428,12 @@ mod tests {
                 .await,
                 Err(FAILED)
             );
-            assert_eq!(*emitted.lock().unwrap(), [true]);
+            let emitted = emitted.lock().unwrap();
+            if response == Ok(ARMED) {
+                assert_eq!(*emitted, [true]);
+            } else {
+                assert!(emitted.is_empty());
+            }
         }
     }
 
@@ -1170,5 +1478,224 @@ mod tests {
         reaping.resume.notify_one();
         assert_eq!(task.await.unwrap(), Err(FAILED));
         assert!(completed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn resident_commands_keep_utf8_and_reject_line_injection() {
+        assert_eq!(resident_command(&GuardCommand::Status), Ok("S\n".into()));
+        assert_eq!(resident_command(&GuardCommand::Release), Ok("R\n".into()));
+        assert_eq!(
+            resident_command(&GuardCommand::Arm(PathBuf::from(
+                "C:/fixture with spaces/имя.toml"
+            ))),
+            Ok("A C:/fixture with spaces/имя.toml\n".into())
+        );
+        for path in ["", "fixture\nR", "fixture\rA second", "fixture\0.toml"] {
+            assert!(resident_command(&GuardCommand::Arm(PathBuf::from(path))).is_err());
+        }
+        assert!(resident_command(&GuardCommand::LegacyRelease).is_err());
+    }
+
+    #[tokio::test]
+    async fn resident_frames_require_a_newline_and_enforce_the_output_bound() {
+        let mut valid = b"{\"version\":2,\"armed\":false}\n".as_slice();
+        assert_eq!(read_resident_line(&mut valid).await.unwrap(), UNARMED);
+        let mut incomplete = b"{\"version\":2,\"armed\":false}".as_slice();
+        assert!(read_resident_line(&mut incomplete).await.is_err());
+        let oversized = vec![b'x'; OUTPUT_LIMIT as usize + 1];
+        assert!(read_resident_line(&mut oversized.as_slice()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn resident_transport_reuses_one_channel_and_never_releases_between_rearms() {
+        let (client, server) = tokio::io::duplex(1024);
+        let (mut input, mut output) = tokio::io::split(server);
+        let peer = tokio::spawn(async move {
+            let mut commands = Vec::new();
+            for reply in [ARMED, ARMED, ARMED, UNARMED, ARMED] {
+                commands.push(read_resident_line(&mut input).await.unwrap());
+                output
+                    .write_all(format!("{reply}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            assert!(
+                read_resident_line(&mut input).await.is_err(),
+                "GUI EOF ends the session"
+            );
+            commands
+        });
+        let (mut output, mut input) = tokio::io::split(client);
+        for command in [
+            "A first.toml\n",
+            "A second.toml\n",
+            "S\n",
+            "R\n",
+            "A third.toml\n",
+        ] {
+            assert!(exchange_resident(&mut input, &mut output, command)
+                .await
+                .is_ok());
+        }
+        drop(input);
+        drop(output);
+        assert_eq!(
+            peer.await.unwrap(),
+            ["A first.toml", "A second.toml", "S", "R", "A third.toml"]
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_migration_only_uses_verified_legacy_cleanup_and_never_arms() {
+        let executor = FakeExecutor::new(vec![
+            step(GuardCommand::Help, HELP),
+            step(GuardCommand::Version, "2"),
+            step(GuardCommand::LegacyRelease, UNARMED),
+        ]);
+        let session = GuardSession::begin(executor.clone(), Arc::new(Mutex::new(()))).await;
+        assert_eq!(migrate_with(&session).await, Ok(()));
+        assert_eq!(
+            executor.calls(),
+            [
+                GuardCommand::Help,
+                GuardCommand::Version,
+                GuardCommand::LegacyRelease
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn persistent_only_core_is_rejected_before_any_mutating_command() {
+        let executor = FakeExecutor::new(vec![step(GuardCommand::Help, "--network-guard-version --network-guard-status --network-guard-arm --network-guard-release --network-guard-resolve")]);
+        let session = GuardSession::begin(executor.clone(), Arc::new(Mutex::new(()))).await;
+        assert_eq!(verify(&session, &|| true).await, Err(FAILED));
+        assert_eq!(executor.calls(), [GuardCommand::Help]);
+    }
+
+    #[test]
+    fn an_already_unarmed_helper_death_never_requests_connection_teardown() {
+        for request in [
+            None,
+            Some(GuardCommand::Status),
+            Some(GuardCommand::Release),
+        ] {
+            let mut state = ResidentState::default();
+            let (reply, notify_failure) =
+                finish_resident_failure(&mut state, 42, false, request.as_ref());
+            assert_eq!(reply.and_then(|text| parse_state(&text)), Ok(false));
+            assert!(
+                !notify_failure,
+                "an idle guardian cannot fail an unrelated KS-off connection"
+            );
+            assert!(
+                state.failed.is_none(),
+                "the next protected connection may start a fresh guardian"
+            );
+        }
+    }
+
+    #[test]
+    fn armed_death_and_an_unanswered_arm_both_require_generation_safe_failure_handling() {
+        for (armed, request) in [
+            (true, None),
+            (
+                false,
+                Some(GuardCommand::Arm(PathBuf::from("fixture.toml"))),
+            ),
+        ] {
+            let mut state = ResidentState::default();
+            let (reply, notify_failure) =
+                finish_resident_failure(&mut state, 43, armed, request.as_ref());
+            assert_eq!(reply, Err(FAILED));
+            assert!(notify_failure);
+            assert_eq!(state.failed, Some(43));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn kernel_job_target_fixture() {
+        if std::env::var_os("TT_GUARD_JOB_TARGET_FIXTURE").is_some() {
+            loop {
+                std::thread::park_timeout(Duration::from_secs(60));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn kernel_job_owner_fixture() {
+        if std::env::var_os("TT_GUARD_JOB_OWNER_FIXTURE").is_none() {
+            return;
+        }
+        use std::io::Write;
+        use std::os::windows::process::CommandExt;
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "network_guard::tests::kernel_job_target_fixture",
+                "--nocapture",
+            ])
+            .env("TT_GUARD_JOB_TARGET_FIXTURE", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .unwrap();
+        let job = crate::job_object::assign_to_kill_on_close_job(child.id());
+        let _job = match job {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("{error}");
+            }
+        };
+        println!("GUARD_FIXTURE_CHILD={}", child.id());
+        std::io::stdout().flush().unwrap();
+        loop {
+            std::thread::park_timeout(Duration::from_secs(60));
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn gui_crash_closes_the_kernel_job_even_without_rust_destructors() {
+        let mut owner = tokio::process::Command::new(std::env::current_exe().unwrap());
+        owner
+            .args([
+                "--exact",
+                "network_guard::tests::kernel_job_owner_fixture",
+                "--nocapture",
+            ])
+            .env("TT_GUARD_JOB_OWNER_FIXTURE", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .kill_on_drop(true);
+        let mut owner = owner.spawn().unwrap();
+        let mut output = BufReader::new(owner.stdout.take().unwrap());
+        let child = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let line = read_resident_line(&mut output).await.unwrap();
+                if let Some((_, pid)) = line.split_once("GUARD_FIXTURE_CHILD=") {
+                    break pid.trim().parse::<u32>().unwrap();
+                }
+            }
+        })
+        .await
+        .expect("fixture must publish its owned child PID");
+        assert!(crate::sidecar::process_is_alive(child));
+        // TerminateProcess skips Rust Drop in the fixture owner. Only Windows closes its job handle.
+        owner.kill().await.unwrap();
+        for _ in 0..100 {
+            if !crate::sidecar::process_is_alive(child) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the owned helper survived its GUI owner");
     }
 }

@@ -10,7 +10,7 @@ interface NetworkGuardBannerProps {
   status: VpnStatus;
 }
 
-/** Recovery remains available after a process crash, independently of the selected server. */
+/** Recovery for a failed VPN core while the GUI session is still running. */
 export function NetworkGuardBanner({ status }: NetworkGuardBannerProps) {
   const { t } = useTranslation();
   const [armed, setArmed] = useState<boolean | null>(null);
@@ -66,7 +66,7 @@ export function NetworkGuardBanner({ status }: NetworkGuardBannerProps) {
     releasePending.current = true;
     setReleasing(true);
     try {
-      // Normal disconnect serializes teardown and releases persistent protection. Only an event
+      // Normal disconnect serializes teardown and releases session protection. Only an event
       // or a fresh query confirms that the block was removed; the click itself never does.
       await invoke("vpn_disconnect");
       await refresh();

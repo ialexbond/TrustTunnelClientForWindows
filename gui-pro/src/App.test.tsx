@@ -229,9 +229,9 @@ describe("App", () => {
       ? Promise.resolve(true)
       : defaultInvoke(command, args, options));
     await act(async () => { render(<App />); });
-    expect(screen.getByRole("button", { name: "Снять блокировку" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Продолжить без VPN" })).toBeInTheDocument();
     await gotoSettings();
-    expect(screen.getByRole("button", { name: "Снять блокировку" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Продолжить без VPN" })).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("vpn_disconnect");
   });
 

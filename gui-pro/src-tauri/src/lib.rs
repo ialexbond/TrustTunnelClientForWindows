@@ -46,6 +46,7 @@ mod tray;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri::Emitter;
+use tauri::Listener;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::image::Image;
 use tauri::RunEvent;
@@ -471,6 +472,33 @@ pub fn run() {
             // resolver (Claude Code 403 until restart). Restore the snapshot now.
             dns_guard::sweep_stale_dns_on_startup();
 
+            // Finish the narrowly owned v1 cleanup before any automatic connection or guard read.
+            // Keep the window usable on failure, with a fixed error rather than helper diagnostics.
+            let migration = tauri::async_runtime::block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    network_guard::migrate_legacy_on_startup(app.handle()),
+                ).await.unwrap_or(Err(network_guard::FAILED))
+            });
+            if migration.is_err() {
+                logging::log_app("WARN", "[vpn] previous network protection cleanup failed");
+                if let Some(state) = app.try_state::<AppState>() {
+                    commands::vpn::set_vpn_status(
+                        app.handle(), &state, commands::vpn::VpnStatus::Error,
+                        Some(network_guard::FAILED.to_string()),
+                    );
+                }
+            }
+
+            let guardian_app = app.handle().clone();
+            app.listen("network-guard-helper-failed", move |event| {
+                let Some(failure) = commands::vpn::parse_network_guard_failure(event.payload()) else { return; };
+                let app = guardian_app.clone();
+                tauri::async_runtime::spawn(async move {
+                    commands::vpn::handle_network_guard_failure(app, failure).await;
+                });
+            });
+
             // Egress guard: drop leftover throwaway connect-override copies from previous sessions.
             // Their only reader (that session's sidecar) is long gone, and they carry the endpoint
             // password, so nothing should outlive the session that wrote it.
@@ -786,7 +814,6 @@ pub fn run() {
             let _ = commands::protocol::capture_cold_start_deeplink();
 
             // Listen for vpn-status events to update tray icon color
-            use tauri::Listener;
             let app_handle = app.handle().clone();
             app.listen_any("vpn-status", move |event| {
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {

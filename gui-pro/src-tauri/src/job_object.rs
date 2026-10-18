@@ -92,11 +92,9 @@ impl Drop for OwnedJobHandle {
 /// call name (D-09). Because `OwnedJobHandle` is built only on full success, the
 /// early-exit paths cannot leak and there is no double-close.
 ///
-/// The returned `Err` is the explicit DEGRADED-MODE signal: the caller logs a
-/// fixed phrase and CONTINUES connecting with `job: None`. Assign can legitimately
-/// fail when the parent is already inside a job (debugger / CI / some launchers),
-/// and that must never block the user from connecting — the PID-file fallback
-/// still covers cleanup (Codex MEDIUM, D-06).
+/// The caller decides how to handle a fixed error. GUI VPN sessions must abort
+/// before sending the native startup token if ownership cannot be established;
+/// a PID-file fallback cannot enforce cleanup after an abrupt GUI crash.
 #[cfg(target_os = "windows")]
 pub fn assign_to_kill_on_close_job(pid: u32) -> Result<OwnedJobHandle, String> {
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -201,33 +199,4 @@ mod tests {
         drop(handle);
     }
 
-    /// Degraded-mode contract: the helper returns a `Result`, and `sidecar.rs`'s spawn path
-    /// maps an `Err` to "LOG the failed call name, then continue with `job: None`" — never
-    /// panic, never abort the connect (D-06). The load-bearing half is the LOG: the error
-    /// string has to survive the mapping, and it has to be a bare Win32 call name so the
-    /// degraded-mode line carries no PID and no secret (D-09).
-    ///
-    /// The earlier version of this test threw the error away (`Ok => Some, Err(_) => None`),
-    /// which asserted only that `Err(_).ok()` is `None` — a property of `std`, not of this
-    /// module, and it silently dropped exactly the value production depends on.
-    #[test]
-    fn err_maps_to_log_and_continue_not_panic() {
-        // Simulate the helper failing (as it would when the parent is already in
-        // a job under a debugger/CI).
-        let simulated: Result<OwnedJobHandle, String> =
-            Err("AssignProcessToJobObject failed".to_string());
-        // Mirror the spawn path: the Err arm KEEPS the call name for the log line.
-        let (job, logged): (Option<OwnedJobHandle>, Option<String>) = match simulated {
-            Ok(h) => (Some(h), None),
-            Err(call) => (None, Some(call)),
-        };
-        assert!(job.is_none(), "a failed assign must degrade to `job: None`, not abort");
-        let logged = logged.expect("the degraded path must hand the call name to the log");
-        assert!(
-            !logged.chars().any(|c| c.is_ascii_digit()),
-            "D-09: the degraded-mode log line must be a bare call name — no PID, no secret: {logged}"
-        );
-        // Dropping the degraded fallback must be a safe no-op (nothing to CloseHandle).
-        drop(job);
-    }
 }

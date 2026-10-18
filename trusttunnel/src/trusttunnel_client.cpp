@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <csignal>
@@ -33,6 +34,7 @@
 #ifdef _WIN32
 #include "net/windows_network_guard.h"
 #include <filesystem>
+#include <fstream>
 #endif
 
 #ifdef __linux__
@@ -60,6 +62,98 @@ static int service_uninstall();
 static int service_install(const std::string &config_path);
 static void report_service_status(DWORD current_state, DWORD win32_exit_code, DWORD wait_hint);
 static bool g_svc_running = false;
+
+static std::optional<NetworkGuardPolicy> read_guard_policy(const std::string &path) {
+    if (path.empty() || path.size() > 32768 || std::ranges::any_of(path, [](unsigned char ch) {
+            return ch < 32;
+        })) {
+        return std::nullopt;
+    }
+    int count =
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data(), static_cast<int>(path.size()), nullptr, 0);
+    if (count <= 0) {
+        return std::nullopt;
+    }
+    std::wstring wide(static_cast<size_t>(count), L'\0');
+    if (!MultiByteToWideChar(
+                CP_UTF8, MB_ERR_INVALID_CHARS, path.data(), static_cast<int>(path.size()), wide.data(), count)) {
+        return std::nullopt;
+    }
+    std::ifstream stream(std::filesystem::path(wide), std::ios::binary);
+    if (!stream) {
+        return std::nullopt;
+    }
+    auto parsed = toml::parse(stream);
+    auto config = parsed ? TrustTunnelConfig::build_config(parsed.table()) : std::nullopt;
+    if (!config || !config->killswitch_enabled
+            || !std::holds_alternative<TrustTunnelConfig::TunListener>(config->listener)) {
+        return std::nullopt;
+    }
+    auto tun = std::get<TrustTunnelConfig::TunListener>(config->listener).with_windows_ipv6_protection(true);
+    return NetworkGuardPolicy{tun.included_routes, tun.excluded_routes};
+}
+
+static int run_network_guard_session() {
+    Logger::set_callback([](LogLevel, std::string_view) {});
+    WindowsNetworkGuardSession session;
+    auto ready = session.status();
+    std::cout << ready.to_json() << '\n' << std::flush;
+    if (!ready.success || ready.armed) {
+        return 1;
+    }
+    // A bounded newline protocol. EOF is a normal shutdown and closes the dynamic
+    // engine, even when the GUI never had an opportunity to send an explicit R.
+    for (;;) {
+        std::string line;
+        bool overflow = false;
+        char ch = 0;
+        while (std::cin.get(ch) && ch != '\n') {
+            if (line.size() < 32770) {
+                line.push_back(ch);
+            } else {
+                overflow = true;
+            }
+        }
+        if (!std::cin) {
+            return 0;
+        }
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        NetworkGuardResult result;
+        auto command = overflow ? NetworkGuardCommand{} : network_guard_parse_command(line);
+        if (command.kind == NetworkGuardCommandKind::STATUS) {
+            result = session.status();
+        } else if (command.kind == NetworkGuardCommandKind::RELEASE) {
+            result = session.release();
+        } else if (command.kind == NetworkGuardCommandKind::ARM) {
+            auto policy = read_guard_policy(command.config_path);
+            result = policy ? session.arm(*policy) : NetworkGuardResult{false, true, "network-guard-invalid-config"};
+        } else {
+            result = {false, true, "network-guard-invalid-command"};
+        }
+        std::cout << result.to_json() << '\n' << std::flush;
+    }
+}
+
+static bool await_gui_session_ready() {
+    std::string line;
+    char ch = 0;
+    while (std::cin.get(ch) && ch != '\n') {
+        if (line.size() >= 64) {
+            return false;
+        }
+        line.push_back(ch);
+    }
+    if (!std::cin) {
+        return false;
+    }
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
+    return network_guard_valid_gui_ready(line);
+}
+
 #endif
 
 int run_client(const cxxopts::ParseResult &cli_args);
@@ -122,7 +216,7 @@ int main(int argc, char **argv) {
             && ((std::string_view(argv[1]) == "--version" && std::string_view(argv[2]) == "--network-guard-version")
                     || (std::string_view(argv[2]) == "--version"
                             && std::string_view(argv[1]) == "--network-guard-version"))) {
-        std::cout << "1\n";
+        std::cout << "2\n";
         return 0;
     }
 #endif
@@ -142,11 +236,12 @@ int main(int argc, char **argv) {
             ("h,help", "Print usage");
 #ifdef _WIN32
     args.add_options()
-            ("network-guard-version", "Print supported persistent Windows network guard format")
-            ("network-guard-status", "Read persistent Windows network guard state")
-            ("network-guard-arm", "Arm persistent Windows network guard for a TUN config", cxxopts::value<std::string>())
-            ("network-guard-release", "Release persistent Windows network guard after disconnect")
+            ("network-guard-version", "Print supported GUI-owned Windows network guard format")
+            ("network-guard-session", "Run a GUI-owned dynamic Windows network guard until input closes")
+            ("network-guard-status", "Read GUI-owned Windows network guard state")
+            ("network-guard-release", "Remove only proven-owned legacy persistent network guard rules")
             ("network-guard-resolve", "Resolve an endpoint using core-owned physical DNS sockets", cxxopts::value<std::string>())
+            ("gui-session", "Require GUI job assignment handshake before touching networking")
             ("service-install", "Install as Windows service", cxxopts::value<bool>()->default_value("false"))
             ("service-uninstall", "Uninstall Windows service", cxxopts::value<bool>()->default_value("false"));
     args.add_options("internal")
@@ -187,10 +282,13 @@ int main(int argc, char **argv) {
 
 #ifdef _WIN32
     // Explicit one-shot helpers return before profile parsing and tunnel/service creation.
-    // No diagnostic or startup path may silently release persistent crash protection.
+    // Current blocking rules exist only inside the GUI-owned session helper.
     if (result.count("network-guard-version")) {
-        std::cout << "1\n";
+        std::cout << "2\n";
         return 0;
+    }
+    if (result.count("network-guard-session")) {
+        return run_network_guard_session();
     }
     if (result.count("network-guard-resolve")) {
         Logger::set_log_level(LOG_LEVEL_ERROR);
@@ -199,34 +297,13 @@ int main(int argc, char **argv) {
         std::cout << resolved.to_json() << '\n';
         return resolved.error ? 1 : 0;
     }
-    if (result.count("network-guard-status") || result.count("network-guard-arm")
-            || result.count("network-guard-release")) {
-        if (result.count("network-guard-status") + result.count("network-guard-arm")
-                        + result.count("network-guard-release")
-                != 1) {
+    if (result.count("network-guard-status") || result.count("network-guard-release")) {
+        if (result.count("network-guard-status") + result.count("network-guard-release") != 1) {
             std::cout << NetworkGuardResult{false, true, "network-guard-invalid-operation"}.to_json() << '\n';
             return 1;
         }
-        NetworkGuardResult state;
-        if (result.count("network-guard-arm")) {
-            // Do not expose a config path, server credentials or parser diagnostics in
-            // this privileged helper's output. Persistent state is untouched on error.
-            Logger::set_log_level(LOG_LEVEL_ERROR);
-            Logger::set_callback([](LogLevel, std::string_view) {});
-            auto parsed = toml::parse_file(result["network-guard-arm"].as<std::string>());
-            auto config = parsed ? TrustTunnelConfig::build_config(parsed.table()) : std::nullopt;
-            if (!config || !config->killswitch_enabled
-                    || !std::holds_alternative<TrustTunnelConfig::TunListener>(config->listener)) {
-                state = {false, true, "network-guard-invalid-config"};
-            } else {
-                auto tun =
-                        std::get<TrustTunnelConfig::TunListener>(config->listener).with_windows_ipv6_protection(true);
-                state = WindowsNetworkGuard::arm({tun.included_routes, tun.excluded_routes});
-            }
-        } else {
-            state = result.count("network-guard-status") ? WindowsNetworkGuard::status()
-                                                         : WindowsNetworkGuard::release();
-        }
+        auto state =
+                result.count("network-guard-status") ? WindowsNetworkGuard::status() : WindowsNetworkGuard::release();
         std::cout << state.to_json() << '\n';
         return state.success ? 0 : 1;
     }
@@ -243,6 +320,11 @@ int main(int argc, char **argv) {
     if (result["service-run"].as<bool>()) {
         return service_run(&result);
     }
+    if (result.count("gui-session") && !await_gui_session_ready()) {
+        std::cerr << "Unable to validate GUI session handshake\n";
+        return 1;
+    }
+
 #endif
 
     return run_client(result);
@@ -268,12 +350,12 @@ int run_client(const cxxopts::ParseResult &cli_args) {
 
 #ifdef _WIN32
     if (std::holds_alternative<TrustTunnelConfig::TunListener>(config.listener)) {
-        // This is the normal client path only. Never change persistent state here.
-        // Under a retained guard, endpoint transports must bypass routes using BOTH
+        // This is the normal client path only. Never change session policy here.
+        // Under the GUI-owned guard, endpoint transports must bypass routes using BOTH
         // a physical source and interface pin, rather than a global endpoint-IP hole.
         auto guard = WindowsNetworkGuard::status();
         if (!guard.success || (guard.armed && !config.killswitch_enabled)) {
-            errlog(g_logger, "Unable to validate persistent network protection");
+            errlog(g_logger, "Unable to validate GUI-owned network protection");
             return 1;
         }
         network_guard_set_strict_socket_protection(guard.armed);

@@ -214,6 +214,26 @@ bool network_guard_valid_hostname(const std::string &host) {
     return label != 0 && previous != '-';
 }
 
+NetworkGuardCommand network_guard_parse_command(std::string_view line) {
+    if (line == "S") {
+        return {NetworkGuardCommandKind::STATUS, {}};
+    }
+    if (line == "R") {
+        return {NetworkGuardCommandKind::RELEASE, {}};
+    }
+    if (line.starts_with("A ") && line.size() > 2 && line.size() <= 32770
+            && std::none_of(line.begin() + 2, line.end(), [](unsigned char ch) {
+                   return ch < 32;
+               })) {
+        return {NetworkGuardCommandKind::ARM, std::string(line.substr(2))};
+    }
+    return {};
+}
+
+bool network_guard_valid_gui_ready(std::string_view line) {
+    return line == "TRUSTTUNNEL_GUI_READY_V2";
+}
+
 bool run_network_guard_transaction(const NetworkGuardTransaction &transaction) {
     if (!transaction.begin()) {
         return false;
@@ -226,7 +246,7 @@ bool run_network_guard_transaction(const NetworkGuardTransaction &transaction) {
 }
 
 std::string NetworkGuardResult::to_json() const {
-    nlohmann::json value{{"version", 1}, {"armed", armed}};
+    nlohmann::json value{{"version", 2}, {"armed", armed}};
     if (!success) {
         value["error"] = error;
     }
@@ -234,7 +254,7 @@ std::string NetworkGuardResult::to_json() const {
 }
 
 std::string NetworkGuardResolveResult::to_json() const {
-    nlohmann::json value{{"version", 1}, {"addresses", addresses}};
+    nlohmann::json value{{"version", 2}, {"addresses", addresses}};
     if (error) {
         value["error"] = error;
     }
@@ -246,13 +266,17 @@ std::string NetworkGuardResolveResult::to_json() const {
 namespace {
 
 // Dedicated Pro objects: never enumerate/delete a foreign provider, sublayer or filter.
-const GUID PROVIDER = {0x9bdb91ef, 0x433b, 0x45d6, {0x96, 0x6d, 0x81, 0xe6, 0x43, 0x95, 0x77, 0x5c}};
-const GUID SUBLAYER = {0x407a7508, 0xdb88, 0x45f5, {0xab, 0xb8, 0x5b, 0x63, 0x4e, 0x7d, 0x1c, 0x67}};
-constexpr char OWNER[] = "TrustTunnelClientPro.NetworkGuard.1";
+const GUID LEGACY_PROVIDER = {0x9bdb91ef, 0x433b, 0x45d6, {0x96, 0x6d, 0x81, 0xe6, 0x43, 0x95, 0x77, 0x5c}};
+const GUID PROVIDER = {0x811c1a8b, 0xf10c, 0x4398, {0x99, 0x7d, 0x18, 0x7a, 0x66, 0x8b, 0x97, 0x42}};
+const GUID LEGACY_SUBLAYER = {0x407a7508, 0xdb88, 0x45f5, {0xab, 0xb8, 0x5b, 0x63, 0x4e, 0x7d, 0x1c, 0x67}};
+const GUID SUBLAYER = {0x91e271ac, 0x6c35, 0x4f2e, {0xad, 0xe8, 0x66, 0x90, 0x83, 0xa7, 0xc2, 0xd0}};
+constexpr char OWNER[] = "TrustTunnelClientPro.NetworkGuard.2";
+constexpr char LEGACY_OWNER[] = "TrustTunnelClientPro.NetworkGuard.1";
+static_assert(sizeof(OWNER) == sizeof(LEGACY_OWNER));
 constexpr UINT16 SUBLAYER_WEIGHT = 0x100;
 
-GUID filter_key(size_t index) {
-    GUID key = {0xb6d5da00, 0x843d, 0x4263, {0xaf, 0x3e, 0x64, 0x7d, 0x30, 0x13, 0xe3, 0x95}};
+GUID filter_key(size_t index, bool legacy = false) {
+    GUID key = {legacy ? 0xb6d5da00UL : 0xc7e6eb00UL, 0x843d, 0x4263, {0xaf, 0x3e, 0x64, 0x7d, 0x30, 0x13, 0xe3, 0x95}};
     key.Data1 += static_cast<ULONG>(index);
     return key;
 }
@@ -288,19 +312,19 @@ struct AppId {
     }
 };
 
-FWP_BYTE_BLOB owner_blob() {
-    return {sizeof(OWNER), reinterpret_cast<UINT8 *>(const_cast<char *>(OWNER))};
+FWP_BYTE_BLOB owner_blob(bool legacy = false) {
+    return {sizeof(OWNER), reinterpret_cast<UINT8 *>(const_cast<char *>(legacy ? LEGACY_OWNER : OWNER))};
 }
 
-std::string policy_data(const NetworkGuardPolicy &policy) {
-    std::string data(OWNER, sizeof(OWNER));
+std::string policy_data(const NetworkGuardPolicy &policy, bool legacy = false) {
+    std::string data(legacy ? LEGACY_OWNER : OWNER, sizeof(OWNER));
     data += nlohmann::json{{"included", policy.included_routes}, {"excluded", policy.excluded_routes}}.dump();
     return data;
 }
 
-std::optional<NetworkGuardPolicy> parse_policy(const FWP_BYTE_BLOB &data) {
+std::optional<NetworkGuardPolicy> parse_policy(const FWP_BYTE_BLOB &data, bool legacy = false) {
     if (!data.data || data.size <= sizeof(OWNER) || data.size > 1024 * 1024
-            || std::memcmp(data.data, OWNER, sizeof(OWNER)) != 0) {
+            || std::memcmp(data.data, legacy ? LEGACY_OWNER : OWNER, sizeof(OWNER)) != 0) {
         return std::nullopt;
     }
     auto value = nlohmann::json::parse(data.data + sizeof(OWNER), data.data + data.size, nullptr, false);
@@ -321,8 +345,9 @@ std::optional<NetworkGuardPolicy> parse_policy(const FWP_BYTE_BLOB &data) {
     return network_guard_valid_policy(policy) ? std::optional(std::move(policy)) : std::nullopt;
 }
 
-bool is_owner(const FWP_BYTE_BLOB &data) {
-    return data.size == sizeof(OWNER) && data.data && std::memcmp(data.data, OWNER, sizeof(OWNER)) == 0;
+bool is_owner(const FWP_BYTE_BLOB &data, bool legacy = false) {
+    return data.size == sizeof(OWNER) && data.data
+            && std::memcmp(data.data, legacy ? LEGACY_OWNER : OWNER, sizeof(OWNER)) == 0;
 }
 
 bool transaction(HANDLE engine, const std::function<bool()> &apply) {
@@ -352,21 +377,23 @@ struct Filter {
     std::string data;
 
     Filter(const NetworkGuardRule &rule, size_t index, FWP_BYTE_BLOB *app_id,
-            const NetworkGuardPolicy *policy = nullptr) {
-        value.filterKey = filter_key(index);
+            const NetworkGuardPolicy *policy = nullptr, bool legacy = false) {
+        value.filterKey = filter_key(index, legacy);
         value.displayData.name = const_cast<wchar_t *>(L"TrustTunnel Client Pro network protection");
-        value.providerKey = const_cast<GUID *>(&PROVIDER);
-        value.providerData = owner_blob();
+        value.providerKey = const_cast<GUID *>(legacy ? &LEGACY_PROVIDER : &PROVIDER);
+        value.providerData = owner_blob(legacy);
         if (policy && index == 0) {
-            data = policy_data(*policy);
+            data = policy_data(*policy, legacy);
             value.providerData = {static_cast<UINT32>(data.size()), reinterpret_cast<UINT8 *>(data.data())};
         }
-        value.subLayerKey = SUBLAYER;
+        value.subLayerKey = legacy ? LEGACY_SUBLAYER : SUBLAYER;
         value.layerKey = rule.inbound
                 ? (rule.ipv6 ? FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6 : FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4)
                 : (rule.ipv6 ? FWPM_LAYER_ALE_AUTH_CONNECT_V6 : FWPM_LAYER_ALE_AUTH_CONNECT_V4);
         // Do not set CLEAR_ACTION_RIGHT: another firewall's block must remain effective.
-        value.flags = rule.persistent ? FWPM_FILTER_FLAG_PERSISTENT : 0;
+        // New rules are always session-owned. PERSISTENT is used only to validate
+        // a legacy filter before deleting it; no legacy construction is added to WFP.
+        value.flags = legacy ? FWPM_FILTER_FLAG_PERSISTENT : 0;
         value.weight.type = FWP_UINT8;
         value.weight.uint8 = network_guard_rule_weight(rule);
         value.action.type = network_guard_rule_blocks(rule) ? FWP_ACTION_BLOCK : FWP_ACTION_PERMIT;
@@ -436,12 +463,13 @@ bool equal_value(const FWP_CONDITION_VALUE0 &a, const FWP_CONDITION_VALUE0 &b) {
     }
 }
 
-bool equal_filter(const FWPM_FILTER0 &a, const FWPM_FILTER0 &b) {
-    if (!a.providerKey || *a.providerKey != PROVIDER || a.subLayerKey != SUBLAYER
+bool equal_filter(const FWPM_FILTER0 &a, const FWPM_FILTER0 &b, bool legacy = false) {
+    if (!a.providerKey || !b.providerKey || *a.providerKey != *b.providerKey || a.subLayerKey != b.subLayerKey
             || a.providerData.size != b.providerData.size
-            || std::memcmp(a.providerData.data, b.providerData.data, a.providerData.size) != 0 || a.flags != b.flags
-            || a.layerKey != b.layerKey || a.action.type != b.action.type || a.weight.type != FWP_UINT8
-            || a.weight.uint8 != b.weight.uint8 || a.numFilterConditions != b.numFilterConditions) {
+            || std::memcmp(a.providerData.data, b.providerData.data, a.providerData.size) != 0
+            || (a.flags & ~(legacy ? FWPM_FILTER_FLAG_DISABLED : 0)) != b.flags || a.layerKey != b.layerKey
+            || a.action.type != b.action.type || a.weight.type != FWP_UINT8 || a.weight.uint8 != b.weight.uint8
+            || a.numFilterConditions != b.numFilterConditions) {
         return false;
     }
     for (UINT32 i = 0; i < a.numFilterConditions; ++i) {
@@ -458,12 +486,14 @@ bool equal_filter(const FWPM_FILTER0 &a, const FWPM_FILTER0 &b) {
     return true;
 }
 
-bool exact_owned_filter_count(HANDLE engine, size_t expected) {
-    size_t persistent = 0;
+bool exact_owned_filter_count(HANDLE engine, size_t expected, bool legacy = false) {
+    size_t base_count = 0;
+    const GUID &provider = legacy ? LEGACY_PROVIDER : PROVIDER;
+    const GUID &sublayer = legacy ? LEGACY_SUBLAYER : SUBLAYER;
     for (const GUID &layer : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
                  FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
         FWPM_FILTER_ENUM_TEMPLATE0 query{};
-        query.providerKey = const_cast<GUID *>(&PROVIDER);
+        query.providerKey = const_cast<GUID *>(&provider);
         query.layerKey = layer;
         query.enumType = FWP_FILTER_ENUM_FULLY_CONTAINED;
         query.flags = FWP_FILTER_ENUM_FLAG_INCLUDE_DISABLED;
@@ -484,18 +514,23 @@ bool exact_owned_filter_count(HANDLE engine, size_t expected) {
             bool valid = true;
             for (UINT32 i = 0; i < count; ++i) {
                 const auto &entry = *entries[i];
-                if (entry.subLayerKey != SUBLAYER) {
+                GUID base_key = filter_key(0, legacy);
+                ULONG index = entry.filterKey.Data1 - base_key.Data1;
+                base_key.Data1 = entry.filterKey.Data1;
+                bool base = entry.filterKey == base_key && index < expected;
+                if (entry.subLayerKey != sublayer) {
                     valid = false;
-                } else if (entry.flags & FWPM_FILTER_FLAG_PERSISTENT) {
-                    ++persistent;
+                } else if (base) {
+                    ++base_count;
                 } else {
-                    // Only the four dynamic TUN tuple permits may coexist with this base.
-                    bool known_key = false;
+                    // The current core can own only these nonblocking dynamic TUN permits.
+                    bool known = false;
                     for (size_t index = 0; index < 4; ++index) {
-                        known_key = known_key || entry.filterKey == filter_key(0x10000 + index);
+                        known = known || entry.filterKey == filter_key(0x10000 + index, legacy);
                     }
-                    valid = valid && known_key && is_owner(entry.providerData) && entry.action.type == FWP_ACTION_PERMIT
-                            && entry.flags == 0 && entry.numFilterConditions == 2;
+                    valid = valid && !legacy && known && is_owner(entry.providerData)
+                            && entry.action.type == FWP_ACTION_PERMIT && entry.flags == 0
+                            && entry.numFilterConditions == 2;
                     if (valid) {
                         bool address = false;
                         bool interface_match = false;
@@ -510,7 +545,7 @@ bool exact_owned_filter_count(HANDLE engine, size_t expected) {
                 }
             }
             FwpmFreeMemory0(reinterpret_cast<void **>(&entries));
-            if (!valid || persistent > expected) {
+            if (!valid || base_count > expected) {
                 return false;
             }
             if (count < 128) {
@@ -518,93 +553,107 @@ bool exact_owned_filter_count(HANDLE engine, size_t expected) {
             }
         }
     }
-    return persistent == expected;
+    return base_count == expected;
 }
 
-NetworkGuardResult inspect(HANDLE engine, FWP_BYTE_BLOB *app_id, NetworkGuardPolicy *stored = nullptr) {
+NetworkGuardResult inspect(
+        HANDLE engine, FWP_BYTE_BLOB *app_id, NetworkGuardPolicy *stored = nullptr, bool legacy = false) {
+    const GUID &provider_key = legacy ? LEGACY_PROVIDER : PROVIDER;
+    const GUID &sublayer_key = legacy ? LEGACY_SUBLAYER : SUBLAYER;
     FWPM_PROVIDER0 *provider = nullptr;
-    DWORD error = FwpmProviderGetByKey0(engine, &PROVIDER, &provider);
+    DWORD error = FwpmProviderGetByKey0(engine, &provider_key, &provider);
     bool absent = error == FWP_E_PROVIDER_NOT_FOUND;
     if (!absent && error != ERROR_SUCCESS) {
         return {};
     }
-    bool valid = absent || (provider->flags == FWPM_PROVIDER_FLAG_PERSISTENT && is_owner(provider->providerData));
+    UINT32 expected_flags = legacy ? FWPM_PROVIDER_FLAG_PERSISTENT : 0;
+    bool valid = absent
+            || ((provider->flags & ~(legacy ? FWPM_PROVIDER_FLAG_DISABLED : 0)) == expected_flags
+                    && is_owner(provider->providerData, legacy));
     if (provider) {
         FwpmFreeMemory0(reinterpret_cast<void **>(&provider));
     }
     FWPM_SUBLAYER0 *sublayer = nullptr;
-    error = FwpmSubLayerGetByKey0(engine, &SUBLAYER, &sublayer);
+    error = FwpmSubLayerGetByKey0(engine, &sublayer_key, &sublayer);
     bool sublayer_absent = error == FWP_E_SUBLAYER_NOT_FOUND;
     if (!sublayer_absent && error != ERROR_SUCCESS) {
         return {};
     }
     valid = valid
             && (sublayer_absent ? absent
-                                : !absent && sublayer->providerKey && *sublayer->providerKey == PROVIDER
-                                    && sublayer->flags == FWPM_SUBLAYER_FLAG_PERSISTENT
-                                    && sublayer->weight == SUBLAYER_WEIGHT && is_owner(sublayer->providerData));
+                                : !absent && sublayer->providerKey && *sublayer->providerKey == provider_key
+                                    && sublayer->flags == (legacy ? FWPM_SUBLAYER_FLAG_PERSISTENT : 0)
+                                    && sublayer->weight == SUBLAYER_WEIGHT && is_owner(sublayer->providerData, legacy));
     if (sublayer) {
         FwpmFreeMemory0(reinterpret_cast<void **>(&sublayer));
     }
-    std::optional<NetworkGuardPolicy> policy = NetworkGuardPolicy{};
-    if (!absent) {
-        GUID first_key = filter_key(0);
-        FWPM_FILTER0 *first = nullptr;
-        error = FwpmFilterGetByKey0(engine, &first_key, &first);
-        policy = error == ERROR_SUCCESS ? parse_policy(first->providerData) : std::nullopt;
-        valid = valid && policy.has_value();
-        if (first) {
-            FwpmFreeMemory0(reinterpret_cast<void **>(&first));
-        }
+    GUID first_key = filter_key(0, legacy);
+    FWPM_FILTER0 *first = nullptr;
+    error = FwpmFilterGetByKey0(engine, &first_key, &first);
+    bool armed = error == ERROR_SUCCESS;
+    std::optional<NetworkGuardPolicy> policy = armed ? parse_policy(first->providerData, legacy) : std::nullopt;
+    if (first) {
+        FwpmFreeMemory0(reinterpret_cast<void **>(&first));
     }
+    valid = valid
+            && (armed ? !absent && !sublayer_absent && policy.has_value()
+                      : error == FWP_E_FILTER_NOT_FOUND && (!legacy || absent));
     if (policy && stored) {
         *stored = *policy;
     }
-    auto plan = network_guard_base_plan(policy.value_or(NetworkGuardPolicy{}));
+    auto plan = policy ? network_guard_base_plan(*policy) : std::vector<NetworkGuardRule>{};
     for (size_t i = 0; i < plan.size(); ++i) {
+        if (legacy) {
+            plan[i].persistent = true;
+        }
         FWPM_FILTER0 *filter = nullptr;
-        GUID key = filter_key(i);
+        GUID key = filter_key(i, legacy);
         error = FwpmFilterGetByKey0(engine, &key, &filter);
-        if (error == FWP_E_FILTER_NOT_FOUND) {
-            valid = valid && absent;
-        } else if (error != ERROR_SUCCESS) {
+        if (error != ERROR_SUCCESS) {
             valid = false;
         } else {
-            Filter expected(plan[i], i, app_id, policy ? &*policy : nullptr);
-            valid = valid && !absent && !sublayer_absent && equal_filter(*filter, expected.value);
+            Filter expected(plan[i], i, app_id, &*policy, legacy);
+            valid = valid && equal_filter(*filter, expected.value, legacy);
         }
         if (filter) {
             FwpmFreeMemory0(reinterpret_cast<void **>(&filter));
         }
     }
-    valid = valid && (absent || exact_owned_filter_count(engine, plan.size()));
-    if (!valid) {
-        return {false, true, "network-guard-state-incomplete"};
-    }
-    return {true, !absent, nullptr};
+    valid = valid && (absent || exact_owned_filter_count(engine, plan.size(), legacy));
+    return valid ? NetworkGuardResult{true, armed, nullptr}
+                 : NetworkGuardResult{false, true, "network-guard-state-incomplete"};
 }
 
-bool add_base(HANDLE engine, FWP_BYTE_BLOB *app_id, const NetworkGuardPolicy &policy, bool create_objects) {
-    if (create_objects) {
-        FWPM_PROVIDER0 provider{};
-        provider.providerKey = PROVIDER;
-        provider.displayData.name = const_cast<wchar_t *>(L"TrustTunnel Client Pro persistent protection");
-        provider.flags = FWPM_PROVIDER_FLAG_PERSISTENT;
-        provider.providerData = owner_blob();
-        if (FwpmProviderAdd0(engine, &provider, nullptr) != ERROR_SUCCESS) {
-            return false;
-        }
-        FWPM_SUBLAYER0 sublayer{};
-        sublayer.subLayerKey = SUBLAYER;
-        sublayer.providerKey = const_cast<GUID *>(&PROVIDER);
-        sublayer.displayData = provider.displayData;
-        sublayer.flags = FWPM_SUBLAYER_FLAG_PERSISTENT;
-        sublayer.providerData = owner_blob();
-        sublayer.weight = SUBLAYER_WEIGHT;
-        if (FwpmSubLayerAdd0(engine, &sublayer, nullptr) != ERROR_SUCCESS) {
-            return false;
-        }
+bool ensure_static_objects(HANDLE engine) {
+    FWPM_PROVIDER0 *existing = nullptr;
+    DWORD error = FwpmProviderGetByKey0(engine, &PROVIDER, &existing);
+    if (existing) {
+        FwpmFreeMemory0(reinterpret_cast<void **>(&existing));
     }
+    if (error == ERROR_SUCCESS) {
+        return true;
+    } // inspect already validated both objects.
+    if (error != FWP_E_PROVIDER_NOT_FOUND) {
+        return false;
+    }
+    FWPM_PROVIDER0 provider{};
+    provider.providerKey = PROVIDER;
+    provider.displayData.name = const_cast<wchar_t *>(L"TrustTunnel Client Pro session protection");
+    provider.providerData = owner_blob();
+    // Static metadata cannot block traffic and disappears when BFE/Windows restarts.
+    if (FwpmProviderAdd0(engine, &provider, nullptr) != ERROR_SUCCESS) {
+        return false;
+    }
+    FWPM_SUBLAYER0 sublayer{};
+    sublayer.subLayerKey = SUBLAYER;
+    sublayer.providerKey = const_cast<GUID *>(&PROVIDER);
+    sublayer.displayData = provider.displayData;
+    sublayer.providerData = owner_blob();
+    sublayer.weight = SUBLAYER_WEIGHT;
+    return FwpmSubLayerAdd0(engine, &sublayer, nullptr) == ERROR_SUCCESS;
+}
+
+bool add_base(HANDLE engine, FWP_BYTE_BLOB *app_id, const NetworkGuardPolicy &policy) {
     auto plan = network_guard_base_plan(policy);
     for (size_t i = 0; i < plan.size(); ++i) {
         Filter filter(plan[i], i, app_id, &policy);
@@ -615,6 +664,26 @@ bool add_base(HANDLE engine, FWP_BYTE_BLOB *app_id, const NetworkGuardPolicy &po
     return true;
 }
 
+bool delete_base(HANDLE engine, const NetworkGuardPolicy &policy) {
+    auto plan = network_guard_base_plan(policy);
+    for (size_t i = 0; i < plan.size(); ++i) {
+        GUID key = filter_key(i);
+        if (FwpmFilterDeleteByKey0(engine, &key) != ERROR_SUCCESS) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool legacy_absent(HANDLE engine) {
+    FWPM_PROVIDER0 *provider = nullptr;
+    DWORD error = FwpmProviderGetByKey0(engine, &LEGACY_PROVIDER, &provider);
+    if (provider) {
+        FwpmFreeMemory0(reinterpret_cast<void **>(&provider));
+    }
+    return error == FWP_E_PROVIDER_NOT_FOUND;
+}
+
 } // namespace
 
 NetworkGuardResult WindowsNetworkGuard::status() {
@@ -623,43 +692,13 @@ NetworkGuardResult WindowsNetworkGuard::status() {
     if (!engine.handle || !app.blob || FwpmTransactionBegin0(engine.handle, FWPM_TXN_READ_ONLY) != ERROR_SUCCESS) {
         return {};
     }
-    auto result = inspect(engine.handle, app.blob);
+    auto result = legacy_absent(engine.handle)
+            ? inspect(engine.handle, app.blob)
+            : NetworkGuardResult{false, true, "network-guard-legacy-cleanup-required"};
     if (FwpmTransactionCommit0(engine.handle) != ERROR_SUCCESS) {
         return {};
     }
     return result;
-}
-
-NetworkGuardResult WindowsNetworkGuard::arm(const NetworkGuardPolicy &policy) {
-    if (!network_guard_valid_policy(policy)) {
-        return {false, true, "network-guard-invalid-routes"};
-    }
-    Engine engine;
-    AppId app;
-    if (!engine.handle || !app.blob) {
-        return {};
-    }
-    NetworkGuardResult state;
-    bool success = transaction(engine.handle, [&] {
-        NetworkGuardPolicy stored;
-        state = inspect(engine.handle, app.blob, &stored);
-        if (!state.success || (state.armed && stored == policy)) {
-            return state.success;
-        }
-        if (state.armed) {
-            // Only these fixed, validated objects belong to this version of the guard.
-            // An active TUN owns dynamic filters in the sublayer: keep that sublayer intact.
-            auto old = network_guard_base_plan(stored);
-            for (size_t i = 0; i < old.size(); ++i) {
-                GUID key = filter_key(i);
-                if (FwpmFilterDeleteByKey0(engine.handle, &key) != ERROR_SUCCESS) {
-                    return false;
-                }
-            }
-        }
-        return add_base(engine.handle, app.blob, policy, !state.armed);
-    });
-    return success ? NetworkGuardResult{true, true, nullptr} : NetworkGuardResult{};
 }
 
 NetworkGuardResult WindowsNetworkGuard::release() {
@@ -670,21 +709,98 @@ NetworkGuardResult WindowsNetworkGuard::release() {
     }
     bool success = transaction(engine.handle, [&] {
         NetworkGuardPolicy policy;
-        auto state = inspect(engine.handle, app.blob, &policy);
+        auto state = inspect(engine.handle, app.blob, &policy, true);
         if (!state.success || !state.armed) {
             return state.success;
         }
         auto plan = network_guard_base_plan(policy);
         for (size_t i = 0; i < plan.size(); ++i) {
-            GUID key = filter_key(i);
+            GUID key = filter_key(i, true);
             if (FwpmFilterDeleteByKey0(engine.handle, &key) != ERROR_SUCCESS) {
                 return false;
             }
         }
-        // A still-running TUN permit makes this fail atomically with IN_USE.
-        return FwpmSubLayerDeleteByKey0(engine.handle, &SUBLAYER) == ERROR_SUCCESS
-                && FwpmProviderDeleteByKey0(engine.handle, &PROVIDER) == ERROR_SUCCESS;
+        // Disabled legacy filters are removable after reboot, but unknown ownership
+        // or a still-live legacy TUN session makes the whole cleanup roll back.
+        return FwpmSubLayerDeleteByKey0(engine.handle, &LEGACY_SUBLAYER) == ERROR_SUCCESS
+                && FwpmProviderDeleteByKey0(engine.handle, &LEGACY_PROVIDER) == ERROR_SUCCESS;
     });
+    return success ? WindowsNetworkGuard::status() : NetworkGuardResult{};
+}
+
+struct WindowsNetworkGuardSession::Impl {
+    std::unique_ptr<Engine> engine;
+    std::unique_ptr<AppId> app;
+    bool owns_base = false;
+};
+
+WindowsNetworkGuardSession::WindowsNetworkGuardSession()
+        : m_impl(std::make_unique<Impl>()) {
+    Engine setup;
+    m_impl->app = std::make_unique<AppId>();
+    if (!setup.handle || !m_impl->app->blob || !transaction(setup.handle, [&] {
+            auto state = inspect(setup.handle, m_impl->app->blob);
+            return state.success && !state.armed && legacy_absent(setup.handle) && ensure_static_objects(setup.handle);
+        })) {
+        return;
+    }
+    m_impl->engine = std::make_unique<Engine>(true);
+    if (!m_impl->engine->handle) {
+        m_impl->engine.reset();
+    }
+}
+
+WindowsNetworkGuardSession::~WindowsNetworkGuardSession() = default;
+
+NetworkGuardResult WindowsNetworkGuardSession::status() {
+    if (!m_impl->engine || !m_impl->app->blob) {
+        return {};
+    }
+    auto result = inspect(m_impl->engine->handle, m_impl->app->blob);
+    if (result.success && result.armed != m_impl->owns_base) {
+        return {false, true, "network-guard-session-conflict"};
+    }
+    return result;
+}
+
+NetworkGuardResult WindowsNetworkGuardSession::arm(const NetworkGuardPolicy &policy) {
+    if (!network_guard_valid_policy(policy)) {
+        return {false, true, "network-guard-invalid-routes"};
+    }
+    if (!m_impl->engine || !m_impl->app->blob) {
+        return {};
+    }
+    bool success = transaction(m_impl->engine->handle, [&] {
+        NetworkGuardPolicy previous;
+        auto state = inspect(m_impl->engine->handle, m_impl->app->blob, &previous);
+        if (!state.success || state.armed != m_impl->owns_base) {
+            return false;
+        }
+        if (state.armed && previous == policy) {
+            return true;
+        }
+        return (!state.armed || delete_base(m_impl->engine->handle, previous))
+                && add_base(m_impl->engine->handle, m_impl->app->blob, policy);
+    });
+    if (success) {
+        m_impl->owns_base = true;
+    }
+    return success ? NetworkGuardResult{true, true, nullptr} : NetworkGuardResult{};
+}
+
+NetworkGuardResult WindowsNetworkGuardSession::release() {
+    if (!m_impl->engine || !m_impl->app->blob) {
+        return {};
+    }
+    bool success = transaction(m_impl->engine->handle, [&] {
+        NetworkGuardPolicy policy;
+        auto state = inspect(m_impl->engine->handle, m_impl->app->blob, &policy);
+        return state.success && state.armed == m_impl->owns_base
+                && (!state.armed || delete_base(m_impl->engine->handle, policy));
+    });
+    if (success) {
+        m_impl->owns_base = false;
+    }
     return success ? NetworkGuardResult{true, false, nullptr} : NetworkGuardResult{};
 }
 
@@ -704,7 +820,7 @@ void WindowsNetworkGuardTunnel::reset() {
 
 bool WindowsNetworkGuardTunnel::activate(uint64_t luid, const CidrRange &ipv4, const CidrRange &ipv6) {
     reset();
-    // This status is read-only. It must not arm or remove persistent protection.
+    // This status is read-only. The GUI helper alone owns the session base rules.
     auto state = WindowsNetworkGuard::status();
     if (!state.success || !state.armed) {
         return state.success;
@@ -860,14 +976,25 @@ NetworkGuardResolveResult WindowsNetworkGuard::resolve(const std::string &host) 
 NetworkGuardResult WindowsNetworkGuard::status() {
     return {};
 }
-NetworkGuardResult WindowsNetworkGuard::arm(const NetworkGuardPolicy &) {
-    return {};
-}
 NetworkGuardResult WindowsNetworkGuard::release() {
     return {};
 }
 NetworkGuardResolveResult WindowsNetworkGuard::resolve(const std::string &) {
     return {{}, "network-guard-unsupported-platform"};
+}
+struct WindowsNetworkGuardSession::Impl {};
+WindowsNetworkGuardSession::WindowsNetworkGuardSession()
+        : m_impl(std::make_unique<Impl>()) {
+}
+WindowsNetworkGuardSession::~WindowsNetworkGuardSession() = default;
+NetworkGuardResult WindowsNetworkGuardSession::status() {
+    return {};
+}
+NetworkGuardResult WindowsNetworkGuardSession::arm(const NetworkGuardPolicy &) {
+    return {};
+}
+NetworkGuardResult WindowsNetworkGuardSession::release() {
+    return {};
 }
 struct WindowsNetworkGuardTunnel::Impl {};
 WindowsNetworkGuardTunnel::WindowsNetworkGuardTunnel()
