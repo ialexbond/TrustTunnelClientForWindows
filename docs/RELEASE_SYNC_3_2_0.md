@@ -168,6 +168,14 @@ The verified 3.2.0 installer and its adjacent `.exe.sha256` replace the previous
 
 Actual core compatibility, raw/extracted artifact privacy, build-label, post-build NSIS and checksum gates pass. The installer was extracted without execution: its core and WinTUN match the unchanged inputs, and GUI comparison allows only Tauri's expected three-byte bundle marker. It embeds the current `main-RLTiybYC.js` frontend. The existing unsigned configuration remains unchanged. No installation, public release, tag or push was performed. Private build/check receipts are in `release-3.2.0/mtu-fix` under this task's visualization directory. Earlier live ping/scroll retests and broader acceptance limits remain pending; the MTU default correction does not change their status.
 
+## Scrollbar color refinement
+
+Source fix: `ba6e53de36f07f2fedb7b2bfc10d7a146e21f14c`. The user's light-theme screenshot showed an overly dark scrollbar. A single CSS change removes the stronger routing-specific text-color overrides and reuses the existing softer, theme-aware scrollbar colors. Stable gutter, width, list bounds, scrolling and new-row reveal are unchanged. One native-browser inspection covers all three lists in dark/light themes; one scoped UI detector run has no findings. No new behavior tests were added for this color-only change.
+
+The actual production Tauri/NSIS build and all core compatibility, raw/extracted privacy, build-label, post-build NSIS and checksum gates pass. Extracted GUI payload SHA-256 is `42d89c3743811d1f9473c725605faced804d3c57abfc9a8d7491424bf7509eb8`; the expected Tauri bundle-marker normalization is verified. Core and WinTUN retain their prior hashes. The embedded frontend is `main-DrvEol4k.js`.
+
+The updated Desktop `TrustTunnel Client Pro_3.2.0_x64-setup.exe` is 9,799,008 bytes, SHA-256 `0470bdbe047a8cb579a728973d8d425471ef74ee0e9b1f10fe59a8412c275762`, with a verified adjacent `.exe.sha256`. The previous MTU candidate and checksum are privately archived. All six saved configuration files and installed binaries remain unchanged. No installation or publication was performed. Private receipts and both-theme previews are under `release-3.2.0/scrollbar-tone` in the task's visualization directory.
+
 ## Recovery and run-owned resources
 
 The pre-upgrade routing patch is committed independently, followed by baseline ancestry and official-release merge commits. Reverting only the later release work restores the original development baseline without changing installed files.
