@@ -15,7 +15,7 @@ export function TunnelSection({ state }: Props) {
   if (!config) return null;
 
   const protocol = config.endpoint?.upstream_protocol || "http2";
-  const mtu = config.listener?.tun?.mtu_size || 1280;
+  const mtu = config.listener?.tun?.mtu_size || 1350;
 
   return (
     <Card padding="md">

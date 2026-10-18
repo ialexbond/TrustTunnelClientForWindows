@@ -75,9 +75,22 @@ describe("TunnelSection", () => {
     expect(screen.getByText("MTU")).toBeInTheDocument();
   });
 
-  it("shows current MTU value", () => {
-    render(<TunnelSection state={makeState()} />);
-    expect(screen.getByDisplayValue("1280")).toBeInTheDocument();
+  it.each([1280, 1350, 1400])("preserves a saved MTU of %i without requesting a write", (mtu) => {
+    const state = makeState();
+    state.config!.listener.tun!.mtu_size = mtu;
+    render(<TunnelSection state={state} />);
+    expect(screen.getByDisplayValue(String(mtu))).toBeInTheDocument();
+    expect(state.updateField).not.toHaveBeenCalled();
+    expect(state.handleSave).not.toHaveBeenCalled();
+  });
+
+  it("shows 1350 when MTU is absent without requesting a write", () => {
+    const state = makeState();
+    delete (state.config!.listener.tun as { mtu_size?: number }).mtu_size;
+    render(<TunnelSection state={state} />);
+    expect(screen.getByDisplayValue("1350")).toBeInTheDocument();
+    expect(state.updateField).not.toHaveBeenCalled();
+    expect(state.handleSave).not.toHaveBeenCalled();
   });
 
   it("calls updateField when HTTP/3 button is clicked", () => {

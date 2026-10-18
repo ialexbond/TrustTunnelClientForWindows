@@ -98,6 +98,31 @@ describe("ConfigEditView (production)", () => {
     expect(dialog).toBeInTheDocument();
   });
 
+  it("shows 1350 when MTU is absent without changing or saving the configuration", async () => {
+    const config = configFixture();
+    const { mtu_size: _mtu, ...tun } = config.listener.tun;
+    const withoutMtu = { ...config, listener: { tun } };
+    invokeMock.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "read_client_config" ? withoutMtu : undefined),
+    );
+    setup({ isActiveConfig: false, status: "disconnected" });
+    expect(await screen.findByLabelText(i18n.t("connection.editView.mtu"))).toHaveValue("1350");
+    expect(screen.getByRole("button", { name: L.save })).toBeDisabled();
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "save_client_config")).toBe(false);
+  });
+
+  it.each([1280, 1350, 1400])("preserves a saved MTU of %i when opening the editor", async (mtu) => {
+    const config = configFixture();
+    config.listener.tun.mtu_size = mtu;
+    invokeMock.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "read_client_config" ? config : undefined),
+    );
+    setup({ isActiveConfig: false, status: "disconnected" });
+    expect(await screen.findByLabelText(i18n.t("connection.editView.mtu"))).toHaveValue(String(mtu));
+    expect(screen.getByRole("button", { name: L.save })).toBeDisabled();
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "save_client_config")).toBe(false);
+  });
+
   // D-29 / T-11-14: the password field shows a MASKED placeholder, NEVER the real value,
   // AND no log/sanitize sink is ever called with the password argument.
   it("D-29: password field is masked and the secret never reaches the DOM or a log sink", async () => {
