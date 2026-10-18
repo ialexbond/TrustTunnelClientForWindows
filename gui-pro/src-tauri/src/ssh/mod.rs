@@ -873,7 +873,7 @@ post_quantum_group_enabled = true
 {endpoint_section}
 
 [listener.tun]
-mtu_size = 1280
+mtu_size = 1350
 change_system_dns = true
 included_routes = ["0.0.0.0/0"]
 excluded_routes = []
@@ -1398,6 +1398,19 @@ pub(crate) async fn exec_command_cancellable(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_client_config_uses_upstream_mtu_default() {
+        let config = build_client_config(
+            "hostname = \"vpn.example.com\"\naddresses = [\"192.0.2.1:443\"]\nanti_dpi = false",
+            "Setup Wizard",
+        );
+        let parsed: toml::Value = toml::from_str(&config).expect("generated config must parse");
+
+        assert_eq!(parsed["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
+        assert_eq!(parsed["endpoint"]["hostname"].as_str(), Some("vpn.example.com"));
+        assert_eq!(parsed["endpoint"]["anti_dpi"].as_bool(), Some(true));
+    }
 
     // ── D-05 (phase 32): the data root is NAMED, not derived from the executable ──
 

@@ -784,7 +784,7 @@ fn merge_json_into_table(
 /// config has none — e.g. a legacy SOCKS-only config being converted to TUN.
 fn default_tun_table() -> toml_edit::Table {
     let mut tun = toml_edit::Table::new();
-    tun.insert("mtu_size", toml_edit::value(1280));
+    tun.insert("mtu_size", toml_edit::value(1350));
     tun.insert("change_system_dns", toml_edit::value(true));
     let mut inc = toml_edit::Array::new();
     inc.push("0.0.0.0/0");
@@ -1557,6 +1557,62 @@ excluded_routes = []
         assert!(out.contains("password = \"secret\""), "password lost:\n{out}");
     }
 
+    #[test]
+    fn apply_edit_synthesizes_tun_with_upstream_mtu_default() {
+        let existing = "[endpoint]\nhostname = \"vpn.example.com\"\n";
+        let config = serde_json::json!({ "endpoint": { "name": "Renamed" } });
+
+        let out = apply_config_edit(existing, &config).unwrap();
+        let parsed: toml::Value = toml::from_str(&out).unwrap();
+
+        assert_eq!(parsed["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
+        assert_eq!(parsed["endpoint"]["hostname"].as_str(), Some("vpn.example.com"));
+    }
+
+    #[test]
+    fn apply_edit_preserves_explicit_and_omitted_tun_mtu() {
+        for mtu in [Some(1280), Some(1350), Some(1400), None] {
+            let mtu_line = mtu.map(|value| format!("mtu_size = {value}\n")).unwrap_or_default();
+            let existing = format!(
+                "[endpoint]\nhostname = \"vpn.example.com\"\nname = \"Old\"\n\
+                 [listener.tun]\n{mtu_line}change_system_dns = true\n\
+                 included_routes = [\"0.0.0.0/0\"]\n"
+            );
+            let config = serde_json::json!({
+                "endpoint": { "name": "Renamed" },
+                "listener": { "tun": { "change_system_dns": false } }
+            });
+
+            let out = apply_config_edit(&existing, &config).unwrap();
+            let parsed: toml::Value = toml::from_str(&out).unwrap();
+            let tun = parsed["listener"]["tun"].as_table().unwrap();
+
+            assert_eq!(tun.get("mtu_size").and_then(|value| value.as_integer()), mtu);
+            assert_eq!(tun["change_system_dns"].as_bool(), Some(false));
+            assert_eq!(parsed["endpoint"]["name"].as_str(), Some("Renamed"));
+            assert!(normalize_config_socks_to_tun(&existing).is_none(), "existing TUN config must not be rewritten");
+        }
+    }
+
+    #[test]
+    fn normalize_preserves_explicit_and_omitted_tun_mtu() {
+        for mtu in [Some(1280), Some(1350), Some(1400), None] {
+            let mtu_line = mtu.map(|value| format!("mtu_size = {value}\n")).unwrap_or_default();
+            let existing = format!(
+                "[listener.tun]\n{mtu_line}change_system_dns = true\n\
+                 [listener.socks]\naddress = \"127.0.0.1:1080\"\n"
+            );
+
+            let out = normalize_config_socks_to_tun(&existing).expect("legacy SOCKS block must be removed");
+            let parsed: toml::Value = toml::from_str(&out).unwrap();
+            let listener = parsed["listener"].as_table().unwrap();
+            let tun = listener["tun"].as_table().unwrap();
+
+            assert_eq!(tun.get("mtu_size").and_then(|value| value.as_integer()), mtu);
+            assert!(!listener.contains_key("socks"));
+        }
+    }
+
     /// SOCKS5 client mode was removed — an incoming `[listener.socks]` payload is stripped on save
     /// and the `[listener.tun]` listener is preserved. No socks block can ever be written.
     #[test]
@@ -1594,6 +1650,8 @@ password = "secret"
 address = "127.0.0.1:1080"
 "#;
         let out = normalize_config_socks_to_tun(socks).expect("socks config should be rewritten");
+        let parsed: toml::Value = toml::from_str(&out).unwrap();
+        assert_eq!(parsed["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
         assert!(!out.contains("[listener.socks]"), "socks block survived:\n{out}");
         assert!(out.contains("[listener.tun]"), "tun listener missing:\n{out}");
         assert!(out.contains("0.0.0.0/0"), "full-tunnel route missing:\n{out}");
