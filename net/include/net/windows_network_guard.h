@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/cidr_range.h"
@@ -29,7 +30,7 @@ struct NetworkGuardRule {
     uint8_t protocol = 0;
     uint16_t local_port = 0;
     uint16_t remote_port = 0;
-    bool persistent = true;
+    bool persistent = false;
     bool inbound = false;
 };
 
@@ -37,8 +38,8 @@ std::vector<NetworkGuardRule> network_guard_base_plan(const NetworkGuardPolicy &
 bool network_guard_valid_policy(const NetworkGuardPolicy &policy);
 uint8_t network_guard_rule_weight(const NetworkGuardRule &rule);
 bool network_guard_rule_blocks(const NetworkGuardRule &rule);
-// Set only by the normal Windows client startup after checking persistent state.
-// Diagnostic helpers never change this process-local mode or persistent policy.
+// Set only by the normal Windows client startup after checking the GUI-owned session.
+// Diagnostic helpers never change this process-local mode or network policy.
 void network_guard_set_strict_socket_protection(bool enabled);
 bool network_guard_strict_socket_protection();
 bool network_guard_socket_protection_result(
@@ -46,6 +47,14 @@ bool network_guard_socket_protection_result(
 std::vector<NetworkGuardRule> network_guard_tunnel_plan(
         uint64_t interface_luid, const CidrRange &ipv4, const CidrRange &ipv6);
 bool network_guard_valid_hostname(const std::string &host);
+
+enum class NetworkGuardCommandKind { INVALID, STATUS, ARM, RELEASE };
+struct NetworkGuardCommand {
+    NetworkGuardCommandKind kind = NetworkGuardCommandKind::INVALID;
+    std::string config_path;
+};
+NetworkGuardCommand network_guard_parse_command(std::string_view line);
+bool network_guard_valid_gui_ready(std::string_view line);
 
 // The same transaction coordinator is used for the real WFP calls and fault injection.
 struct NetworkGuardTransaction {
@@ -72,12 +81,28 @@ struct NetworkGuardResolveResult {
 class WindowsNetworkGuard {
 public:
     static NetworkGuardResult status();
-    static NetworkGuardResult arm(const NetworkGuardPolicy &policy);
-    // Only an explicit user disconnect/uninstall calls release, after the core exits.
-    // Diagnostic helpers, normal startup, destructors and crash recovery never release it.
+    // Migration/uninstall only: remove proven-owned version 1 persistent objects.
+    // This never releases the current GUI-owned session's dynamic rules.
     static NetworkGuardResult release();
     // Core-owned sockets, numeric physical-adapter DNS servers, no OS resolver fallback.
     static NetworkGuardResolveResult resolve(const std::string &host);
+};
+
+// The GUI owns the helper process and its input pipe. Closing input or terminating
+// that helper closes its dynamic WFP engine and removes every blocking rule.
+class WindowsNetworkGuardSession {
+public:
+    WindowsNetworkGuardSession();
+    ~WindowsNetworkGuardSession();
+    WindowsNetworkGuardSession(const WindowsNetworkGuardSession &) = delete;
+    WindowsNetworkGuardSession &operator=(const WindowsNetworkGuardSession &) = delete;
+    NetworkGuardResult status();
+    NetworkGuardResult arm(const NetworkGuardPolicy &policy);
+    NetworkGuardResult release();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
 };
 
 class WindowsNetworkGuardTunnel {

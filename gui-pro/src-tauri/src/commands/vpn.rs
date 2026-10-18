@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -2558,6 +2558,82 @@ pub async fn respawn_sidecar(
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NetworkGuardFailure {
+    generation: u64,
+    session_id: u64,
+}
+
+pub(crate) fn parse_network_guard_failure(payload: &str) -> Option<NetworkGuardFailure> {
+    if payload.len() > 256 {
+        return None;
+    }
+    let failure: NetworkGuardFailure = serde_json::from_str(payload).ok()?;
+    (failure.session_id != 0).then_some(failure)
+}
+
+fn claim_network_guard_failure(
+    generation: &AtomicU64,
+    disconnect_requested: &AtomicBool,
+    failure_generation: u64,
+    helper_is_current: bool,
+) -> Option<u64> {
+    if !helper_is_current || disconnect_requested.load(Ordering::SeqCst) {
+        return None;
+    }
+    let next_generation = failure_generation.checked_add(1)?;
+    generation
+        .compare_exchange(
+            failure_generation,
+            next_generation,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .ok()
+        .map(|_| next_generation)
+}
+
+/// A dead guardian invalidates only the connection that still owns its failure event.
+/// Acquire the lifecycle lock before setting cancellation: a delayed event must never
+/// cancel or kill a newer manual connection that won this lock first.
+pub(crate) async fn handle_network_guard_failure(
+    app: tauri::AppHandle,
+    failure: NetworkGuardFailure,
+) {
+    let Some(state) = app.try_state::<AppState>() else { return; };
+    let flow = Arc::clone(&state.lifecycle_flow);
+    let _flow_guard = flow.lock().await;
+    let helper_is_current = crate::network_guard::failure_is_current(failure.session_id).await;
+    let Some(generation) = claim_network_guard_failure(
+        &state.connection_generation,
+        &state.user_disconnect_requested,
+        failure.generation,
+        helper_is_current,
+    ) else { return; };
+
+    state.user_disconnect_requested.store(true, Ordering::SeqCst);
+    if let Ok(mut flag) = state.disconnecting.lock() { *flag = true; }
+    let child = state.sidecar_child.lock().unwrap_or_else(|error| error.into_inner()).take();
+    let stopped = if let Some(child) = child {
+        if let Ok(mut flag) = child.disconnecting.lock() { *flag = true; }
+        sidecar::kill_sidecar(child).await.is_ok()
+    } else {
+        true
+    };
+    crate::dns_guard::restore_system_dns();
+    if stopped {
+        // A newer disconnect may have advanced the generation during the confirmed kill.
+        // The cleanup API rechecks ownership after taking the guardian operation lock.
+        let _ = crate::network_guard::release_after_disconnect(&app, &state, generation).await;
+    }
+    if state.connection_generation.load(Ordering::SeqCst) == generation {
+        crate::logging::log_app("WARN", "[vpn] network guardian failed; stopping its connection");
+        set_vpn_status(&app, &state, VpnStatus::Error, Some(crate::network_guard::FAILED.to_string()));
+        if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
+    }
+}
+
 /// G-03.1-7 — restart the core after Windows did not create the WinTUN adapter, on a connect the
 /// person (or the launch auto-connect, save-and-reconnect, or the tray) started.
 ///
@@ -3176,6 +3252,44 @@ pub fn set_plate_language(language: String, state: tauri::State<'_, AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guardian_failure_payload_is_bounded_and_strict() {
+        let failure = parse_network_guard_failure(r#"{"generation":7,"session_id":11}"#).unwrap();
+        assert_eq!((failure.generation, failure.session_id), (7, 11));
+        for invalid in [
+            r#"{"generation":7,"session_id":0}"#,
+            r#"{"generation":7,"session_id":11,"other":true}"#,
+            r#"{"generation":7,"session_id":-1}"#,
+            r#"{"generation":7,"session_id":18446744073709551616}"#,
+            r#"{"generation":7}"#,
+        ] {
+            assert!(parse_network_guard_failure(invalid).is_none());
+        }
+        let oversized = format!("{}{{\"generation\":7,\"session_id\":11}}", " ".repeat(256));
+        assert!(parse_network_guard_failure(&oversized).is_none());
+    }
+
+    #[test]
+    fn guardian_failure_claim_never_advances_a_newer_cancelled_or_replaced_session() {
+        let generation = AtomicU64::new(20);
+        let disconnected = AtomicBool::new(false);
+        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 19, true), None);
+        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, false), None);
+        disconnected.store(true, Ordering::SeqCst);
+        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, true), None);
+        assert_eq!(generation.load(Ordering::SeqCst), 20);
+
+        disconnected.store(false, Ordering::SeqCst);
+        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, true), Some(21));
+        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, true), None);
+        assert_eq!(generation.load(Ordering::SeqCst), 21);
+        assert!(!disconnected.load(Ordering::SeqCst));
+
+        generation.store(u64::MAX, Ordering::SeqCst);
+        assert_eq!(claim_network_guard_failure(&generation, &disconnected, u64::MAX, true), None);
+        assert_eq!(generation.load(Ordering::SeqCst), u64::MAX);
+    }
 
     /// **The pid file follows the BINARIES, not the user's data.** (Phase 32, D-05.)
     ///

@@ -27,9 +27,9 @@ beforeEach(() => {
 });
 
 describe("NetworkGuardBanner", () => {
-  it.each(["disconnected", "error"] as VpnStatus[])("restores persistent protection recovery on %s without a running child", async (status) => {
+  it.each(["disconnected", "error"] as VpnStatus[])("offers session protection recovery on %s without a running child", async (status) => {
     render(<NetworkGuardBanner status={status} />);
-    expect(await screen.findByRole("button", { name: "Снять блокировку" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Продолжить без VPN" })).toBeEnabled();
     expect(screen.getByRole("status")).toHaveTextContent(i18n.t("network_guard.blocked"));
     expect(invoke).not.toHaveBeenCalledWith("vpn_disconnect");
   });
@@ -55,7 +55,7 @@ describe("NetworkGuardBanner", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalled());
     act(() => changed({ payload: { armed: true } }));
     await act(async () => snapshot.resolve(false));
-    expect(screen.getByRole("button", { name: "Снять блокировку" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Продолжить без VPN" })).toBeInTheDocument();
   });
 
   it("releases only on explicit click, prevents duplicate commands and waits for confirmation", async () => {
@@ -66,7 +66,7 @@ describe("NetworkGuardBanner", () => {
       return armed;
     });
     render(<NetworkGuardBanner status="error" />);
-    const button = await screen.findByRole("button", { name: "Снять блокировку" });
+    const button = await screen.findByRole("button", { name: "Продолжить без VPN" });
     fireEvent.click(button);
     fireEvent.click(button);
     expect(invoke).toHaveBeenCalledWith("vpn_disconnect");
@@ -84,7 +84,7 @@ describe("NetworkGuardBanner", () => {
       return true;
     });
     render(<NetworkGuardBanner status="error" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Снять блокировку" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить без VPN" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(i18n.t("errors.network_guard_failed"));
     expect(screen.getByText(i18n.t("network_guard.blocked"))).toBeInTheDocument();
     expect(screen.getByRole("button")).toBeEnabled();
@@ -95,7 +95,7 @@ describe("NetworkGuardBanner", () => {
     vi.mocked(invoke).mockRejectedValue("network-guard-failed");
     render(<NetworkGuardBanner status="disconnected" />);
     expect(await screen.findByText(i18n.t("errors.network_guard_failed"))).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Снять блокировку" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Продолжить без VPN" })).toBeEnabled();
     expect(screen.queryByText(i18n.t("network_guard.blocked"))).not.toBeInTheDocument();
   });
 
@@ -103,7 +103,7 @@ describe("NetworkGuardBanner", () => {
     const view = render(<NetworkGuardBanner status="connected" />);
     await waitFor(() => expect(invoke).toHaveBeenCalled());
     view.rerender(<NetworkGuardBanner status="error" />);
-    expect(await screen.findByRole("button", { name: "Снять блокировку" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Продолжить без VPN" })).toBeInTheDocument();
     act(() => changed({ payload: { armed: false } }));
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
@@ -125,7 +125,7 @@ describe("NetworkGuardBanner", () => {
   it("renders English recovery copy when English is selected", async () => {
     await i18n.changeLanguage("en");
     render(<NetworkGuardBanner status="disconnected" />);
-    expect(await screen.findByRole("button", { name: "Release block" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Protection is still blocking traffic outside the VPN");
+    expect(await screen.findByRole("button", { name: "Continue without VPN" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("While the app is open, protection stops traffic outside the VPN");
   });
 });

@@ -122,10 +122,10 @@ TEST(WindowsNetworkGuardTest, LocalAccessDoesNotCreatePublicDnsOrServiceExceptio
     EXPECT_FALSE(allowed(plan, {.remote = "224.1.2.3"}));
 }
 
-TEST(WindowsNetworkGuardTest, CrashLosesOnlyDynamicTunnelPermission) {
+TEST(WindowsNetworkGuardTest, CoreCrashRetainsGuiSessionBaseButGuiExitRemovesAllBlockingRules) {
     auto base = network_guard_base_plan();
     auto dynamic = network_guard_tunnel_plan(99, CidrRange("10.20.30.40"), CidrRange("fd00::40"));
-    EXPECT_TRUE(std::all_of(base.begin(), base.end(), [](const auto &rule) {
+    EXPECT_TRUE(std::none_of(base.begin(), base.end(), [](const auto &rule) {
         return rule.persistent;
     }));
     EXPECT_TRUE(std::none_of(dynamic.begin(), dynamic.end(), [](const auto &rule) {
@@ -135,11 +135,16 @@ TEST(WindowsNetworkGuardTest, CrashLosesOnlyDynamicTunnelPermission) {
     live.insert(live.end(), dynamic.begin(), dynamic.end());
     Flow flow{.remote = "198.51.100.1", .local = "10.20.30.40", .interface_luid = 99};
     EXPECT_TRUE(allowed(live, flow));
-    // Engine-close/core death/GUI job termination removes dynamic filters; persistent base stays.
+    // Core death closes its TUN engine; the separate GUI-owned helper still owns its base.
     dynamic.clear();
     EXPECT_FALSE(allowed(base, flow));
     EXPECT_FALSE(allowed(base, {.remote = "2001:db8::1", .local = "2001:db8::20"}));
     EXPECT_TRUE(allowed(base, {.remote = "198.51.100.1", .core = true}));
+    // Helper EOF/GUI job termination removes its entire dynamic base. Windows
+    // restart cannot restore it: neither the base nor TUN plan has persistent rules.
+    base.clear();
+    EXPECT_TRUE(allowed(base, flow));
+    EXPECT_TRUE(allowed(base, {.remote = "2001:db8::1", .local = "2001:db8::20"}));
 }
 
 TEST(WindowsNetworkGuardTest, CrashCannotFallBackToLanDnsButRetainsOrdinaryLanAccess) {
@@ -301,9 +306,9 @@ TEST(WindowsNetworkGuardTest, BootstrapAcceptsOnlyOneHostAndNeverAUrlOrCommand) 
 }
 
 TEST(WindowsNetworkGuardTest, UnknownStateIsReportedProtectedWithFixedError) {
-    EXPECT_EQ("{\"armed\":true,\"error\":\"network-guard-unavailable\",\"version\":1}", NetworkGuardResult{}.to_json());
-    EXPECT_EQ("{\"armed\":false,\"version\":1}", (NetworkGuardResult{true, false, nullptr}.to_json()));
-    EXPECT_EQ("{\"addresses\":[],\"error\":\"network-guard-invalid-host\",\"version\":1}",
+    EXPECT_EQ("{\"armed\":true,\"error\":\"network-guard-unavailable\",\"version\":2}", NetworkGuardResult{}.to_json());
+    EXPECT_EQ("{\"armed\":false,\"version\":2}", (NetworkGuardResult{true, false, nullptr}.to_json()));
+    EXPECT_EQ("{\"addresses\":[],\"error\":\"network-guard-invalid-host\",\"version\":2}",
             (NetworkGuardResolveResult{{}, "network-guard-invalid-host"}.to_json()));
 }
 
@@ -317,6 +322,28 @@ TEST(WindowsNetworkGuardTest, GuardedTransportRequiresBothPinsOnAPhysicalInterfa
     EXPECT_TRUE(network_guard_socket_protection_result(false, 7, false, true, false));
     EXPECT_TRUE(network_guard_socket_protection_result(false, 7, false, false, true));
     EXPECT_FALSE(network_guard_socket_protection_result(false, 7, false, false, false));
+}
+
+TEST(WindowsNetworkGuardTest, SessionProtocolHasBoundedUnambiguousCommands) {
+    EXPECT_EQ(NetworkGuardCommandKind::STATUS, network_guard_parse_command("S").kind);
+    EXPECT_EQ(NetworkGuardCommandKind::RELEASE, network_guard_parse_command("R").kind);
+    auto arm = network_guard_parse_command("A C:\\Profiles With Spaces\\profile.toml");
+    EXPECT_EQ(NetworkGuardCommandKind::ARM, arm.kind);
+    EXPECT_EQ("C:\\Profiles With Spaces\\profile.toml", arm.config_path);
+    for (const char *line : {"", "A", "A ", "S ", "R anything", "arm path", "A file\nR", "A file\rR"}) {
+        EXPECT_EQ(NetworkGuardCommandKind::INVALID, network_guard_parse_command(line).kind);
+    }
+    EXPECT_EQ(NetworkGuardCommandKind::INVALID, network_guard_parse_command("A " + std::string(32769, 'x')).kind);
+    EXPECT_EQ(NetworkGuardCommandKind::INVALID, network_guard_parse_command(std::string("A file\0R", 8)).kind);
+}
+
+TEST(WindowsNetworkGuardTest, CoreCannotStartWithoutTheExactGuiJobHandshake) {
+    EXPECT_TRUE(network_guard_valid_gui_ready("TRUSTTUNNEL_GUI_READY_V2"));
+    for (const char *line :
+            {"", "TRUSTTUNNEL_GUI_READY_V1", "TRUSTTUNNEL_GUI_READY_V2 ", "ready", "TRUSTTUNNEL_GUI_READY_V2\n"}) {
+        EXPECT_FALSE(network_guard_valid_gui_ready(line));
+    }
+    EXPECT_FALSE(network_guard_valid_gui_ready(std::string(65, 'x')));
 }
 
 } // namespace

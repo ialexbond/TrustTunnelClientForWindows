@@ -9,6 +9,10 @@ const { EXPECTED_VERSION, EXPECTED_POLICY_VERSION, DEFAULT_CORE, validateWindows
 
 // Synthetic header fixtures never execute. Query results are injected, so this
 // suite is safe on CI with no Windows core, network, or user settings.
+const CORE_HELP = "  --routing-policy-version\r\n  --endpoint-probe-version\r\n  --probe-endpoint arg\r\n"
+  + "--gui-session\r\n--network-guard-version\r\n--network-guard-status\r\n--network-guard-session\r\n"
+  + "--network-guard-release\r\n--network-guard-resolve arg\r\n";
+
 function executable() {
   const bytes = Buffer.alloc(1024);
   bytes.write("MZ");
@@ -26,10 +30,10 @@ function fixture(overrides = {}, bytes = executable()) {
   const calls = [];
   const results = {
     "--version": { status: 0, stdout: `trusttunnel_client ${EXPECTED_VERSION}\r\n` },
-    "--help": { status: 1, stdout: "  --routing-policy-version\r\n  --endpoint-probe-version\r\n  --probe-endpoint arg\r\n--network-guard-version\r\n--network-guard-status\r\n--network-guard-arm arg\r\n--network-guard-release\r\n--network-guard-resolve arg\r\n" },
+    "--help": { status: 1, stdout: CORE_HELP },
     "--routing-policy-version": { status: 0, stdout: `${EXPECTED_POLICY_VERSION}\r\n` },
     "--endpoint-probe-version": { status: 0, stdout: "1\r\n" },
-    "--network-guard-version": { status: 0, stdout: "1\r\n" },
+    "--network-guard-version": { status: 0, stdout: "2\r\n" },
     ...overrides,
   };
   return {
@@ -50,7 +54,7 @@ test("matching Windows core reports its measured hash and only uses read-only qu
   assert.equal(result.version, "1.1.11");
   assert.equal(result.policyVersion, "1");
   assert.equal(result.endpointProbeVersion, "1");
-  assert.equal(result.networkGuardVersion, "1");
+  assert.equal(result.networkGuardVersion, "2");
   assert.equal(result.sha256, crypto.createHash("sha256").update(bytes).digest("hex"));
 });
 
@@ -138,16 +142,42 @@ test("release and bundle hooks check the exact Tauri sidecar, and prerelease exe
 });
 
 
-test("previous 1.1.11 fork cannot ship without persistent protection", () => {
+test("previous 1.1.11 fork cannot ship without GUI-lifetime protection", () => {
   const { calls, options } = fixture({ "--help": { status: 1, stdout:
     "--routing-policy-version\n--endpoint-probe-version\n--probe-endpoint arg\n" } });
-  assert.throws(() => verifyCore(DEFAULT_CORE, options), /persistent network guard capability/);
+  assert.throws(() => verifyCore(DEFAULT_CORE, options), /GUI-lifetime network guard capability/);
   assert.deepEqual(calls, ["--version", "--help", "--routing-policy-version", "--endpoint-probe-version"]);
 });
 
-for (const version of ["0", "2", "1\nextra"]) {
-  test(`unsupported persistent protection ${JSON.stringify(version)} fails`, () => {
+for (const version of ["0", "1", "3", "2\nextra"]) {
+  test(`unsupported session protection ${JSON.stringify(version)} fails`, () => {
     const { options } = fixture({ "--network-guard-version": { status: 0, stdout: version } });
-    assert.throws(() => verifyCore(DEFAULT_CORE, options), /must support network guard 1/);
+    assert.throws(() => verifyCore(DEFAULT_CORE, options), /must support network guard 2/);
+  });
+}
+
+test("persistent v1 core cannot substitute its one-shot arm for the resident session", () => {
+  const { calls, options } = fixture({ "--help": { status: 1, stdout:
+    "--routing-policy-version\n--endpoint-probe-version\n--probe-endpoint arg\n"
+      + "--network-guard-version\n--network-guard-status\n--network-guard-arm arg\n"
+      + "--network-guard-release\n--network-guard-resolve arg\n" } });
+  assert.throws(() => verifyCore(DEFAULT_CORE, options), /GUI-lifetime network guard capability/);
+  assert.deepEqual(calls, ["--version", "--help", "--routing-policy-version", "--endpoint-probe-version"]);
+});
+
+test("session capability must be a complete option and is never executed by the gate", () => {
+  const help = CORE_HELP.replace("--network-guard-session\r\n", "--network-guard-session-future\r\n");
+  const { calls, options } = fixture({ "--help": { status: 1, stdout: help } });
+  assert.throws(() => verifyCore(DEFAULT_CORE, options), /GUI-lifetime network guard capability/);
+  assert.ok(!calls.includes("--network-guard-session"));
+  assert.ok(!calls.includes("--network-guard-version"));
+});
+
+for (const replacement of ["", "--gui-session-future\r\n"]) {
+  test(`capability v2 without the exact GUI startup handshake is rejected (${JSON.stringify(replacement)})`, () => {
+    const { calls, options } = fixture({ "--help": { status: 1, stdout:
+      CORE_HELP.replace("--gui-session\r\n", replacement) } });
+    assert.throws(() => verifyCore(DEFAULT_CORE, options), /GUI-lifetime network guard capability/);
+    assert.deepEqual(calls, ["--version", "--help", "--routing-policy-version", "--endpoint-probe-version"]);
   });
 }

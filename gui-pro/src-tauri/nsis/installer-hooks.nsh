@@ -1253,7 +1253,68 @@ Var TT_LEGACY_SURVIVOR_SEEN
 !macroend
 
 
+; Reused after installation and before removal: always invoke the installed
+; executable so its WFP application identity matches the old rules.
+!macro TT_CLEANUP_LEGACY_NETWORK_GUARD
+  ; Protection must be removed before its only recovery executable is deleted.
+  ; The GUI's job closes the v2 resident helper and its dynamic session filters.
+  ; The composite version query is safe on older cores: --version never starts VPN.
+  ; Both v1 and v2 provide the narrow cleanup for a previous persistent candidate.
+  IfFileExists "$INSTDIR\trusttunnel_client.exe" 0 tt_guard_uninstall_failed
+  nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --version --network-guard-version'
+  Pop $R0
+  Pop $R1
+  StrCmp $R0 "0" 0 tt_guard_uninstall_failed
+  tt_guard_trim_version:
+    StrCpy $R2 $R1 1 -1
+    StrCmp $R2 "$\r" tt_guard_trim_char
+    StrCmp $R2 "$\n" tt_guard_trim_char tt_guard_version_ready
+  tt_guard_trim_char:
+    StrCpy $R1 $R1 -1
+    Goto tt_guard_trim_version
+  tt_guard_version_ready:
+    StrCmp $R1 "1" tt_guard_release_begin
+    StrCmp $R1 "2" tt_guard_release_begin tt_guard_uninstall_failed
+  tt_guard_release_begin:
+    StrCpy $R2 0
+  tt_guard_release_retry:
+  nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --network-guard-release'
+  Pop $R0
+  Pop $R1
+  StrCmp $R0 "0" tt_guard_trim_reply tt_guard_release_wait
+  tt_guard_trim_reply:
+    StrCpy $R3 $R1 1 -1
+    StrCmp $R3 "$\r" tt_guard_trim_reply_char
+    StrCmp $R3 "$\n" tt_guard_trim_reply_char tt_guard_reply_ready
+  tt_guard_trim_reply_char:
+    StrCpy $R1 $R1 -1
+    Goto tt_guard_trim_reply
+  tt_guard_reply_ready:
+    ; v2 release removes only the legacy namespace. A live GUI session may
+    ; remain armed even after successful legacy cleanup: keep the helper then.
+    StrCmp $R1 '{"armed":false,"version":1}' tt_guard_uninstall_done
+    StrCmp $R1 '{"armed":false,"version":2}' tt_guard_uninstall_done
+  tt_guard_release_wait:
+  ; Process termination and dynamic-session teardown are asynchronous. Retry only
+  ; this owned cleanup, at most three bounded attempts; preserve the helper on failure.
+  IntOp $R2 $R2 + 1
+  IntCmp $R2 3 tt_guard_uninstall_failed 0 tt_guard_uninstall_failed
+  Sleep 250
+  Goto tt_guard_release_retry
+  tt_guard_uninstall_failed:
+    DetailPrint "$(networkGuardReleaseFailed)"
+    MessageBox MB_ICONSTOP|MB_OK "$(networkGuardReleaseFailed)"
+    Abort
+  tt_guard_uninstall_done:
+!macroend
+
+
 !macro NSIS_HOOK_POSTINSTALL
+
+  ; New files already exist at their final path. Do not require a successful
+  ; GUI launch to remove protection left by the earlier persistent candidate.
+  ; Failure aborts this step while preserving the newly installed recovery core.
+  !insertmacro TT_CLEANUP_LEGACY_NETWORK_GUARD
 
   ; ── THE MARKER DESCRIBES THIS INSTALL, OR IT DOES NOT EXIST ──────────────────
   ;
@@ -1469,34 +1530,10 @@ Var TT_LEGACY_SURVIVOR_SEEN
     FileOpen $R1 "${TT_SIDECAR_PID_FILE}" r
     FileRead $R1 $R0
     FileClose $R1
-    nsExec::Exec 'taskkill /F /PID $R0'
+    nsExec::Exec /TIMEOUT=5000 'taskkill /F /PID $R0'
   Sleep 500
 
-  ; Protection must be removed before its only recovery executable is deleted.
-  ; The composite version query is safe on older cores: --version never starts VPN.
-  IfFileExists "$INSTDIR\trusttunnel_client.exe" 0 tt_guard_uninstall_failed
-  nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --version --network-guard-version'
-  Pop $R0
-  Pop $R1
-  StrCmp $R0 "0" 0 tt_guard_uninstall_failed
-  tt_guard_trim_version:
-    StrCpy $R2 $R1 1 -1
-    StrCmp $R2 "$\r" tt_guard_trim_char
-    StrCmp $R2 "$\n" tt_guard_trim_char tt_guard_version_ready
-  tt_guard_trim_char:
-    StrCpy $R1 $R1 -1
-    Goto tt_guard_trim_version
-  tt_guard_version_ready:
-    StrCmp $R1 "1" 0 tt_guard_uninstall_failed
-  nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --network-guard-release'
-  Pop $R0
-  Pop $R1
-  StrCmp $R0 "0" tt_guard_uninstall_done tt_guard_uninstall_failed
-  tt_guard_uninstall_failed:
-    DetailPrint "$(networkGuardReleaseFailed)"
-    MessageBox MB_ICONSTOP|MB_OK "$(networkGuardReleaseFailed)"
-    Abort
-  tt_guard_uninstall_done:
+  !insertmacro TT_CLEANUP_LEGACY_NETWORK_GUARD
 
 !macroend
 

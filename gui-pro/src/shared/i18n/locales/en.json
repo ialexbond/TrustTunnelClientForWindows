@@ -193,13 +193,13 @@
     "auto_connect_no_target": "Auto-connect has no server to connect to yet. Connect once manually and it will remember"
   },
   "network_guard": {
-    "blocked": "Protection is still blocking traffic outside the VPN. Connect or release the block.",
-    "release": "Release block"
+    "blocked": "VPN is disconnected. While the app is open, protection stops traffic outside the VPN. Reconnect or continue without VPN.",
+    "release": "Continue without VPN"
   },
   "errors": {
-    "network_guard_failed": "Could not check or change network protection. Try connecting or releasing the block again.",
-    "network_guard_active": "Network protection is still enabled. Enable protection on connection loss for the selected server, or release the block first.",
-    "network_guard_bootstrap_failed": "Could not resolve the VPN server address while protection is enabled. Try again or release the block before connecting.",
+    "network_guard_failed": "Could not check or change protection. Try again, or close the app to continue without VPN.",
+    "network_guard_active": "Protection is still enabled. Select Continue without VPN, or choose a connection with protection on connection loss enabled.",
+    "network_guard_bootstrap_failed": "Could not resolve the VPN server address. Try again or continue without VPN.",
     "internet_lost_disconnecting": "Internet connection lost. Disconnecting VPN, waiting for network recovery...",
     "server_connection_lost": "Lost connection to the server. Reconnecting…",
     "network_recovery_timeout": "Network recovery timed out (5 min). Please reconnect manually.",

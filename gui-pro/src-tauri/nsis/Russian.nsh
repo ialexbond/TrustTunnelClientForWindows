@@ -56,4 +56,4 @@ LangString uninstallDataKept ${LANG_RUSSIAN} "Данные пользовате�
 LangString uninstallCleaningRegistry ${LANG_RUSSIAN} "Очистка записей в реестре..."
 LangString uninstallRemovingUpdateFiles ${LANG_RUSSIAN} "Удаление временных файлов обновления..."
 
-LangString networkGuardReleaseFailed ${LANG_RUSSIAN} "Не удалось снять защитную блокировку. Откройте приложение и нажмите «Снять блокировку», затем повторите удаление. Если приложение не запускается, сначала переустановите текущую версию."
+LangString networkGuardReleaseFailed ${LANG_RUSSIAN} "Не удалось завершить очистку сетевой защиты. Файлы программы сохранены. Закройте приложение, подождите несколько секунд и повторите операцию. Если ошибка повторяется, запустите установщик последней версии."
