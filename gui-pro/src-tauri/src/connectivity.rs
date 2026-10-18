@@ -954,6 +954,12 @@ pub fn give_up_reason(queue_exhausted: bool) -> &'static str {
 /// is worth.
 pub fn terminal_reason_for_give_up(recorded: Option<&str>, queue_exhausted: bool) -> &'static str {
     match recorded {
+        Some(c) if c == crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON => {
+            crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON
+        }
+        Some(c) if c == crate::lifecycle::CORE_VERSION_MISMATCH_REASON => {
+            crate::lifecycle::CORE_VERSION_MISMATCH_REASON
+        }
         Some(c) if c == crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON => {
             crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON
         }
@@ -981,6 +987,9 @@ pub enum SupervisorOutcome {
     /// All `RECONNECT_MAX_ATTEMPTS` failed — caller surfaces the terminal Error
     /// carrying `RECONNECT_GAVE_UP_REASON`.
     GaveUp,
+    /// A failure requiring user intervention, such as an incorrect wall clock.
+    /// Stop the whole failover walk and preserve the recorded diagnosis.
+    TerminalFailure,
     /// The user disconnected, or the captured generation was advanced by a manual
     /// reconnect / disconnect — the supervisor is stale and must NOT act (D-04 +
     /// Codex HIGH stale-actor guard). No respawn, no status-write.
@@ -1090,6 +1099,15 @@ where
         // loop and surface the honest Error now, instead of burning the remaining
         // attempts. Only the specific never-recoverable reasons match; transient
         // failures fall through to the normal retry path below.
+        if matches!(
+            failure_reason.as_deref(),
+            Some(
+                crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON
+                    | crate::lifecycle::CORE_VERSION_MISMATCH_REASON
+            )
+        ) {
+            return SupervisorOutcome::TerminalFailure;
+        }
         if failure_reason
             .as_deref()
             .is_some_and(crate::lifecycle::is_terminal_reason)
@@ -1200,7 +1218,9 @@ where
 
         let outcome = run_one_candidate(index).await;
         match outcome {
-            SupervisorOutcome::Recovered | SupervisorOutcome::Aborted => {
+            SupervisorOutcome::Recovered
+            | SupervisorOutcome::Aborted
+            | SupervisorOutcome::TerminalFailure => {
                 return FailoverWalkResult {
                     outcome,
                     candidate_index: index,
@@ -2442,7 +2462,7 @@ pub fn start_reconnect_supervisor(
                     crate::commands::vpn::teardown_session_sidecar(&app).await;
                 }
             }
-            SupervisorOutcome::GaveUp => {
+            SupervisorOutcome::GaveUp | SupervisorOutcome::TerminalFailure => {
                 // One final generation re-check before the terminal write so a
                 // session that was reconnected/disconnected during the last attempt
                 // is not clobbered with an Error (Codex HIGH).
@@ -3884,6 +3904,60 @@ mod reconnect_supervisor_tests {
         assert_eq!(sleeps.get(), 0);
     }
 
+    #[tokio::test]
+    async fn core_1111_clock_and_version_errors_stop_all_retry_and_failover_attempts() {
+        let clock_reason = crate::sidecar::core_exit_error_reason(
+            "2026-10-18 12:00:00 ERROR Error: 8 certificate is not yet valid password=private",
+        )
+        .expect("the paired core's clock error must be understood");
+        for reason in [clock_reason, crate::lifecycle::CORE_VERSION_MISMATCH_REASON] {
+            assert!(crate::lifecycle::is_terminal_reason(reason));
+            assert_eq!(
+                crate::lifecycle::never_connected_exit_reason(false, false, true, Some(reason)),
+                Some(reason),
+            );
+            let candidates = Cell::new(0u32);
+            let attempts = Cell::new(0u32);
+            let sleeps = Cell::new(0u32);
+            let result = run_failover_walk(
+                4,
+                |_index| {
+                    candidates.set(candidates.get() + 1);
+                    let attempts = &attempts;
+                    let sleeps = &sleeps;
+                    async move {
+                        run_reconnect_loop(
+                            7,
+                            crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+                            |_attempt| {
+                                attempts.set(attempts.get() + 1);
+                                async move { (false, Duration::ZERO, Some(reason.to_string())) }
+                            },
+                            || false,
+                            || 7,
+                            |_attempt| {},
+                            || {
+                                sleeps.set(sleeps.get() + 1);
+                                async {}
+                            },
+                        )
+                        .await
+                    }
+                },
+                || true,
+            )
+            .await;
+            assert_eq!(result.outcome, SupervisorOutcome::TerminalFailure);
+            assert!(!result.queue_exhausted);
+            assert_eq!(candidates.get(), 1);
+            assert_eq!(attempts.get(), 1);
+            assert_eq!(sleeps.get(), 0);
+            for exhausted in [false, true] {
+                assert_eq!(terminal_reason_for_give_up(Some(reason), exhausted), reason);
+            }
+        }
+    }
+
     #[test]
     fn the_terminal_write_prefers_our_own_recorded_cause_and_nothing_else() {
         use crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON;
@@ -3990,7 +4064,10 @@ mod reconnect_supervisor_tests {
         // source it searches, so a literal needle matches ITSELF — measured: the locate-first arm
         // reported 2 hits on the first run. Assembling it here keeps the guard's subject to the
         // production arm alone. (Same trap, same fix, as `updater.rs::function_body`.)
-        let needle = format!("SupervisorOutcome::{}{} => {{", "Gave", "Up");
+        let needle = format!(
+            "SupervisorOutcome::{}{} | SupervisorOutcome::{}{} => {{",
+            "Gave", "Up", "Terminal", "Failure"
+        );
         let needle = needle.as_str();
         let hits = source.matches(needle).count();
         assert_eq!(

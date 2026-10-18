@@ -310,13 +310,13 @@ std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const Trus
 
 static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback() {
     return [](VpnVerifyCertificateEvent *event) {
-        const char *err = tls_verify_cert(event->cert, event->chain, nullptr);
-        if (err == nullptr) {
+        auto verification = tls_verify_cert_detailed(event->cert, event->chain, nullptr);
+        if (verification.error == nullptr) {
             tracelog(g_logger, "Certificate verified successfully");
             event->result = 0;
         } else {
-            errlog(g_logger, "Failed to verify certificate: {}", err);
-            event->result = -1;
+            errlog(g_logger, "Failed to verify certificate: {}", verification.error);
+            event->result = verification.not_yet_valid ? VPN_VCR_CERT_NOT_YET_VALID : -1;
         }
     };
 }

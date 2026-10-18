@@ -723,7 +723,9 @@ static int ssl_verify_callback(const char *host_name, const sockaddr *host_ip, C
     if ((host_name != nullptr || (host_ip != nullptr && host_ip->sa_family != AF_UNSPEC))
             && (host_name == nullptr || !tls_verify_cert_host_name(ctx.cert, host_name))
             && (host_ip == nullptr || host_ip->sa_family == AF_UNSPEC
-                    || !tls_verify_cert_ip(ctx.cert, SocketAddress(host_ip).str().c_str()))) {
+                    || !tls_verify_cert_ip(ctx.cert, SocketAddress(host_ip).host_str().c_str()))) {
+        // Identity failure takes precedence over an earlier chain validity-date cause.
+        ctx.handler_result = -1;
         log_vpn(vpn, warn, "Server host name or IP doesn't match certificate. Expected host: '{}', IP: '{}'",
                 host_name ? host_name : "<null>",
                 (host_ip && host_ip->sa_family != AF_UNSPEC) ? SocketAddress(host_ip).str().c_str() : "<none>");

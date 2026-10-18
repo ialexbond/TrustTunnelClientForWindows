@@ -21,6 +21,6 @@ declare module "node:child_process" {
   export function spawnSync(
     command: string,
     args: readonly string[],
-    options: { encoding: "utf8"; cwd?: string },
+    options: { encoding: "utf8"; cwd?: string; timeout?: number; windowsHide?: boolean },
   ): { status: number | null; stdout: string; stderr: string };
 }

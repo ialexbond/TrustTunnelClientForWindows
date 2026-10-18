@@ -5,18 +5,24 @@
 > The GUI desktop app (Pro / Light) is versioned separately and its user-facing release notes live with
 > the app, not here. The release entries below are upstream's own changelog (TrustTunnel /
 > TrustTunnelClient), copied as they are; the fork's own core changes are not recorded in them. The
-> core that ships with the application is upstream `v1.1.7` plus the fork changes listed in the section
+> core prepared for Pro 3.2.0 is upstream `v1.1.11` plus the fork changes listed in the section
 > right below.
 
-## Fork changes on top of upstream v1.1.7 (not in the entries below)
+## Fork changes on top of upstream v1.1.11 (not in the entries below)
 
-The core sources carrying these changes are on the `release/tt-win-3.1.0` branch and in the release
-tags such as `v3.1.0-pro`, not on `master`.
+The 3.2.0 development sources are on `codex/release-3.2.0`. The published Pro 3.1.0
+continues to contain core 1.1.7 until a new matched GUI/core package is released.
 
 - `exclusions_file` (`trusttunnel/src/config.cpp:314`, plus the matching field in `trusttunnel/include/vpn/trusttunnel/config.h`) — exclusions read from a file and appended to `exclusions`.
 - `process_direct_file`, `process_proxy_file`, `process_block_file` (`trusttunnel/src/config.cpp:352-354`, plus the matching fields in `trusttunnel/include/vpn/trusttunnel/config.h`) — per-program rule lists (direct / proxy / block) loaded from files.
 - Per-process routing in `trusttunnel/src/client.cpp` (~223 changed lines, plus the matching members and `#include`s in `trusttunnel/include/vpn/trusttunnel/client.h`) — including copying the application name into the task context instead of holding a pointer into event memory.
 - `trusttunnel/CMakeLists.txt` links `iphlpapi` and `ws2_32` on Windows.
+- Explicit site/address routing overrides group lists in both routing modes. Process rules
+  retain priority. The private policy-v1 syntax requires a matching rebuilt GUI and core.
+- Configured routing/process files are required at startup; unreadable files fail configuration.
+- Connection diagnostics report the actual requested/final action instead of swapped labels.
+- Certificate verification preserves a structured not-yet-valid cause for the GUI while
+  retaining certificate trust checks. It does not accept an invalid certificate.
 - The remainder: a settings re-export in `trusttunnel/settings/src/lib.rs`, setup-wizard lint fixes and a Windows-only build dependency under `trusttunnel/setup_wizard/`, and a comment in `conanfile.py`.
 
 All notable changes to this project will be documented in this file.

@@ -212,6 +212,8 @@
     "config_outside_data_dir": "This server's configuration file is outside the folder where the application keeps its data, so the connection was cancelled — the server was never contacted. Add the server again so the app stores the config in its own data folder.",
     "core_server_unreachable": "The server is not responding. Check the server address and that the VPN service is running on it.",
     "core_certificate_failed": "The server's certificate failed verification.",
+    "core_certificate_not_yet_valid": "The VPN server's certificate is not valid yet. Check the date and time on your computer. If they are correct, contact the server administrator.",
+    "core_version_mismatch": "The application and VPN engine versions do not match. Reinstall the application using the complete installer.",
     "core_invalid_settings": "There is an error in the connection settings. Check your config.",
     "core_address_in_use": "The address or port this connection needs is already in use by another program.",
     "core_fatal_connectivity": "The server refused the connection and asked not to be retried (for example, the device limit was exceeded).",

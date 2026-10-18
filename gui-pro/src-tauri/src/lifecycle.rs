@@ -113,14 +113,14 @@ pub const SIDECAR_EXIT_REASON: &str = "sidecar-exit";
 // ---------------------------------------------------------------------------
 // AUD-08 / D-04 — the core's own precise reason, parsed from its `Error: <code> <text>`
 // line (`sidecar::core_exit_error_reason`) by a FIXED set of `VpnErrorCode` values
-// (`core/include/vpn/vpn.h`). Each of the six codes below maps ONE numeric
-// `VpnErrorCode`; every other code (including 0/1/4/8, and any code this list does not
+// (`core/include/vpn/vpn.h`). Values match the paired v1.1.11 core, including its
+// inserted certificate-time error. Every other code (including 0/1/4) that we do not
 // name) falls back to `SIDECAR_EXIT_REASON` — never a passthrough of the number or the
 // core's own text (D-09/D-29).
 // ---------------------------------------------------------------------------
 
 /// `VpnErrorCode::LOCATION_UNAVAILABLE` (6) and `VpnErrorCode::INITIAL_CONNECT_FAILED`
-/// (9) — both mean the server could not be reached. Maps to `errors.core_server_unreachable`.
+/// (10) — both mean the server could not be reached. Maps to `errors.core_server_unreachable`.
 pub const CORE_SERVER_UNREACHABLE_REASON: &str = "core-server-unreachable";
 
 /// `VpnErrorCode::AUTH_REQUIRED` (5). Maps to `errors.auth_required` (reuses the
@@ -131,13 +131,20 @@ pub const CORE_AUTH_FAILED_REASON: &str = "core-auth-failed";
 /// `errors.core_certificate_failed`.
 pub const CORE_CERTIFICATE_FAILED_REASON: &str = "core-certificate-failed";
 
+/// The paired v1.1.11 core's `VPN_EC_CERTIFICATE_NOT_YET_VALID` (8).
+/// Retrying cannot repair the computer clock or the server certificate.
+pub const CORE_CERTIFICATE_NOT_YET_VALID_REASON: &str = "core-certificate-not-yet-valid";
+
+/// GUI and engine must agree on numeric error codes and routing capabilities.
+pub const CORE_VERSION_MISMATCH_REASON: &str = "core-version-mismatch";
+
 /// `VpnErrorCode::INVALID_SETTINGS` (2). Maps to `errors.core_invalid_settings`.
 pub const CORE_INVALID_SETTINGS_REASON: &str = "core-invalid-settings";
 
 /// `VpnErrorCode::ADDR_IN_USE` (3). Maps to `errors.core_address_in_use`.
 pub const CORE_ADDRESS_IN_USE_REASON: &str = "core-address-in-use";
 
-/// `VpnErrorCode::FATAL_CONNECTIVITY_ERROR` (10) — the server refused and asked not to
+/// `VpnErrorCode::FATAL_CONNECTIVITY_ERROR` (11) — the server refused and asked not to
 /// be retried (e.g. device-limit exceeded). Maps to `errors.core_fatal_connectivity`.
 pub const CORE_FATAL_CONNECTIVITY_REASON: &str = "core-fatal-connectivity";
 
@@ -556,7 +563,7 @@ pub fn should_reconnect(was_intentional: bool, was_connected: bool) -> bool {
 /// 6/9) and no parsed reason at all. The probe is a heuristic — `vpn_connect` says at
 /// the call that hotel, corporate and captive networks routinely fail it while the VPN
 /// still connects — so it must never replace a reason that proves otherwise: a code the
-/// SERVER answered with (auth 5, certificate 7, device limit 10) means the machine
+/// SERVER answered with (auth 5, certificate 7/8, device limit 11) means the machine
 /// reached the server, and a LOCAL code (settings 2, address in use 3) has nothing to do
 /// with the network. Those are surfaced as-is (D-04). The first version let the offline
 /// verdict win over everything, which told a person with a wrong password to go check
@@ -660,6 +667,8 @@ pub fn is_terminal_reason(reason: &str) -> bool {
         // list onto a Russian screen.
         | ROUTING_RULES_UNREADABLE_REASON
           | ROUTING_RULES_APPLY_FAILED_REASON
+        | CORE_CERTIFICATE_NOT_YET_VALID_REASON
+        | CORE_VERSION_MISMATCH_REASON
     )
 }
 
@@ -1176,13 +1185,15 @@ pub(crate) mod tests {
         // Row 3b (deep review of AUD-08, H-1): the pre-flight probe is a heuristic that
         // routinely reads a working hotel / corporate / captive network as offline
         // (commands/vpn.rs says so at the probe). A reason the SERVER answered with
-        // (auth 5, certificate 7, device limit 10) proves the machine reached the
+        // (auth 5, certificate 7/8, device limit 11) proves the machine reached the
         // server, and a LOCAL reason (settings 2, address in use 3) has nothing to do
         // with the network — the probe's guess must never replace either with
         // «Нет подключения к интернету».
         for reason in [
             CORE_AUTH_FAILED_REASON,
             CORE_CERTIFICATE_FAILED_REASON,
+            CORE_CERTIFICATE_NOT_YET_VALID_REASON,
+            CORE_VERSION_MISMATCH_REASON,
             CORE_FATAL_CONNECTIVITY_REASON,
             CORE_INVALID_SETTINGS_REASON,
             CORE_ADDRESS_IN_USE_REASON,

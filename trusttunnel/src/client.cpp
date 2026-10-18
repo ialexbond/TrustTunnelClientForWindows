@@ -622,10 +622,11 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
                 dbglog(m_logger, "Skipping certificate verification");
                 event->result = VPN_VCR_SKIP_HOSTNAME_VERIFICATION;
             } else if (m_config.location.ca_store) {
-                const char *err = tls_verify_cert(event->cert, event->chain, m_config.location.ca_store.get());
-                if (err != nullptr) {
-                    errlog(m_logger, "Failed to verify certificate: {}", err);
-                    event->result = -1;
+                auto verification =
+                        tls_verify_cert_detailed(event->cert, event->chain, m_config.location.ca_store.get());
+                if (verification.error != nullptr) {
+                    errlog(m_logger, "Failed to verify certificate: {}", verification.error);
+                    event->result = verification.not_yet_valid ? VPN_VCR_CERT_NOT_YET_VALID : -1;
                 } else {
                     dbglog(m_logger, "Certificate verified successfully");
                     event->result = 0;

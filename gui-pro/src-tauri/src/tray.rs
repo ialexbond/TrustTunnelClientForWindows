@@ -695,6 +695,15 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
                 spawn_connect_timeout_watchdog(&app, connect_generation);
             }
             Err(e) => {
+                if e == crate::lifecycle::CORE_VERSION_MISMATCH_REASON
+                    && !crate::lifecycle::respawn_may_store(
+                        connect_generation,
+                        state.connection_generation.load(Ordering::SeqCst),
+                        state.user_disconnect_requested.load(Ordering::SeqCst),
+                    )
+                {
+                    return;
+                }
                 eprintln!("[tray_vpn_connect] Failed: {e}");
                 // e is a derived spawn error string, not a credential (D-29).
                 set_vpn_status(&app, &state, VpnStatus::Error, Some(e.to_string()));

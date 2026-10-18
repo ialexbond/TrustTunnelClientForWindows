@@ -1,18 +1,19 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "TrustTunnel Client Pro",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "identifier": "com.trusttunnel.gui",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run core:check && npm run build",
+    "beforeBundleCommand": "npm run core:check"
   },
   "app": {
     "windows": [
       {
-        "title": "TrustTunnel Client for Windows Pro v3.1.0",
+        "title": "TrustTunnel Client for Windows Pro v3.2.0",
         "width": 900,
         "height": 1000,
         "minWidth": 800,
