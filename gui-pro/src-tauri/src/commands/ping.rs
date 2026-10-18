@@ -1,34 +1,15 @@
-//! Per-config endpoint-reachability ping — Phase 11 (Plan 11-03).
+//! Endpoint reachability as direct TCP handshake RTT, measured by a one-shot native
+//! core helper bound to physical egress. The helper never starts a VPN session.
 //!
-//! NAMING NOTE (Rule 3 — blocking collision): a `network::ping_endpoint(host, port)`
-//! command ALREADY exists (used by the Control Panel / OverviewSection to ping a server
-//! by a host the operator just typed in the wizard). That one takes a frontend-supplied
-//! host directly. THIS Phase-11 command is the SSRF-safe per-config variant the design
-//! requires (T-11-06): it takes `config_path` and reads host:port Rust-side from the
-//! config's own `.toml`. To avoid a `__cmd__ping_endpoint` redefinition in the Tauri
-//! macro namespace, it is registered as `ping_config_endpoint`.
+//! A GUI TcpStream::connect is unsuitable while the TUN is active: early TCP
+//! acknowledgement can complete locally before the real server answers. The core
+//! executable already has the active Kill Switch's application permission; binding
+//! a GUI socket alone would instead be denied. Missing helper capability yields
+//! NoData rather than an unprotected or synthetic fallback.
 //!
-//! `ping_config_endpoint` does a bounded TCP connect to a config's own endpoint host:port and
-//! reports a numeric-ms / unreachable / no-data discriminant (`PingResult`). It is the
-//! honest reachability signal the Connection-tab card pills render (D-16). It is
-//! INDEPENDENT of the VPN tunnel — it never touches the killswitch, routing, or the C++
-//! sidecar; it is a plain outbound TCP connect from the host process.
-//!
-//! Security invariants this module holds:
-//!   * SSRF guard (T-11-06): the command takes `config_path` (validated against
-//!     `user_data_dir()` via `validate_app_path`) and reads host:port Rust-side from
-//!     that config's own `.toml` — it NEVER trusts an arbitrary frontend-supplied host.
-//!     The host is whitelist-validated (mirroring `ssh::sanitize::validate_ssh_host` /
-//!     `validate_tls_domain`) and the port range-checked before the raw TCP connect.
-//!   * D-29 (T-11-07): logs only host:port + result, NEVER the `.toml` content or the
-//!     password. There are no `eprintln!`/`emit_log` of config content in this module.
-//!
-//! ⚠️ By-design limitation (RESEARCH §Pitfall 6): a server that only listens on the
-//! tunnel-internal IP will fail a direct TCP connect and read `Unreachable` forever, even
-//! though it works THROUGH the tunnel. This is correct — the ping is endpoint reachability,
-//! not tunnel latency (the sidecar cannot expose real tunnel latency). The honest `no-data`
-//! «—» state covers "never measured / no network"; do NOT try to route the probe through
-//! the WinTUN adapter.
+//! Config targets are read from path-validated application TOML files. Probe
+//! arguments contain only a numeric destination and timeout, never credentials.
+//! The metric is endpoint TCP RTT, not latency of traffic carried by the VPN.
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -48,7 +29,7 @@ const DEFAULT_ENDPOINT_PORT: u16 = 443;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
 pub enum PingResult {
-    /// The TCP connect succeeded within the timeout; `ms` is the elapsed round-trip.
+    /// A physical TCP handshake succeeded; `ms` is its native measured round-trip.
     Ok { ms: u64 },
     /// The connect was refused, reset, or timed out — the endpoint is not reachable.
     Unreachable,
@@ -305,12 +286,10 @@ pub(crate) fn host_from_addr(addr: &str) -> Option<String> {
 enum ProbeOutcome {
     /// The TCP handshake completed inside the budget.
     Connected,
-    /// The outer `tokio::time::timeout` elapsed — the peer never finished the handshake.
-    /// This is what a merely SLOW (not dead) network produces.
-    TimedOut,
-    /// The connect returned an error before the budget elapsed. Carries the `io::ErrorKind`
-    /// name, which separates a refused port from a DNS failure from an unreachable network.
+    /// The native helper confirmed that a physical connection failed.
     Failed(String),
+    /// The protected native measurement is unavailable; never guess from a local SYN-ACK.
+    Unavailable,
 }
 
 /// One probe's measurement. `elapsed_ms` is wall time for THIS probe alone, not the sweep.
@@ -321,13 +300,12 @@ struct ProbeSample {
 }
 
 impl ProbeSample {
-    /// Compact one-token rendering for the log line: `ok/71`, `timeout/3001`,
-    /// `ConnectionRefused/2`. Kept terse because a sweep writes one of these per card.
+    /// Compact one-token rendering: `ok/71`, `no-data/3001`, `ConnectFailed/2`. Kept terse because a sweep writes one of these per card.
     fn render(&self) -> String {
         match &self.outcome {
             ProbeOutcome::Connected => format!("ok/{}", self.elapsed_ms),
-            ProbeOutcome::TimedOut => format!("timeout/{}", self.elapsed_ms),
             ProbeOutcome::Failed(kind) => format!("{}/{}", kind, self.elapsed_ms),
+            ProbeOutcome::Unavailable => format!("no-data/{}", self.elapsed_ms),
         }
     }
 }
@@ -338,46 +316,169 @@ impl ProbeSample {
 /// a `(host, port)` directly. Always returns within `timeout_ms` — `tokio::time::timeout`
 /// caps the connect; a refused/reset connect resolves immediately as `Unreachable`. Raw
 /// TCP only: no redirect-following, no protocol handshake.
-async fn probe_tcp_sampled(host: &str, port: u16, timeout_ms: u64) -> (PingResult, ProbeSample) {
+async fn sample_measurement(
+    measurement: impl std::future::Future<Output = PingResult>,
+    timeout_ms: u64,
+) -> (PingResult, ProbeSample) {
     let start = std::time::Instant::now();
-    let outcome = tokio::time::timeout(
-        Duration::from_millis(timeout_ms),
-        tokio::net::TcpStream::connect((host, port)),
-    )
-    .await;
+    let outcome = tokio::time::timeout(Duration::from_millis(timeout_ms), measurement).await;
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
     match outcome {
-        Ok(Ok(_stream)) => (
-            PingResult::Ok { ms: elapsed_ms },
+        Ok(PingResult::Ok { ms }) => (
+            PingResult::Ok { ms },
             ProbeSample { outcome: ProbeOutcome::Connected, elapsed_ms },
         ),
-        // Connect error (refused / reset / DNS fail) → not reachable. The verdict still
-        // collapses to Unreachable (D-16 «Недоступен»), but the io::ErrorKind is kept for the
-        // DIAG-01 log line: a refused port, a DNS failure and an unreachable network read
-        // identically on the card and have three different fixes.
-        Ok(Err(e)) => (
+        // A completed native socket measurement confirmed a connection failure.
+        Ok(PingResult::Unreachable) => (
             PingResult::Unreachable,
             ProbeSample {
-                outcome: ProbeOutcome::Failed(format!("{:?}", e.kind())),
+                outcome: ProbeOutcome::Failed("ConnectFailed".into()),
                 elapsed_ms,
             },
         ),
-        // The outer budget elapsed: the peer never finished the handshake in time. Same
-        // verdict as above, opposite diagnosis — and this is the outcome the degradation
-        // hypothesis predicts, so it must be distinguishable in the log.
+        Ok(PingResult::NoData) => (
+            PingResult::NoData,
+            ProbeSample { outcome: ProbeOutcome::Unavailable, elapsed_ms },
+        ),
+        // A helper/startup/capability/DNS deadline does not prove a dead server.
         Err(_) => (
-            PingResult::Unreachable,
-            ProbeSample { outcome: ProbeOutcome::TimedOut, elapsed_ms },
+            PingResult::NoData,
+            ProbeSample { outcome: ProbeOutcome::Unavailable, elapsed_ms },
         ),
     }
 }
 
-/// Verdict-only view of `probe_tcp_sampled`, kept for the tests that predate DIAG-01 and only
-/// care about the tri-state. Test-only: every production path now takes the sampled variant,
-/// because a verdict thrown away un-sampled is exactly the information loss DIAG-01 removes.
-#[cfg(test)]
-async fn probe_tcp(host: &str, port: u16, timeout_ms: u64) -> PingResult {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeProbeReply {
+    version: u8,
+    status: String,
+    ms: Option<u64>,
+    reason: Option<String>,
+}
+
+fn parse_native_probe_reply(output: &[u8], timeout_ms: u64) -> PingResult {
+    if output.len() > 4096 {
+        return PingResult::NoData;
+    }
+    let Ok(reply) = serde_json::from_slice::<NativeProbeReply>(output) else {
+        return PingResult::NoData;
+    };
+    if reply.version != 1 {
+        return PingResult::NoData;
+    }
+    match reply.status.as_str() {
+        "ok" if reply.reason.is_none() => match reply.ms {
+            Some(ms) if ms <= timeout_ms => PingResult::Ok { ms },
+            _ => PingResult::NoData,
+        },
+        "unreachable" if reply.ms.is_none() => PingResult::Unreachable,
+        _ => PingResult::NoData,
+    }
+}
+
+fn native_probe_help_supported(exit: Option<i32>, stdout: &[u8]) -> bool {
+    matches!(exit, Some(0 | 1))
+        && std::str::from_utf8(stdout).is_ok_and(|text| {
+            text.split_whitespace().any(|word| word == "--endpoint-probe-version")
+                && text.split_whitespace().any(|word| word == "--probe-endpoint")
+        })
+}
+
+fn native_probe_binary() -> Option<std::path::PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os("TT_TEST_ENDPOINT_PROBE_BINARY") {
+        return Some(path.into());
+    }
+    std::env::current_exe().ok().map(|exe| {
+        exe.with_file_name(if cfg!(windows) { "trusttunnel_client.exe" } else { "trusttunnel_client" })
+    })
+}
+
+#[async_trait::async_trait]
+trait ProbeExecutor: Send + Sync {
+    async fn run(&self, args: &[&str]) -> Option<std::process::Output>;
+}
+
+struct NativeProbeExecutor(std::path::PathBuf);
+
+#[async_trait::async_trait]
+impl ProbeExecutor for NativeProbeExecutor {
+    async fn run(&self, args: &[&str]) -> Option<std::process::Output> {
+        let mut command = tokio::process::Command::new(&self.0);
+        command.args(args).kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(crate::sidecar::CREATE_NO_WINDOW);
+        command.output().await.ok()
+    }
+}
+
+/// Numeric RTT comes only from a socket pinned to physical egress in the SAME
+/// core executable permitted by the active Kill Switch. No GUI TCP fallback:
+/// TUN early acknowledgement can finish that connect before a remote SYN exists.
+async fn native_tcp_measurement(executor: &dyn ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> PingResult {
+    let started = std::time::Instant::now();
+    if port == 0 {
+        return PingResult::NoData;
+    }
+    if validate_ping_host(host).is_err() {
+        return PingResult::NoData;
+    }
+    // Old cores may start a default config when given an unknown flag. Only the
+    // standard --help is safe before capability advertisement has been verified.
+    let Some(help) = executor.run(&["--help"]).await else { return PingResult::NoData; };
+    if !native_probe_help_supported(help.status.code(), &help.stdout) {
+        return PingResult::NoData;
+    }
+    let Some(version) = executor.run(&["--endpoint-probe-version"]).await else { return PingResult::NoData; };
+    if !version.status.success() || version.stdout != b"1\n" && version.stdout != b"1\r\n" {
+        return PingResult::NoData;
+    }
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let Ok(addresses) = tokio::net::lookup_host((host, port)).await else { return PingResult::NoData; };
+    let mut addresses: Vec<_> = addresses.collect();
+    addresses.sort_by_key(|address| !address.is_ipv4());
+    addresses.dedup();
+    let mut verdict = PingResult::NoData;
+    for address in addresses.into_iter().take(8) {
+        let address = address.to_string();
+        // Leave time for process startup/exit inside the outer deadline. This is
+        // a timeout allowance only; measured RTT is never adjusted or clamped.
+        let remaining = timeout_ms.saturating_sub(started.elapsed().as_millis() as u64);
+        let native_budget = remaining.saturating_sub(100).min(10000);
+        if native_budget == 0 {
+            return PingResult::NoData;
+        }
+        let budget = native_budget.to_string();
+        let Some(output) = executor.run(&["--probe-endpoint", &address, "--probe-timeout-ms", &budget]).await else { continue; };
+        if !output.status.success() {
+            continue;
+        }
+        match parse_native_probe_reply(&output.stdout, native_budget) {
+            ok @ PingResult::Ok { .. } => return ok,
+            PingResult::Unreachable => verdict = PingResult::Unreachable,
+            PingResult::NoData => {},
+        }
+    }
+    verdict
+}
+
+async fn probe_tcp_sampled(host: &str, port: u16, timeout_ms: u64) -> (PingResult, ProbeSample) {
+    let Some(binary) = native_probe_binary() else {
+        return (PingResult::NoData, ProbeSample {outcome: ProbeOutcome::Unavailable, elapsed_ms: 0});
+    };
+    probe_tcp_sampled_with_executor(&NativeProbeExecutor(binary), host, port, timeout_ms).await
+}
+
+async fn probe_tcp_sampled_with_executor(executor: &dyn ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> (PingResult, ProbeSample) {
+    if timeout_ms == 0 {
+        return (PingResult::NoData, ProbeSample {outcome: ProbeOutcome::Unavailable, elapsed_ms: 0});
+    }
+    sample_measurement(native_tcp_measurement(executor, host, port, timeout_ms), timeout_ms).await
+}
+
+pub(crate) async fn probe_endpoint_latency(host: &str, port: u16, timeout_ms: u64) -> PingResult {
     probe_tcp_sampled(host, port, timeout_ms).await.0
 }
 
@@ -393,7 +494,7 @@ const STEADY_STATE_REAL_SAMPLES: usize = 2;
 /// D-04 (17-02): pick the honest steady-state ms from a batch of per-probe samples where the
 /// FIRST entry is a cold / idle-inflated warm-up read.
 ///
-/// Root cause (verified 17-RESEARCH §D-04): `probe_tcp` opens a FRESH `TcpStream::connect`
+/// Root cause (verified 17-RESEARCH §D-04): each native probe opens a fresh physical TCP socket
 /// every call with no pool. The first connect after idle pays cold OS DNS resolution + a cold
 /// TCP handshake, so a warm ~70 ms endpoint reads ~210 ms on the first «Обновить пинг». That
 /// cold-inflated number then poisons BOTH the displayed pill AND — critically — the frozen
@@ -444,13 +545,21 @@ fn steady_state_ms(samples: &[u64]) -> Option<u64> {
 /// reachable endpoint — acceptable because the refresh is manual (the «Обновить пинг» button),
 /// never an interval (17-RESEARCH §Open-Q1). SSRF invariant unchanged: `host`/`port` are still
 /// read Rust-side by the caller (`ping_config_endpoint` → `read_endpoint_host_port` +
-/// `validate_ping_host`); this fn never takes a frontend-supplied host. C++ core untouched — a
-/// plain outbound TCP connect.
+/// `validate_ping_host`); this fn never takes a frontend-supplied host. The native helper
+/// never starts a VPN session.
 async fn probe_tcp_steady_state_sampled(
     host: &str,
     port: u16,
     timeout_ms: u64,
 ) -> (PingResult, Vec<ProbeSample>) {
+    let Some(binary) = native_probe_binary() else {
+        return (PingResult::NoData, vec![ProbeSample {outcome: ProbeOutcome::Unavailable, elapsed_ms: 0}]);
+    };
+    probe_tcp_steady_state_with_executor(&NativeProbeExecutor(binary), host, port, timeout_ms).await
+}
+
+async fn probe_tcp_steady_state_with_executor(executor: &dyn ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> (PingResult, Vec<ProbeSample>) {
+    let started = std::time::Instant::now();
     // Warm-up: warms OS DNS + the TCP path so the cold-first inflation does not ride into the
     // reported number. On a REACHABLE endpoint its numeric result is deliberately discarded (never
     // banded — D-04). On a NON-reachable endpoint (Unreachable/NoData) we return that verdict
@@ -460,7 +569,7 @@ async fn probe_tcp_steady_state_sampled(
     // the reals were skipped rather than silently failing.
     let mut samples: Vec<ProbeSample> = Vec::with_capacity(STEADY_STATE_REAL_SAMPLES + 1);
 
-    let (warm_verdict, warm_sample) = probe_tcp_sampled(host, port, timeout_ms).await;
+    let (warm_verdict, warm_sample) = probe_tcp_sampled_with_executor(executor, host, port, timeout_ms).await;
     samples.push(warm_sample);
     match warm_verdict {
         PingResult::Ok { .. } => {} // warmed — fall through to the real samples (result discarded)
@@ -471,7 +580,8 @@ async fn probe_tcp_steady_state_sampled(
     // it verbatim so a refused endpoint stays Unreachable (never a spurious min over a partial set).
     let mut real_ms: Vec<u64> = Vec::with_capacity(STEADY_STATE_REAL_SAMPLES);
     for _ in 0..STEADY_STATE_REAL_SAMPLES {
-        let (verdict, sample) = probe_tcp_sampled(host, port, timeout_ms).await;
+        let remaining = timeout_ms.saturating_sub(started.elapsed().as_millis() as u64);
+        let (verdict, sample) = probe_tcp_sampled_with_executor(executor, host, port, remaining).await;
         samples.push(sample);
         match verdict {
             PingResult::Ok { ms } => real_ms.push(ms),
@@ -491,14 +601,6 @@ async fn probe_tcp_steady_state_sampled(
         None => PingResult::NoData,
     };
     (verdict, samples)
-}
-
-/// Verdict-only view of `probe_tcp_steady_state_sampled`, kept for the tests that predate
-/// DIAG-01. Test-only — the command path takes the sampled variant so the measurement can be
-/// logged.
-#[cfg(test)]
-async fn probe_tcp_steady_state(host: &str, port: u16, timeout_ms: u64) -> PingResult {
-    probe_tcp_steady_state_sampled(host, port, timeout_ms).await.0
 }
 
 /// Phase 13 (13-08): the endpoint address as a DISPLAY string `"host:port"` from a config's TOML
@@ -582,7 +684,7 @@ pub async fn ping_config_endpoint(
         "PING-DIAG".to_string(),
         format!("{label} {host}:{port}"),
         Some(format!(
-            "budget={timeout_ms}ms verdict={verdict_token} probes=[{}]",
+            "metric=physical-tcp-rtt budget={timeout_ms}ms verdict={verdict_token} probes=[{}]",
             rendered.join(" ")
         )),
     );
@@ -614,6 +716,64 @@ pub async fn ping_config_endpoint(
 // ═══════════════════════════════════════════════════════════════
 //   Tests
 // ═══════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod probe_test_support {
+    use super::*;
+    use std::sync::{atomic::{AtomicUsize, Ordering}, Mutex};
+
+    pub(super) struct FakeExecutor {
+        pub calls: Mutex<Vec<Vec<String>>>,
+        pub help: &'static str,
+        pub delay: Duration,
+        pub peer_response: bool,
+        replies: Vec<PingResult>,
+        next: AtomicUsize,
+    }
+
+    impl FakeExecutor {
+        pub fn new(replies: Vec<PingResult>) -> Self {
+            Self { calls: Mutex::new(Vec::new()), help: "--endpoint-probe-version --probe-endpoint", delay: Duration::ZERO, peer_response: false, replies, next: AtomicUsize::new(0) }
+        }
+    }
+
+    fn output(code: i32, stdout: Vec<u8>) -> std::process::Output {
+        #[cfg(windows)]
+        let status = { use std::os::windows::process::ExitStatusExt; std::process::ExitStatus::from_raw(code as u32) };
+        #[cfg(not(windows))]
+        let status = { use std::os::unix::process::ExitStatusExt; std::process::ExitStatus::from_raw(code << 8) };
+        std::process::Output { status, stdout, stderr: Vec::new() }
+    }
+
+    #[async_trait::async_trait]
+    impl ProbeExecutor for FakeExecutor {
+        async fn run(&self, args: &[&str]) -> Option<std::process::Output> {
+            self.calls.lock().unwrap().push(args.iter().map(|arg| arg.to_string()).collect());
+            match args[0] {
+                "--help" => Some(output(1, self.help.as_bytes().to_vec())),
+                "--endpoint-probe-version" => Some(output(0, b"1\n".to_vec())),
+                "--probe-endpoint" if self.peer_response => {
+                    use tokio::io::AsyncReadExt;
+                    // Model an immediately accepted local connection whose actual
+                    // peer measurement arrives later, as with synthetic TUN ACKs.
+                    let mut stream = tokio::net::TcpStream::connect(args[1]).await.ok()?;
+                    let mut bytes = Vec::new();
+                    stream.read_to_end(&mut bytes).await.ok()?;
+                    Some(output(0, bytes))
+                },
+                "--probe-endpoint" => {
+                    tokio::time::sleep(self.delay).await;
+                    let index = self.next.fetch_add(1, Ordering::SeqCst);
+                    let reply = self.replies.get(index).or(self.replies.last())?;
+                    let mut value = serde_json::to_value(reply).unwrap();
+                    value["version"] = 1.into();
+                    Some(output(0, serde_json::to_vec(&value).unwrap()))
+                },
+                _ => None,
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -661,123 +821,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Truth: a reachable loopback listener → PingResult::Ok with a numeric ms.
     #[tokio::test]
-    async fn ping_reachable_loopback_returns_ms() {
-        // Bind a listener on an ephemeral loopback port, then probe it.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        // Accept in a background thread so the connect completes (it doesn't strictly need
-        // an accept for connect() to succeed on a listening socket, but this keeps the
-        // socket alive for the duration of the probe).
-        std::thread::spawn(move || {
-            let _ = listener.accept();
-        });
-
-        let result = probe_tcp("127.0.0.1", port, 2000).await;
-        match result {
-            PingResult::Ok { ms } => {
-                // ms is a real (possibly 0 on a fast loopback) elapsed value; just assert
-                // the discriminant + that it is within the timeout bound.
-                assert!(ms <= 2000, "elapsed ms must be within the timeout");
-            }
-            other => panic!("expected Ok, got {other:?}"),
-        }
+    async fn protected_native_reply_returns_its_measured_ms() {
+        let executor = probe_test_support::FakeExecutor::new(vec![PingResult::Ok { ms: 67 }]);
+        let (result, _) = probe_tcp_sampled_with_executor(&executor, "127.0.0.1", 443, 2000).await;
+        assert_eq!(result, PingResult::Ok { ms: 67 });
     }
 
-    /// Truth: a closed/unused port → PingResult::Unreachable within the timeout (never hangs).
-    ///
-    /// KNOWN RACE, `WINDOWS.md` #38: the freed ephemeral port can be re-bound by any of the other
-    /// 1228 parallel tests, and then this connects. It was NOT converted to the port-0 endpoint
-    /// that fixed #37, because what it asserts is a LATENCY BOUND and it gets that latency from
-    /// the ~2037 ms a SYN-dropped loopback port costs. Port 0 refuses in ≤ 1 ms, which would
-    /// satisfy the bound without testing it — honest-but-racy beats green-but-empty.
     #[tokio::test]
-    async fn ping_unused_port_unreachable() {
-        // Bind then immediately drop the listener to free a port that is now (almost
-        // certainly) closed — connecting to it should be refused fast.
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
-            // listener dropped here → port closed
-        };
-        let start = std::time::Instant::now();
-        let result = probe_tcp("127.0.0.1", port, 1500).await;
-        assert_eq!(
-            result,
-            PingResult::Unreachable,
-            "a closed loopback port must read Unreachable"
-        );
-        assert!(
-            start.elapsed() < Duration::from_millis(1500) + Duration::from_millis(500),
-            "the probe must return within the bounded timeout (never hang)"
-        );
+    async fn native_connection_failure_is_unreachable() {
+        let executor = probe_test_support::FakeExecutor::new(vec![PingResult::Unreachable]);
+        let (result, _) = probe_tcp_sampled_with_executor(&executor, "127.0.0.1", 443, 1500).await;
+        assert_eq!(result, PingResult::Unreachable);
     }
 
-    /// F8 (17-review): the steady-state probe treats `timeout_ms` as the OVERALL budget. On a
-    /// probe-hostile / unreachable endpoint the warm-up reads Unreachable and the fn RETURNS
-    /// immediately — it does NOT then run the two real probes (which would burn another 2× the
-    /// timeout for the same verdict). We prove the bound by measuring: a closed loopback port
-    /// (refused fast) must resolve well under 2× the timeout, i.e. the reals were skipped.
-    ///
-    /// KNOWN RACE, `WINDOWS.md` #38 — same freed-port premise as `ping_unused_port_unreachable`,
-    /// and left unconverted for the same reason: the bound it measures is made of the endpoint's
-    /// latency. `unreachable_endpoint_records_exactly_one_probe` states the same truth by COUNTING
-    /// samples instead of timing them, which is why that one could be converted and this one
-    /// could not.
     #[tokio::test]
     async fn steady_state_early_returns_on_unreachable_warmup() {
-        // A closed loopback port → the warm-up connect is refused fast (Unreachable). If the fn
-        // still ran the 2 reals, the total would be ~3 refused connects; here it is ~1.
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
-            // listener dropped here → port closed
-        };
-        // A generous per-probe timeout so that IF the reals ran, the wall time would visibly
-        // exceed the single-probe budget. A refused connect returns well before the timeout, so
-        // this bound is about the NUMBER of probes, not the timeout elapsing.
-        let timeout_ms = 1500;
-        let start = std::time::Instant::now();
-        let result = probe_tcp_steady_state("127.0.0.1", port, timeout_ms).await;
-        let elapsed = start.elapsed();
-
-        assert_eq!(
-            result,
-            PingResult::Unreachable,
-            "a closed endpoint's warm-up reads Unreachable and is returned verbatim"
-        );
-        // The early return means only the warm-up probe ran. Even allowing slack for a slow CI
-        // box, one refused connect must finish far under 2× the timeout (the old behavior ran
-        // warm-up + 2 reals = 3 connects, each bounded by the FULL timeout).
-        assert!(
-            elapsed < Duration::from_millis(timeout_ms) * 2,
-            "unreachable warm-up must short-circuit the reals (bounded to ~1× timeout), \
-             took {elapsed:?}"
-        );
+        let executor = probe_test_support::FakeExecutor::new(vec![PingResult::Unreachable]);
+        let (result, samples) = probe_tcp_steady_state_with_executor(&executor, "127.0.0.1", 443, 1500).await;
+        assert_eq!(result, PingResult::Unreachable);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(executor.calls.lock().unwrap().iter().filter(|args| args[0] == "--probe-endpoint").count(), 1);
     }
 
-    /// F8 complement: a REACHABLE endpoint still gets the full D-04 treatment — the warm-up
-    /// succeeds (and is discarded), the two real probes run, and a numeric ms is returned. The
-    /// early-return path must NOT rob a reachable server of its honest min-of-2 measurement.
     #[tokio::test]
     async fn steady_state_measures_reachable_endpoint() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        // Keep accepting so the warm-up + both reals all connect successfully.
-        std::thread::spawn(move || {
-            for _ in 0..8 {
-                if listener.accept().is_err() {
-                    break;
-                }
-            }
-        });
-
-        let result = probe_tcp_steady_state("127.0.0.1", port, 2000).await;
-        match result {
-            PingResult::Ok { ms } => assert!(ms <= 2000, "a reachable endpoint reads a numeric ms"),
-            other => panic!("expected Ok for a reachable loopback listener, got {other:?}"),
-        }
+        let executor = probe_test_support::FakeExecutor::new(vec![PingResult::Ok { ms: 190 }, PingResult::Ok { ms: 70 }, PingResult::Ok { ms: 65 }]);
+        let (result, samples) = probe_tcp_steady_state_with_executor(&executor, "127.0.0.1", 443, 2000).await;
+        assert_eq!(result, PingResult::Ok { ms: 65 });
+        assert_eq!(samples.len(), 3);
     }
 
     /// Truth: a config with a shell-metachar host is rejected by the validator before any
@@ -1071,209 +1143,124 @@ mod wave0_d04_measurement {
 mod diag01_tests {
     use super::*;
 
+    #[test]
+    fn native_protocol_rejects_missing_or_unbounded_measurements() {
+        for invalid in [
+            br#"{"version":1,"status":"ok"}"#.as_slice(),
+            br#"{"version":1,"status":"ok","ms":3001}"#.as_slice(),
+            br#"{"version":2,"status":"ok","ms":60}"#.as_slice(),
+            br#"{"version":1,"status":"ok","ms":60,"password":"fixture"}"#.as_slice(),
+            b"unexpected output".as_slice(),
+        ] {
+            assert_eq!(parse_native_probe_reply(invalid, 3000), PingResult::NoData);
+        }
+        assert_eq!(parse_native_probe_reply(br#"{"version":1,"status":"ok","ms":67}"#, 3000), PingResult::Ok {ms:67});
+    }
+
+    #[tokio::test]
+    async fn immediate_resolution_failure_is_no_data_without_a_socket_measurement() {
+        let executor = probe_test_support::FakeExecutor::new(vec![]);
+        let (verdict, sample) = probe_tcp_sampled_with_executor(&executor, "[::invalid]", 443, 1000).await;
+        assert_eq!(verdict, PingResult::NoData);
+        assert_eq!(sample.outcome, ProbeOutcome::Unavailable);
+        assert!(executor.calls.lock().unwrap().iter().all(|args| args[0] != "--probe-endpoint"));
+    }
+
+    #[tokio::test]
+    async fn old_core_never_receives_an_unknown_probe_flag_or_tcp_fallback() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut executor = probe_test_support::FakeExecutor::new(vec![]);
+        executor.help = "--help --version --routing-policy-version";
+        let (verdict, sample) = probe_tcp_sampled_with_executor(&executor, "127.0.0.1", listener.local_addr().unwrap().port(), 1000).await;
+        assert_eq!(verdict, PingResult::NoData);
+        assert_eq!(sample.outcome, ProbeOutcome::Unavailable);
+        assert_eq!(*executor.calls.lock().unwrap(), vec![vec!["--help".to_string()]]);
+        assert!(tokio::time::timeout(Duration::from_millis(30), listener.accept()).await.is_err(), "a raw GUI fallback would produce another false local ACK");
+    }
+
+    #[tokio::test]
+    async fn synthetic_fast_accept_cannot_replace_a_delayed_real_measurement() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            stream.write_all(br#"{"version":1,"status":"ok","ms":67}"#).await.unwrap();
+        });
+        let mut executor = probe_test_support::FakeExecutor::new(vec![]);
+        executor.peer_response = true;
+        let (verdict, sample) = probe_tcp_sampled_with_executor(&executor, "127.0.0.1", port, 1000).await;
+        server.await.unwrap();
+        assert_eq!(verdict, PingResult::Ok {ms:67});
+        assert!(sample.elapsed_ms >= 100, "must wait for the measurement, not use the immediate local connect");
+    }
+
+    #[tokio::test]
+    async fn warmup_and_reals_share_one_total_process_budget() {
+        let mut executor = probe_test_support::FakeExecutor::new(vec![PingResult::Ok {ms:20}]);
+        executor.delay = Duration::from_millis(250);
+        let start = std::time::Instant::now();
+        let (verdict, samples) = probe_tcp_steady_state_with_executor(&executor, "127.0.0.1", 443, 400).await;
+        assert_eq!(verdict, PingResult::NoData);
+        assert_eq!(samples.len(), 2);
+        assert!(start.elapsed() < Duration::from_millis(550));
+    }
+
     /// Truth: the log token distinguishes the three outcomes. If `timeout/3001` and
     /// `ConnectionRefused/2` rendered the same, the whole instrument would be pointless.
     #[test]
     fn render_distinguishes_the_three_outcomes() {
         let ok = ProbeSample { outcome: ProbeOutcome::Connected, elapsed_ms: 71 };
-        let slow = ProbeSample { outcome: ProbeOutcome::TimedOut, elapsed_ms: 3001 };
+        let slow = ProbeSample { outcome: ProbeOutcome::Unavailable, elapsed_ms: 3001 };
         let refused = ProbeSample {
             outcome: ProbeOutcome::Failed("ConnectionRefused".to_string()),
             elapsed_ms: 2,
         };
 
         assert_eq!(ok.render(), "ok/71");
-        assert_eq!(slow.render(), "timeout/3001");
+        assert_eq!(slow.render(), "no-data/3001");
         assert_eq!(refused.render(), "ConnectionRefused/2");
 
         // The three renderings must be mutually distinct — this is the entire diagnostic value.
         assert_ne!(slow.render(), refused.render());
     }
 
-    /// Truth pinned here: the instrument must never MIS-ATTRIBUTE the cause. A budget that
-    /// expired is `TimedOut`; an error that arrived inside the budget is `Failed(kind)`. If those
-    /// two were ever swapped or conflated, the log would actively mislead the diagnosis — worse
-    /// than having no log at all.
-    ///
-    /// **THE ENDPOINT IS PORT 0, AND THAT IS THE WHOLE POINT.** No socket in any process can ever
-    /// be listening there: `bind(port = 0)` is the sockets API asking «assign me one», so port 0
-    /// is the one port that is never assigned to anybody. The connect is refused locally, every
-    /// time, whatever else the machine is running — measured 300/300 `Failed("AddrNotAvailable")`
-    /// in ≤ 1 ms (2026-09-10).
-    ///
-    /// **What that replaced, and why the old premise was unsound (`WINDOWS.md` #37).** This test
-    /// used to bind `127.0.0.1:0`, DROP the listener, and treat the freed ephemeral port as
-    /// closed. `cargo test --lib` runs 1229 tests in parallel and a dozen of them bind sockets,
-    /// so between the drop and the probe the port could be handed to another test. The probe then
-    /// connected, and the FIRST assertion — «a closed port still reads Unreachable» — failed with
-    /// `left: Ok { ms: 0 }`: one CI red on 2026-09-10 (run 34473092097) and a green re-run of the
-    /// same job on the same commit. Reproduced deterministically here by standing a single
-    /// competitor bind in for the parallel suite: `left: Ok { ms: 1 }, right: Unreachable`.
-    ///
-    /// **Reserving the port instead would NOT have closed it, and that was measured rather than
-    /// assumed.** Holding the listener open for the life of the test blocks only the binders that
-    /// ask for `127.0.0.1`; with `127.0.0.1:P` held, `0.0.0.0:P`, `127.0.0.2:P` and `127.0.0.3:P`
-    /// each still bind successfully beside it, and a listener on `0.0.0.0:P` answers a loopback
-    /// connect. A reservation that holds only against the addresses today's tests happen to use
-    /// is a survey of the suite, not a property of the code.
-    ///
-    /// **The ~2050 ms measurement the old comment was built around is still true, and is no
-    /// longer load-bearing HERE.** A TCP connect to a genuinely closed loopback port takes a
-    /// dead-constant ~2037 ms to return `ConnectionRefused` on this machine — the firewall drops
-    /// the SYN instead of answering RST, so the stack only gives up when its retransmit budget
-    /// expires — while a successful connect costs 0–4 ms. That number is the load-bearing fact
-    /// behind the intermittent-degradation report (a merely FILTERED endpoint eats ~2 s
-    /// of a 3000 ms budget, so every card flips to «Недоступен» while the browser still loads
-    /// pages), and it is what `expired_budget_is_labelled_timeout_never_a_refusal` still needs a
-    /// slow endpoint for. It bought THIS test nothing: against a 4000 ms budget the refusal
-    /// always arrived first, so the `TimedOut` arm that the generous budget was chosen to keep
-    /// reachable never once ran here.
-    ///
-    /// **What the assertions still catch, stated so a future reader can check rather than trust.**
-    /// Every comparison is between the label and the clock of the same probe, so the test does not
-    /// need to know which outcome will occur — it only requires that whichever occurs agrees with
-    /// itself. Swap the two arms in `probe_tcp_sampled` and the probe reports `TimedOut` after
-    /// ~0 ms against a 4000 ms budget: RED. Move the clock so it measures anything other than this
-    /// probe and the `Failed` arm's `elapsed < budget` stops holding: RED. What no test can pin
-    /// without gambling on the network is a NON-degenerate expiry — a real budget timeout needs a
-    /// slow peer, and a slow peer is precisely the ambient state this test was rewritten to stop
-    /// depending on.
     #[tokio::test]
     async fn outcome_label_always_matches_the_elapsed_time() {
-        // Nothing binds, nothing is dropped, so there is no window for another test to step into.
-        const NOBODY_CAN_LISTEN_HERE: u16 = 0;
-
-        // Three budgets, because the claim is a RULE about label-versus-clock and not a single
-        // observation. All three sit far above the ~1 ms this connect actually costs, so no branch
-        // below is selected by a timing coin-flip.
-        for budget_ms in [50u64, 200, 4000] {
-            let (verdict, sample) =
-                probe_tcp_sampled("127.0.0.1", NOBODY_CAN_LISTEN_HERE, budget_ms).await;
-
-            assert_eq!(
-                verdict,
-                PingResult::Unreachable,
-                "a port nothing can listen on still reads Unreachable (budget {budget_ms} ms)"
-            );
-
-            match sample.outcome {
-                ProbeOutcome::Failed(ref kind) => {
-                    assert!(!kind.is_empty(), "the io::ErrorKind name must be captured");
-                    assert!(
-                        sample.elapsed_ms < budget_ms,
-                        "an error attributed to the peer must have arrived INSIDE the budget, \
-                         got {} ms against a {} ms budget",
-                        sample.elapsed_ms,
-                        budget_ms
-                    );
-                }
-                ProbeOutcome::TimedOut => {
-                    assert!(
-                        sample.elapsed_ms >= budget_ms,
-                        "a timeout must only be reported when the budget actually expired, \
-                         got {} ms against a {} ms budget",
-                        sample.elapsed_ms,
-                        budget_ms
-                    );
-                }
-                ProbeOutcome::Connected => panic!(
-                    "nothing can be listening on port 0, so a Connected here is the probe \
-                     reporting a connection it did not make"
-                ),
-            }
+        for budget_ms in [200u64, 500, 4000] {
+            let executor = probe_test_support::FakeExecutor::new(vec![PingResult::Unreachable]);
+            let (verdict, sample) = probe_tcp_sampled_with_executor(&executor, "127.0.0.1", 443, budget_ms).await;
+            assert_eq!(verdict, PingResult::Unreachable);
+            assert_eq!(sample.outcome, ProbeOutcome::Failed("ConnectFailed".into()));
+            assert!(sample.elapsed_ms < budget_ms);
         }
     }
 
-    /// Truth: when the budget is the thing that ran out, the log says `timeout`, NOT a fabricated
-    /// refusal. This is the case the degradation hypothesis lives on — a server that would have
-    /// answered in 2.5 s under a 200 ms budget is a BUDGET problem, not a server problem, and the
-    /// log must be able to say which.
-    ///
-    /// **This is the OTHER direction of the correspondence that
-    /// `outcome_label_always_matches_the_elapsed_time` pins**, and the only test that observes a
-    /// real budget expiry: a genuine timeout needs a peer that does not answer, which is why this
-    /// one still gambles on a freed loopback port while its sibling no longer does. It requires
-    /// the endpoint to be SLOW — the measured ~2037 ms a SYN-dropped port costs, far above this
-    /// 200 ms budget — so the port-0 endpoint that removed the race from #37 is unusable here: it
-    /// refuses in ≤ 1 ms and this test would then assert a timeout that never happened.
-    ///
-    /// KNOWN RACE, `WINDOWS.md` #38: if another parallel test takes the freed port, the connect
-    /// succeeds inside 200 ms and this reddens on `Connected`.
     #[tokio::test]
-    async fn expired_budget_is_labelled_timeout_never_a_refusal() {
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
-        };
-
-        // Far below the measured ~2050 ms refusal latency, so the budget is guaranteed to win.
-        let (verdict, sample) = probe_tcp_sampled("127.0.0.1", port, 200).await;
-
-        assert_eq!(verdict, PingResult::Unreachable);
-        assert_eq!(
-            sample.outcome,
-            ProbeOutcome::TimedOut,
-            "a budget that expired before any answer must be recorded as a timeout, \
-             never as a peer-side failure"
-        );
-        assert_eq!(sample.render(), format!("timeout/{}", sample.elapsed_ms));
+    async fn expired_helper_budget_is_no_data_never_a_peer_refusal() {
+        let mut executor = probe_test_support::FakeExecutor::new(vec![PingResult::Ok { ms: 70 }]);
+        executor.delay = Duration::from_secs(1);
+        let (verdict, sample) = probe_tcp_sampled_with_executor(&executor, "127.0.0.1", 443, 200).await;
+        assert_eq!(verdict, PingResult::NoData);
+        assert_eq!(sample.outcome, ProbeOutcome::Unavailable);
+        assert!(sample.elapsed_ms >= 200);
     }
 
-    /// Truth: a reachable endpoint yields THREE samples — the discarded warm-up plus the two
-    /// reals (D-04). The count is the evidence that the measurement really did what its
-    /// docs claim, which a single verdict cannot show.
     #[tokio::test]
     async fn reachable_endpoint_records_warmup_plus_two_reals() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            // Accept every probe for the duration of the measurement.
-            for _ in 0..8 {
-                if listener.accept().is_err() {
-                    break;
-                }
-            }
-        });
-
-        let (verdict, samples) = probe_tcp_steady_state_sampled("127.0.0.1", port, 2000).await;
-
-        assert!(matches!(verdict, PingResult::Ok { .. }), "expected Ok, got {verdict:?}");
-        assert_eq!(
-            samples.len(),
-            STEADY_STATE_REAL_SAMPLES + 1,
-            "a reachable measurement is warm-up + {STEADY_STATE_REAL_SAMPLES} reals"
-        );
-        assert!(
-            samples.iter().all(|s| s.outcome == ProbeOutcome::Connected),
-            "every probe against a live listener must record Connected"
-        );
+        let executor = probe_test_support::FakeExecutor::new(vec![PingResult::Ok { ms: 64 }]);
+        let (verdict, samples) = probe_tcp_steady_state_with_executor(&executor, "127.0.0.1", 443, 2000).await;
+        assert_eq!(verdict, PingResult::Ok { ms: 64 });
+        assert_eq!(samples.len(), STEADY_STATE_REAL_SAMPLES + 1);
+        assert!(samples.iter().all(|sample| sample.outcome == ProbeOutcome::Connected));
     }
 
-    /// Truth: the F8 early-return is VISIBLE in the samples — an unreachable endpoint records
-    /// exactly ONE probe, proving the two reals were skipped rather than silently failing.
-    /// This is the assertion that would catch a future regression re-introducing the 3×
-    /// timeout stall that F8 removed.
-    ///
-    /// Uses port 0 for the same reason as `outcome_label_always_matches_the_elapsed_time`, and it
-    /// costs this test nothing: what is counted is SAMPLES, not milliseconds, so an endpoint that
-    /// refuses in 0 ms exercises the `not_reachable => return` arm exactly as a 2 s one did — the
-    /// early return is about the warm-up's VERDICT, never its latency. The bind-drop-probe idiom
-    /// it replaced could hand the port to another parallel test, which would make the warm-up read
-    /// `Ok`, run the two reals, and redden the count for a reason that has nothing to do with F8
-    /// (`WINDOWS.md` #37).
     #[tokio::test]
     async fn unreachable_endpoint_records_exactly_one_probe() {
-        const NOBODY_CAN_LISTEN_HERE: u16 = 0;
-
-        let (verdict, samples) =
-            probe_tcp_steady_state_sampled("127.0.0.1", NOBODY_CAN_LISTEN_HERE, 1500).await;
-
+        let executor = probe_test_support::FakeExecutor::new(vec![PingResult::Unreachable]);
+        let (verdict, samples) = probe_tcp_steady_state_with_executor(&executor, "127.0.0.1", 443, 1500).await;
         assert_eq!(verdict, PingResult::Unreachable);
-        assert_eq!(
-            samples.len(),
-            1,
-            "the warm-up alone decides an unreachable endpoint (F8 budget fix); \
-             more than one sample means the reals ran and the budget blew out"
-        );
+        assert_eq!(samples.len(), 1);
     }
 }

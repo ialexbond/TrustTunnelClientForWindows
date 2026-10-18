@@ -16,6 +16,7 @@
 #include "common/logger.h"
 #include "common/net_utils.h"
 #include "common/socket_address.h"
+#include "endpoint_probe.h"
 #include "net/network_manager.h"
 #include "net/tls.h"
 #include "utils.h"
@@ -120,6 +121,9 @@ int main(int argc, char **argv) {
     args.add_options()
             ("v,version", "Print version")
             ("routing-policy-version", "Print supported Windows routing policy format")
+            ("endpoint-probe-version", "Print supported direct endpoint probe format")
+            ("probe-endpoint", "Measure one physical TCP connection to numeric IP:port (no tunnel)", cxxopts::value<std::string>())
+            ("probe-timeout-ms", "Endpoint probe timeout in milliseconds (1..10000)", cxxopts::value<uint32_t>()->default_value("3000"))
             ("s", "Skip verify certificate", cxxopts::value<bool>()->default_value("false"))
             ("c,config", "Config file name.", cxxopts::value<std::string>()->default_value(std::string(DEFAULT_CONFIG_FILE)))
             ("l,loglevel", "Logging level. Possible values: error, warn, info, debug, trace.", cxxopts::value<std::string>()->default_value("info"))
@@ -138,6 +142,10 @@ int main(int argc, char **argv) {
         std::cout << "1\n";
         return 0;
     }
+    if (result.count("endpoint-probe-version")) {
+        std::cout << "1\n";
+        return 0;
+    }
     if (result.count("version")) {
         std::cout << args.program() << " " TRUSTTUNNEL_VERSION << '\n';
         return 0;
@@ -147,6 +155,17 @@ int main(int argc, char **argv) {
         // `{""}` mean print only options from default options group
         std::cout << args.help({""}) << '\n';
         return 1;
+    }
+
+    // One-shot measurements must return before config loading, service handling,
+    // network monitors, TUN/DNS setup or a firewall session can be created.
+    if (result.count("probe-endpoint")) {
+        Logger::set_log_level(LOG_LEVEL_ERROR);
+        std::cout << probe_endpoint_tcp(
+                result["probe-endpoint"].as<std::string>(), result["probe-timeout-ms"].as<uint32_t>())
+                             .to_json()
+                  << '\n';
+        return 0;
     }
 
 #ifdef _WIN32

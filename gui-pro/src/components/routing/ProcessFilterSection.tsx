@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Filter, AppWindow, Loader2 } from "lucide-react";
 import { Card, PanelHeader, RowToggle, SettingsRow, Button } from "../../shared/ui";
@@ -37,6 +37,18 @@ export function ProcessFilterSection({
 }: ProcessFilterSectionProps) {
   const { t } = useTranslation();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const pendingRevealRef = useRef<Set<string> | null>(null);
+
+  useLayoutEffect(() => {
+    const previousNames = pendingRevealRef.current;
+    if (!previousNames) return;
+    pendingRevealRef.current = null;
+    if (processes.some((name) => !previousNames.has(name.toLowerCase()))) {
+      const list = listRef.current;
+      if (list) list.scrollTop = list.scrollHeight;
+    }
+  }, [processes, pickerOpen]);
 
   // One binding, two uses: the row's visible label AND the switch's accessible name. Naming it once
   // is what keeps those two from drifting apart when the mode flips the wording.
@@ -66,6 +78,10 @@ export function ProcessFilterSection({
   };
 
   const handlePickerConfirm = (selected: string[]) => {
+    const previousNames = new Set(processes.map((name) => name.toLowerCase()));
+    pendingRevealRef.current = selected.some((name) => !previousNames.has(name.toLowerCase()))
+      ? previousNames
+      : null;
     for (const name of selected) {
       onAdd(name);
     }
@@ -119,7 +135,13 @@ export function ProcessFilterSection({
 
         {/* Process list */}
         {processes.length > 0 && (
-          <div className="mt-3 rounded-[var(--radius-lg)] overflow-hidden border" style={{ borderColor: "var(--color-border)" }}>
+          <div
+            ref={listRef}
+            role="region"
+            aria-label={t("routing.processFilterTitle")}
+            className="mt-3 max-h-[240px] overflow-y-auto scroll-visible routing-list-scrollbar rounded-[var(--radius-lg)] border"
+            style={{ borderColor: "var(--color-border)" }}
+          >
             {processes.map((proc, idx) => (
               <div
                 key={proc}

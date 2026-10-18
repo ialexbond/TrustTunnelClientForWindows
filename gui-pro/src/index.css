@@ -186,6 +186,18 @@ input[type="number"] {
   width: 0;
 }
 
+/* Routing lists keep an obvious grip even before the pointer reaches the list. */
+.routing-list-scrollbar {
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--color-text-muted) transparent;
+}
+.routing-list-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-text-muted);
+}
+.routing-list-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
 /* Non-scrolling container */
 .scroll-gutter-match {
   overflow-y: auto;

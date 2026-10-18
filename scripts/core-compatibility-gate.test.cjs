@@ -26,8 +26,9 @@ function fixture(overrides = {}, bytes = executable()) {
   const calls = [];
   const results = {
     "--version": { status: 0, stdout: `trusttunnel_client ${EXPECTED_VERSION}\r\n` },
-    "--help": { status: 1, stdout: "  --routing-policy-version  Print supported policy\r\n" },
+    "--help": { status: 1, stdout: "  --routing-policy-version\r\n  --endpoint-probe-version\r\n  --probe-endpoint arg\r\n" },
     "--routing-policy-version": { status: 0, stdout: `${EXPECTED_POLICY_VERSION}\r\n` },
+    "--endpoint-probe-version": { status: 0, stdout: "1\r\n" },
     ...overrides,
   };
   return {
@@ -40,13 +41,14 @@ function fixture(overrides = {}, bytes = executable()) {
   };
 }
 
-test("matching Windows core reports its measured hash and only uses three read-only queries", () => {
+test("matching Windows core reports its measured hash and only uses read-only queries", () => {
   const bytes = executable();
   const { calls, options } = fixture({}, bytes);
   const result = verifyCore(DEFAULT_CORE, options);
-  assert.deepEqual(calls, ["--version", "--help", "--routing-policy-version"]);
+  assert.deepEqual(calls, ["--version", "--help", "--routing-policy-version", "--endpoint-probe-version"]);
   assert.equal(result.version, "1.1.11");
   assert.equal(result.policyVersion, "1");
+  assert.equal(result.endpointProbeVersion, "1");
   assert.equal(result.sha256, crypto.createHash("sha256").update(bytes).digest("hex"));
 });
 
@@ -61,6 +63,19 @@ test("official 1.1.11 without the fork capability is rejected without querying a
   assert.throws(() => verifyCore(DEFAULT_CORE, options), /does not advertise/);
   assert.deepEqual(calls, ["--version", "--help"]);
 });
+
+test("older fork without endpoint probes never receives its unknown query flag", () => {
+  const { calls, options } = fixture({ "--help": { status: 1, stdout: "--routing-policy-version\n" } });
+  assert.throws(() => verifyCore(DEFAULT_CORE, options), /protected endpoint probe capability/);
+  assert.deepEqual(calls, ["--version", "--help", "--routing-policy-version"]);
+});
+
+for (const version of ["0", "2", "1\nextra"]) {
+  test(`malformed endpoint probe capability ${JSON.stringify(version)} fails`, () => {
+    const { options } = fixture({ "--endpoint-probe-version": { status: 0, stdout: version } });
+    assert.throws(() => verifyCore(DEFAULT_CORE, options), /must support endpoint probe 1/);
+  });
+}
 
 for (const policy of ["0", "2", "", "1\nunexpected text"]) {
   test(`unsupported or malformed policy response ${JSON.stringify(policy)} fails`, () => {
