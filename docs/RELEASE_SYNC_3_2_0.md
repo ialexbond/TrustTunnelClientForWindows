@@ -176,6 +176,14 @@ The actual production Tauri/NSIS build and all core compatibility, raw/extracted
 
 The updated Desktop `TrustTunnel Client Pro_3.2.0_x64-setup.exe` is 9,799,008 bytes, SHA-256 `0470bdbe047a8cb579a728973d8d425471ef74ee0e9b1f10fe59a8412c275762`, with a verified adjacent `.exe.sha256`. The previous MTU candidate and checksum are privately archived. All six saved configuration files and installed binaries remain unchanged. No installation or publication was performed. Private receipts and both-theme previews are under `release-3.2.0/scrollbar-tone` in the task's visualization directory.
 
+## Scrollbar hover correction
+
+Source fix: `cfccd6d1319e5ff133bc23de4193aa85aada3b5e`. The user accepted the resting scrollbar colors in both themes but reported an excessively strong hover. A real pointer-hover capture reproduced Chromium's native hover paint overriding the intended subtle pseudo-element appearance. Routing/process lists now use scoped WebKit thumb styling in supporting browsers, with standard styling retained as fallback. The existing gutter remains 10 px and the visible grip remains 6 px. The prior global rule hiding scrollbar arrow buttons now takes effect in these scoped Chromium lists; no custom arrows were introduced.
+
+Resting pixels are unchanged: light `(204, 204, 202)` and dark `(60, 60, 60)`. Hover changes to `(202, 202, 200)` and `(62, 62, 62)`, instead of the previously observed `(90, 90, 90)` and `(192, 192, 193)`. One bounded before/after dark/light capture confirms the result; wheel and thumb dragging work, and one final CSS detector run has no findings. No behavioral code or network rules changed.
+
+The real Tauri/NSIS build and all compatibility, raw/extracted privacy, build-label, NSIS and checksum gates pass. New Desktop `TrustTunnel Client Pro_3.2.0_x64-setup.exe`: 9,797,545 bytes, SHA-256 `5381bc52f838743a32816ac2405002e90f3a2f99c6500ce312474f0261b70a7d`, with a verified adjacent checksum. Extracted GUI SHA-256 `bc03601048e1a32017d4ef9ca27c8255067be574d018a526bb043be41d62915a` matches the build output after the expected Tauri bundle-marker normalization; the frontend is `main-F85d2wz-.js`. Core/WinTUN retain their previous hashes. The prior `0470bdbe...` installer is privately archived. Six saved profiles and installed executable hashes are unchanged; no installation or publication was performed. Private pixel evidence and package receipts are under `release-3.2.0/scrollbar-hover`.
+
 ## Recovery and run-owned resources
 
 The pre-upgrade routing patch is committed independently, followed by baseline ancestry and official-release merge commits. Reverting only the later release work restores the original development baseline without changing installed files.
