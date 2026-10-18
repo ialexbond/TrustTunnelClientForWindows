@@ -235,8 +235,13 @@ that release branch and its tag. Compiled core binaries are not stored in Git an
 be built separately. For a release-equivalent core build, set `TT_CLIENT_VERSION=1.1.7`
 explicitly; the GUI version is 3.1.0. See [release synchronization notes](docs/RELEASE_SYNC_3_1_0.md).
 
+Pro **3.2.0 is in development** on `codex/release-3.2.0`, with official core **1.1.11**
+and the fork's process/routing fixes. This does not replace the published 3.1.0 installer.
+Build the matching fork core with `TT_CLIENT_VERSION=1.1.11`; a stock upstream executable
+does not support the fork's policy extensions. See [3.2.0 compatibility and validation](docs/RELEASE_SYNC_3_2_0.md).
+
 `CHANGELOG.md` в корне — это журнал изменений C++-ядра, а не приложения (записи с `0.90.4` за август
-2022 по `1.1.7` за сентябрь 2026), скопированный из апстрима как есть: изменения самого форка в эти
+2022 по `1.1.11` за октябрь 2026), скопированный из апстрима как есть: изменения самого форка в эти
 записи не попадают, они перечислены отдельно в начале файла. Что изменилось в самом приложении,
 написано в описании каждого выпуска и в окне «Что нового».
 

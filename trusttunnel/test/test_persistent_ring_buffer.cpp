@@ -43,9 +43,17 @@ static void corrupt_magic(const std::string &path) {
 
 class PersistentRingBufferTest : public testing::Test {
 protected:
-    std::string path = "./persistent-ring-buffer-test.dat";
+    std::string path;
 
     void SetUp() override {
+        // CTest runs discovered cases in separate processes; each needs its own file.
+#ifdef _WIN32
+        auto process_id = GetCurrentProcessId();
+#else
+        auto process_id = getpid();
+#endif
+        path = "./persistent-ring-buffer-test-" + std::to_string(process_id) + "-"
+                + testing::UnitTest::GetInstance()->current_test_info()->name() + ".dat";
         remove_file_if_exists(path);
     }
 

@@ -102,6 +102,15 @@ bool tls_verify_cert_ip(X509 *cert, const char *ip);
  */
 const char *tls_verify_cert(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store);
 
+struct TlsCertVerificationResult {
+    const char *error = nullptr;
+    // Set only for an otherwise trusted chain whose validity has not started.
+    bool not_yet_valid = false;
+};
+
+/** Verify without changing trust policy, preserving a structured failure cause. */
+TlsCertVerificationResult tls_verify_cert_detailed(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store);
+
 /**
  * Create trusted CA store from system's one
  * @return CA store

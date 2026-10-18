@@ -2086,6 +2086,17 @@ pub async fn vpn_connect(
     let child = sidecar::spawn_trusttunnel(&app, spawn_config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
         .await
         .map_err(|e| {
+            if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON {
+                let reason = crate::lifecycle::CORE_VERSION_MISMATCH_REASON;
+                if crate::lifecycle::respawn_may_store(
+                    connect_generation,
+                    state.connection_generation.load(Ordering::SeqCst),
+                    state.user_disconnect_requested.load(Ordering::SeqCst),
+                ) {
+                    set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+                }
+                return reason.to_string();
+            }
             let msg = format!("Failed to start sidecar: {e}");
             eprintln!("[vpn_connect] {msg}");
             crate::logging::log_app("ERROR", &msg);
@@ -2425,6 +2436,20 @@ pub async fn respawn_sidecar(
     {
         Ok(c) => c,
         Err(e) => {
+            if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON
+                && crate::lifecycle::respawn_may_store(
+                    captured_generation,
+                    state.connection_generation.load(Ordering::SeqCst),
+                    state.user_disconnect_requested.load(Ordering::SeqCst),
+                )
+            {
+                set_vpn_status(
+                    app,
+                    &state,
+                    VpnStatus::Error,
+                    Some(crate::lifecycle::CORE_VERSION_MISMATCH_REASON.to_string()),
+                );
+            }
             crate::logging::log_app("WARN", &format!("[reconnect] respawn failed: {e}"));
             return;
         }

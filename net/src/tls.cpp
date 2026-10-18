@@ -236,8 +236,35 @@ bool tls_verify_cert_ip(X509 *cert, const char *ip) {
     return 1 == X509_check_ip_asc(cert, ip, X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT);
 }
 
-static const char *tls_verify_cert_0(X509 *cert, STACK_OF(X509) * chain, X509_STORE *orig_store) {
-    const char *err = nullptr;
+// This second verification is diagnostic only. Its success never accepts the original
+// connection: it prevents a future date on an untrusted or expired chain from being
+// presented as a clock problem.
+static bool tls_chain_is_only_not_yet_valid(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
+    DeclPtr<X509_STORE_CTX, &X509_STORE_CTX_free> ctx{X509_STORE_CTX_new()};
+    if (!ctx || !X509_STORE_CTX_init(ctx.get(), store, cert, chain)
+            || !X509_STORE_CTX_set_purpose(ctx.get(), X509_PURPOSE_SSL_SERVER)) {
+        return false;
+    }
+    X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(ctx.get()), X509_V_FLAG_NO_CHECK_TIME);
+    if (X509_verify_cert(ctx.get()) != 1) {
+        return false;
+    }
+    bool future = false;
+    STACK_OF(X509) *verified_chain = X509_STORE_CTX_get0_chain(ctx.get());
+    for (size_t i = 0; i < sk_X509_num(verified_chain); ++i) {
+        X509 *entry = sk_X509_value(verified_chain, i);
+        const int not_before = X509_cmp_current_time(X509_get0_notBefore(entry));
+        const int not_after = X509_cmp_current_time(X509_get0_notAfter(entry));
+        if (not_before == 0 || not_after <= 0) {
+            return false;
+        }
+        future |= not_before > 0;
+    }
+    return future;
+}
+
+static TlsCertVerificationResult tls_verify_cert_0(X509 *cert, STACK_OF(X509) * chain, X509_STORE *orig_store) {
+    TlsCertVerificationResult result;
 
     X509_STORE *store = orig_store;
     if (store == nullptr) {
@@ -245,16 +272,19 @@ static const char *tls_verify_cert_0(X509 *cert, STACK_OF(X509) * chain, X509_ST
     }
     X509_STORE_CTX *ctx = X509_STORE_CTX_new();
 
-    if (0 == X509_STORE_CTX_init(ctx, store, cert, chain)) {
-        err = "Can't verify certificate chain: can't initialize STORE_CTX";
+    if (ctx == nullptr || store == nullptr || 0 == X509_STORE_CTX_init(ctx, store, cert, chain)) {
+        result.error = "Can't verify certificate chain: can't initialize STORE_CTX";
         goto finish;
     }
     if (0 == X509_STORE_CTX_set_purpose(ctx, X509_PURPOSE_SSL_SERVER)) {
-        err = "Can't verify certificate chain: can't set STORE_CTX purpose";
+        result.error = "Can't verify certificate chain: can't set STORE_CTX purpose";
         goto finish;
     }
     if (0 >= X509_verify_cert(ctx)) {
-        err = X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx));
+        const int error_code = X509_STORE_CTX_get_error(ctx);
+        result.error = X509_verify_cert_error_string(error_code);
+        result.not_yet_valid =
+                error_code == X509_V_ERR_CERT_NOT_YET_VALID && tls_chain_is_only_not_yet_valid(cert, chain, store);
         goto finish;
     }
 
@@ -263,29 +293,33 @@ finish:
     if (orig_store == nullptr) {
         X509_STORE_free(store);
     }
-    return err;
+    return result;
 }
 
 #ifndef _WIN32
 
-const char *tls_verify_cert(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
+TlsCertVerificationResult tls_verify_cert_detailed(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
     return tls_verify_cert_0(cert, chain, store);
 }
 
 #else // _WIN32
 
-const char *tls_verify_cert(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
+TlsCertVerificationResult tls_verify_cert_detailed(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
     if (store) {
         return tls_verify_cert_0(cert, chain, store);
     }
     WinCryptValidateError r = wcrypt_validate_cert(cert, chain);
     if (r == WCRYPT_E_OK) {
-        return nullptr;
+        return {};
     }
-    return magic_enum::enum_name(r).data();
+    return {magic_enum::enum_name(r).data(), r == WCRYPT_E_CERT_NOT_YET_VALID};
 }
 
 #endif // _WIN32
+
+const char *tls_verify_cert(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
+    return tls_verify_cert_detailed(cert, chain, store).error;
+}
 
 typedef enum {
     CT_HANDSHAKE = 22,
