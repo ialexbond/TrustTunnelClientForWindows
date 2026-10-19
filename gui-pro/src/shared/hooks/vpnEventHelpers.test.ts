@@ -20,6 +20,16 @@ describe("vpnEventHelpers — reason-code localization", () => {
     i18n.changeLanguage("ru");
   });
 
+  it("distinguishes unavailable downloads from invalid routing rules without alarming disk advice", () => {
+    const localize = makeLocalizeError(i18n);
+    expect(localize("routing-rules-apply-failed")).toMatch(/разделе «Маршрутизация»/i);
+    expect(localize("routing-data-unavailable")).toMatch(/списки сайтов/i);
+    expect(localizeVpnError("routing-data-unavailable", i18n)).toBe(localize("routing-data-unavailable"));
+    expect(localize("routing-data-unavailable")).not.toMatch(/диск|старые настройки|отменено/i);
+    i18n.changeLanguage("en");
+    expect(localize("routing-data-unavailable")).toMatch(/download the site lists/i);
+  });
+
   it("maps the exhausted-queue code to its own key, not the reconnect-gave-up one", () => {
     // The exact token `connectivity::FAILOVER_EXHAUSTED_REASON` writes.
     expect(REASON_CODE_I18N["failover-exhausted"]).toBe("errors.failover_exhausted");
@@ -178,15 +188,34 @@ describe("vpnEventHelpers — reason-code localization", () => {
     "core-server-unreachable": "errors.core_server_unreachable",
     "core-auth-failed": "errors.auth_required",
     "core-certificate-failed": "errors.core_certificate_failed",
+    "core-certificate-not-yet-valid": "errors.core_certificate_not_yet_valid",
+    "core-version-mismatch": "errors.core_version_mismatch",
     "core-invalid-settings": "errors.core_invalid_settings",
     "core-address-in-use": "errors.core_address_in_use",
     "core-fatal-connectivity": "errors.core_fatal_connectivity",
   };
 
-  it("maps each of the six core-* reason codes to its own i18n key", () => {
+  it("maps each core-* reason code to its own i18n key", () => {
     for (const [code, key] of Object.entries(CORE_CODES)) {
       expect(REASON_CODE_I18N[code]).toBe(key);
     }
+  });
+
+  it("explains the certificate start date and gives practical clock advice on both error paths", () => {
+    const code = "core-certificate-not-yet-valid";
+    const localize = makeLocalizeError(i18n);
+    const russian = localize(code);
+    expect(russian).toMatch(/ещё не действует/i);
+    expect(russian).toMatch(/дату и время на компьютере/i);
+    expect(russian).toMatch(/если они верны.*администратору сервера/i);
+    expect(russian).not.toBe(localize("core-certificate-failed"));
+    expect(localizeVpnError(code, i18n)).toBe(russian);
+    expect(localizeVpnError(new Error(code), i18n)).toBe(russian);
+    i18n.changeLanguage("en");
+    const english = localize(code);
+    expect(english).toMatch(/not valid yet/i);
+    expect(english).toMatch(/date and time on your computer/i);
+    expect(english).toMatch(/server administrator/i);
   });
 
   it("renders every core-* code as a Russian sentence, never the raw token", () => {
@@ -224,7 +253,7 @@ describe("vpnEventHelpers — reason-code localization", () => {
     }
   });
 
-  it("does not swallow the core's own text — code 9 and code 6 collapse to the same sentence, never the parser's raw line", () => {
+  it("does not swallow the core's own text — code 10 and code 6 collapse to the same sentence, never the parser's raw line", () => {
     // D-29/D-10: `core_exit_error_reason` (sidecar.rs) already strips the raw line down
     // to a fixed code before it ever reaches this map — this test guards the FE half of
     // that contract: the localized sentence never contains anything that looks like the

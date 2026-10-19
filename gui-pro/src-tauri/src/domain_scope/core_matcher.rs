@@ -1,4 +1,5 @@
-//! A line-by-line model of the C++ core's name matcher, for tests only.
+//! A model of the C++ core's plain positive name matcher, for GUI scope tests only.
+//! Policy-v1 priorities are exercised by shared fixtures in the native C++ suite, not this model.
 //!
 //! # Why this exists
 //!
@@ -98,6 +99,8 @@ fn domain_table(exclusions: &str) -> HashMap<String, Flags> {
         if entry_kind(entry) != EntryKind::Domain {
             continue;
         }
+        let normalized = entry.to_ascii_lowercase();
+        let entry = normalized.as_str();
         let (key, flags) = match entry.strip_prefix(WILDCARD_PREFIX) {
             Some(rest) => (
                 rest.to_string(),
@@ -121,6 +124,8 @@ fn domain_table(exclusions: &str) -> HashMap<String, Flags> {
 /// the app actually wrote and ask this question of it.
 pub(crate) fn core_match_domain(exclusions: &str, query: &str) -> bool {
     let table = domain_table(exclusions);
+    let normalized = query.to_ascii_lowercase();
+    let query = normalized.as_str();
 
     let www_prefixed = query.starts_with(WWW_PREFIX);
     let mut seek = if www_prefixed {

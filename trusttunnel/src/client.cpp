@@ -1,8 +1,9 @@
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include <magic_enum/magic_enum.hpp>
@@ -14,6 +15,7 @@
 #include "net/os_tunnel.h"
 #include "net/tls.h"
 #include "net/utils.h"
+#include "process_socket_owner.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
 #include "vpn/vpn.h"
@@ -27,16 +29,8 @@
 namespace ag {
 
 #ifdef _WIN32
-// Cache PID → exe name to avoid repeated OpenProcess + QueryFullProcessImageNameW calls.
-// Cleared on VPN reconnect (new TrustTunnelClient instance).
-static std::unordered_map<DWORD, std::string> s_pid_name_cache;
-
 static std::string pid_to_exe_name(DWORD pid) {
-    auto it = s_pid_name_cache.find(pid);
-    if (it != s_pid_name_cache.end()) {
-        return it->second;
-    }
-
+    // Resolve each time: PIDs can be reused, and failed lookups may succeed later.
     std::string result;
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (hProcess != nullptr) {
@@ -54,87 +48,122 @@ static std::string pid_to_exe_name(DWORD pid) {
         CloseHandle(hProcess);
     }
 
-    s_pid_name_cache[pid] = result;
     return result;
 }
 
-// Look up PID owning a local port in TCP or UDP table.
-// Uses retry loop: table size can grow between the two API calls.
-static DWORD find_pid_by_port(uint16_t local_port, int proto) {
-    if (proto == IPPROTO_TCP) {
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            DWORD size = 0;
-            GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-            if (size == 0)
-                return 0;
-
-            std::vector<uint8_t> buf(size);
-            DWORD err = GetExtendedTcpTable(buf.data(), &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-            if (err == ERROR_INSUFFICIENT_BUFFER)
-                continue;
-            if (err != NO_ERROR)
-                return 0;
-
-            auto *table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID *>(buf.data());
-            for (DWORD i = 0; i < table->dwNumEntries; i++) {
-                auto &row = table->table[i];
-                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port && row.dwOwningPid > 4) {
-                    return row.dwOwningPid;
-                }
-            }
-            return 0;
-        }
-    } else if (proto == IPPROTO_UDP) {
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            DWORD size = 0;
-            GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
-            if (size == 0)
-                return 0;
-
-            std::vector<uint8_t> buf(size);
-            DWORD err = GetExtendedUdpTable(buf.data(), &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
-            if (err == ERROR_INSUFFICIENT_BUFFER)
-                continue;
-            if (err != NO_ERROR)
-                return 0;
-
-            auto *table = reinterpret_cast<MIB_UDPTABLE_OWNER_PID *>(buf.data());
-            for (DWORD i = 0; i < table->dwNumEntries; i++) {
-                auto &row = table->table[i];
-                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port && row.dwOwningPid > 4) {
-                    return row.dwOwningPid;
-                }
-            }
-            return 0;
-        }
-    }
-    return 0;
+static ProcessSocketAddress owner_socket_address(
+        ProcessSocketFamily family, const void *address, DWORD port, DWORD scope = 0) {
+    ProcessSocketAddress result{family};
+    std::memcpy(result.address.data(), address, family == ProcessSocketFamily::IPV4 ? 4 : 16);
+    result.port = ntohs(static_cast<uint16_t>(port));
+    result.scope = scope;
+    return result;
 }
 
-// Resolve source socket address → PID → process executable name.
-// Match by port only — the TUN adapter source IP differs from the physical adapter IP
-// visible in GetExtendedTcpTable, so address matching is unreliable.
-static std::string resolve_app_name_from_socket(const struct sockaddr *src, int proto) {
-    if (src == nullptr) {
+static ProcessSocketAddress owner_socket_address(const sockaddr *address) {
+    if (address != nullptr && address->sa_family == AF_INET) {
+        const auto *v4 = reinterpret_cast<const sockaddr_in *>(address);
+        return owner_socket_address(ProcessSocketFamily::IPV4, &v4->sin_addr, v4->sin_port);
+    }
+    if (address != nullptr && address->sa_family == AF_INET6) {
+        const auto *v6 = reinterpret_cast<const sockaddr_in6 *>(address);
+        return owner_socket_address(ProcessSocketFamily::IPV6, &v6->sin6_addr, v6->sin6_port, v6->sin6_scope_id);
+    }
+    return {};
+}
+
+// Table size can grow between calls; a failed/truncated snapshot stays unknown.
+static std::vector<uint8_t> read_process_socket_table(ULONG family, ProcessSocketProtocol protocol) {
+    auto read = [&](void *buffer, DWORD *size) {
+        return protocol == ProcessSocketProtocol::TCP
+                ? GetExtendedTcpTable(buffer, size, FALSE, family, TCP_TABLE_OWNER_PID_ALL, 0)
+                : GetExtendedUdpTable(buffer, size, FALSE, family, UDP_TABLE_OWNER_PID, 0);
+    };
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        DWORD size = 0;
+        DWORD error = read(nullptr, &size);
+        if (error != ERROR_INSUFFICIENT_BUFFER || size < sizeof(DWORD)) {
+            return {};
+        }
+        std::vector<uint8_t> buffer(size);
+        error = read(buffer.data(), &size);
+        if (error == ERROR_INSUFFICIENT_BUFFER) {
+            continue;
+        }
+        if (error != NO_ERROR || size > buffer.size() || size < sizeof(DWORD)) {
+            return {};
+        }
+        buffer.resize(size);
+        return buffer;
+    }
+    return {};
+}
+
+template <typename Table, typename Convert>
+static std::vector<ProcessSocketOwner> process_socket_rows(const std::vector<uint8_t> &buffer, Convert convert) {
+    constexpr size_t HEADER_SIZE = offsetof(Table, table);
+    if (buffer.size() < HEADER_SIZE) {
         return {};
     }
-
-    uint16_t local_port = 0;
-    if (src->sa_family == AF_INET) {
-        local_port = ntohs(reinterpret_cast<const struct sockaddr_in *>(src)->sin_port);
-    } else if (src->sa_family == AF_INET6) {
-        local_port = ntohs(reinterpret_cast<const struct sockaddr_in6 *>(src)->sin6_port);
-    }
-    if (local_port == 0) {
+    const auto *table = reinterpret_cast<const Table *>(buffer.data());
+    if (table->dwNumEntries > (buffer.size() - HEADER_SIZE) / sizeof(table->table[0])) {
         return {};
     }
+    std::vector<ProcessSocketOwner> result;
+    result.reserve(table->dwNumEntries);
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+        result.push_back(convert(table->table[i]));
+    }
+    return result;
+}
 
-    DWORD pid = find_pid_by_port(local_port, proto);
-    if (pid == 0) {
+static std::string resolve_app_name_from_socket(
+        const sockaddr *src, const VpnAddress *dst, int proto, ProcessSocketContext context) {
+    ProcessSocketAddress source = owner_socket_address(src);
+    ProcessSocketProtocol protocol = proto == IPPROTO_TCP ? ProcessSocketProtocol::TCP
+            : proto == IPPROTO_UDP                       ? ProcessSocketProtocol::UDP
+                                                       : ProcessSocketProtocol::UNKNOWN;
+    auto family = process_socket_table_family(source, protocol);
+    if (!family) {
         return {};
     }
-
-    return pid_to_exe_name(pid);
+    std::optional<ProcessSocketAddress> destination;
+    if (dst != nullptr && dst->type == VPN_AT_ADDR) {
+        destination = owner_socket_address(reinterpret_cast<const sockaddr *>(&dst->addr));
+    }
+    if (protocol == ProcessSocketProtocol::TCP && context == ProcessSocketContext::TUN && !destination) {
+        return {};
+    }
+    const auto buffer = read_process_socket_table(
+            *family == ProcessSocketFamily::IPV4 ? AF_INET : AF_INET6, protocol);
+    std::vector<ProcessSocketOwner> rows;
+    if (protocol == ProcessSocketProtocol::TCP && *family == ProcessSocketFamily::IPV4) {
+        rows = process_socket_rows<MIB_TCPTABLE_OWNER_PID>(buffer, [](const auto &row) {
+            return ProcessSocketOwner{
+                    owner_socket_address(ProcessSocketFamily::IPV4, &row.dwLocalAddr, row.dwLocalPort),
+                    owner_socket_address(ProcessSocketFamily::IPV4, &row.dwRemoteAddr, row.dwRemotePort), row.dwOwningPid};
+        });
+    } else if (protocol == ProcessSocketProtocol::TCP) {
+        rows = process_socket_rows<MIB_TCP6TABLE_OWNER_PID>(buffer, [](const auto &row) {
+            return ProcessSocketOwner{
+                    owner_socket_address(ProcessSocketFamily::IPV6, row.ucLocalAddr, row.dwLocalPort, row.dwLocalScopeId),
+                    owner_socket_address(ProcessSocketFamily::IPV6, row.ucRemoteAddr, row.dwRemotePort, row.dwRemoteScopeId),
+                    row.dwOwningPid};
+        });
+    } else if (*family == ProcessSocketFamily::IPV4) {
+        rows = process_socket_rows<MIB_UDPTABLE_OWNER_PID>(buffer, [](const auto &row) {
+            return ProcessSocketOwner{
+                    owner_socket_address(ProcessSocketFamily::IPV4, &row.dwLocalAddr, row.dwLocalPort), {}, row.dwOwningPid};
+        });
+    } else {
+        rows = process_socket_rows<MIB_UDP6TABLE_OWNER_PID>(buffer, [](const auto &row) {
+            return ProcessSocketOwner{
+                    owner_socket_address(ProcessSocketFamily::IPV6, row.ucLocalAddr, row.dwLocalPort, row.dwLocalScopeId),
+                    {}, row.dwOwningPid};
+        });
+    }
+    uint32_t pid = select_process_socket_owner(source, destination, protocol, rows, context);
+    return pid == 0 ? std::string{} : pid_to_exe_name(pid);
 }
 #endif
 
@@ -485,13 +514,20 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
     return nullptr;
 #else
 
+    // Legacy Pro profiles contain only the IPv4 default. Complete their capture at runtime,
+    // without changing the profile or overriding an explicitly scoped IPv6 configuration.
+#ifdef _WIN32
+    const auto effective_config = config.with_windows_ipv6_protection(m_config.killswitch_enabled);
+#else
+    const auto &effective_config = config;
+#endif
     std::vector<const char *> included_routes;
-    included_routes.reserve(config.included_routes.size());
-    for (const auto &route : config.included_routes) {
+    included_routes.reserve(effective_config.included_routes.size());
+    for (const auto &route : effective_config.included_routes) {
         included_routes.emplace_back(route.c_str());
     }
 
-    std::vector<std::string> complete_excluded_routes = config.excluded_routes;
+    std::vector<std::string> complete_excluded_routes = effective_config.excluded_routes;
     for (const auto &endpoint : m_config.location.endpoints) {
         auto resolved = resolve_endpoint_address(endpoint.address.c_str());
         if (resolved.empty()) {
@@ -620,12 +656,13 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         if (event->verification_type == VT_ENDPOINT) {
             if (m_config.location.skip_verification) {
                 dbglog(m_logger, "Skipping certificate verification");
-                event->result = VPN_SKIP_VERIFICATION_FLAG;
+                event->result = VPN_VCR_SKIP_HOSTNAME_VERIFICATION;
             } else if (m_config.location.ca_store) {
-                const char *err = tls_verify_cert(event->cert, event->chain, m_config.location.ca_store.get());
-                if (err != nullptr) {
-                    errlog(m_logger, "Failed to verify certificate: {}", err);
-                    event->result = -1;
+                auto verification =
+                        tls_verify_cert_detailed(event->cert, event->chain, m_config.location.ca_store.get());
+                if (verification.error != nullptr) {
+                    errlog(m_logger, "Failed to verify certificate: {}", verification.error);
+                    event->result = verification.not_yet_valid ? VPN_VCR_CERT_NOT_YET_VALID : -1;
                 } else {
                     dbglog(m_logger, "Certificate verified successfully");
                     event->result = 0;
@@ -683,9 +720,14 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
             }
 #ifdef _WIN32
             // On Windows, app_name is typically empty because the TUN/lwip stack
-            // doesn't provide process info. Resolve it via GetExtendedTcpTable.
+            // doesn't provide process info. Resolve a unique owner from the
+            // corresponding IPv4/IPv6 TCP/UDP snapshot; uncertainty keeps default policy.
             if (resolved_app.empty() && event->src != nullptr) {
-                resolved_app = resolve_app_name_from_socket(event->src, event->proto);
+                // SOCKS targets differ from the OS peer (the local SOCKS listener).
+                const auto context = std::holds_alternative<TrustTunnelConfig::SocksListener>(m_config.listener)
+                        ? ProcessSocketContext::SOCKS
+                        : ProcessSocketContext::TUN;
+                resolved_app = resolve_app_name_from_socket(event->src, event->dst, event->proto, context);
             }
 #endif
             if (!resolved_app.empty()) {
@@ -713,10 +755,10 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
             }
         }
 
-        // Log final routing decision
+        // The core's domain policy runs after this preliminary application action.
         std::string_view log_app = resolved_app.empty() ? safe_to_string_view(event->app_name) : resolved_app;
-        const char *action_names[] = {"DEFAULT", "PROXY", "BYPASS", "REJECT", "FORCE_BYPASS", "FORCE_REDIRECT"};
-        tracelog(m_logger, "[ROUTE] Decision: {} -> {} (app={})", dst_str, action_names[action], log_app);
+        tracelog(m_logger, "[ROUTE] Requested action: {} -> {} (app={})", dst_str, magic_enum::enum_name(action),
+                log_app);
 
         info->action = action;
         if (!resolved_app.empty()) {

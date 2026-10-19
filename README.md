@@ -79,12 +79,11 @@ OpenAI, инструменту Microsoft APM, установщику MakeMKV, м
 ## Скачать и установить
 
 Установщик выложен на [странице выпусков](https://github.com/ialexbond/TrustTunnelClientForWindows/releases).
-Сейчас там есть только **Pro 3.1.0**: файлы всех прежних выпусков, включая установщики Light,
-удалены. Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по ней видно, что файл
+Рядом с установщиком лежит файл `.sha256` с контрольной суммой — по ней видно, что файл
 скачался целиком:
 
 ```powershell
-Get-FileHash .\TrustTunnel.Client.Pro_3.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\TrustTunnel.Client.Pro_3.2.0_x64-setup.exe -Algorithm SHA256
 ```
 
 Сравните результат с содержимым `.sha256`. Подлинность издателя эта сумма не подтверждает: она
@@ -138,7 +137,7 @@ VPN-серверу лежит в его `.toml`-конфиге открытым 
 | | Pro | Light |
 |---|---|---|
 | Можно скачать | да | **нет**, файлы прежних выпусков удалены |
-| Последняя версия | `3.1.0` | `2.7.0` |
+| Последняя версия | `3.2.0` | `2.7.0` |
 | Подключение к VPN | да | да |
 | Маршрутизация (что идёт через VPN, что напрямую) | да | да |
 | Управление своим сервером по SSH | да | нет |
@@ -229,14 +228,15 @@ VPN, где достаточно установленного в системе 
 
 ### Ветки репозитория
 
-The `master` branch now includes the Pro 3.1.0 application, its tests, and the C++ core/build
-sources restored from `release/tt-win-3.1.0`. The published release remains identified by
-that release branch and its tag. Compiled core binaries are not stored in Git and must
-be built separately. For a release-equivalent core build, set `TT_CLIENT_VERSION=1.1.7`
-explicitly; the GUI version is 3.1.0. See [release synchronization notes](docs/RELEASE_SYNC_3_1_0.md).
+The `master` branch includes Pro **3.2.0**, its tests, and the C++ core/build sources.
+The release source is identified by the `v3.2.0-pro` tag. The release uses official core
+**1.1.11** with the fork's Windows process and routing changes. Compiled core binaries
+are not stored in Git and must be built separately.
+Build the matching fork core with `TT_CLIENT_VERSION=1.1.11`; a stock upstream executable
+does not support the fork's policy extensions. See [3.2.0 compatibility and validation](docs/RELEASE_SYNC_3_2_0.md).
 
 `CHANGELOG.md` в корне — это журнал изменений C++-ядра, а не приложения (записи с `0.90.4` за август
-2022 по `1.1.7` за сентябрь 2026), скопированный из апстрима как есть: изменения самого форка в эти
+2022 по `1.1.11` за октябрь 2026), скопированный из апстрима как есть: изменения самого форка в эти
 записи не попадают, они перечислены отдельно в начале файла. Что изменилось в самом приложении,
 написано в описании каждого выпуска и в окне «Что нового».
 
@@ -289,9 +289,9 @@ machine with no internet at all. Killing `trusttunnel_client.exe` or rebooting c
 
 This is a fork of [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient).
 The C++ VPN core comes from upstream and ships as a separate sidecar process, version upstream
-`1.1.7` plus our changes (listed at the top of `CHANGELOG.md`); the GUI is written here. Core sources
-for the current release live on `release/tt-win-3.1.0` and its tag; the synchronized
-`master` also includes those sources. The root `CHANGELOG.md` is the core's changelog, not the application's — its release
+`1.1.11` plus our Windows process and routing changes; the GUI is written here. Core sources
+for Pro 3.2.0 are included in `master` and the `v3.2.0-pro` tag.
+The root `CHANGELOG.md` is the core's changelog, not the application's — its release
 entries are upstream's; the application has its own release notes.
 
 Everything here, core and application alike, is under the Apache License 2.0 (`LICENSE`). `NOTICE`

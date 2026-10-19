@@ -85,7 +85,7 @@ impl ClientConfig {
 /// so a symlinked decoy under an allowed root cannot redirect the write into a system dir.
 /// This intentionally does NOT replace the picker; it shrinks the blast radius of the
 /// registered command (defense-in-depth, mirroring the read side).
-fn validate_save_destination(destination: &str) -> Result<(), String> {
+fn validate_save_destination(destination: &str) -> Result<std::path::PathBuf, String> {
     let dest = std::path::Path::new(destination);
 
     // Resolve the destination to an absolute, symlink-free canonical path. The file does not
@@ -140,10 +140,53 @@ fn validate_save_destination(destination: &str) -> Result<(), String> {
     push_root(std::env::temp_dir());
 
     if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
-        Ok(())
+        Ok(canonical)
     } else {
         Err("Access denied: destination is outside the allowed save locations".into())
     }
+}
+
+/// Open the final destination without following a file link or truncating its target.
+/// Parent-directory replacement races require a separate handle-relative design.
+fn open_export_destination(path: &std::path::Path) -> Result<std::fs::File, String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    // Reject a pre-existing leaf link, including a dangling one. The Windows handle
+    // check below also covers a link substituted after this metadata check.
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("Access denied: destination is a file link".into());
+        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!("Invalid destination path: {e}"));
+        }
+        _ => {}
+    }
+    let file = options.open(path).map_err(|e| format!("WRITE_FAILED|{e}"))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT,
+        };
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(format!("WRITE_FAILED|{}", std::io::Error::last_os_error()));
+        }
+        if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.nNumberOfLinks > 1 {
+            return Err("Access denied: destination is a file link".into());
+        }
+    }
+    if !file.metadata().map_err(|e| format!("WRITE_FAILED|{e}"))?.is_file() {
+        return Err("Invalid destination path: expected a regular file".into());
+    }
+    Ok(file)
 }
 
 /// Write a string to a user-chosen destination path (for "Download logs" functionality).
@@ -160,10 +203,12 @@ pub async fn write_string_to_path(
     destination: String,
 ) -> Result<(), String> {
     // CR-01: constrain the destination to allow-listed roots + reject reparse points.
-    validate_save_destination(&destination)?;
-    tokio::fs::write(&destination, content.as_bytes())
-        .await
-        .map_err(|e| format!("WRITE_FAILED|{e}"))
+    use tokio::io::AsyncWriteExt;
+    let canonical = validate_save_destination(&destination)?;
+    let mut file = tokio::fs::File::from_std(open_export_destination(&canonical)?);
+    file.set_len(0).await.map_err(|e| format!("WRITE_FAILED|{e}"))?;
+    file.write_all(content.as_bytes()).await.map_err(|e| format!("WRITE_FAILED|{e}"))?;
+    file.flush().await.map_err(|e| format!("WRITE_FAILED|{e}"))
 }
 
 /// Copy a file to a user-chosen destination (for "Save As" functionality).
@@ -207,8 +252,17 @@ pub fn copy_file(source: String, destination: String) -> Result<(), String> {
     // `source` string — otherwise validate and copy could resolve the same string to two
     // different targets (the F16/TOCTOU fix already applied to `validate_app_path_canonical`).
     let canonical_source = validate_copy_source(&source)?;
-    std::fs::copy(&canonical_source, &destination)
+    let target = std::path::Path::new(&destination);
+    let canonical_parent = std::fs::canonicalize(target.parent().ok_or("Invalid destination path")?)
         .map_err(|e| format!("COPY_FAILED|{e}"))?;
+    let canonical_target = canonical_parent.join(target.file_name().ok_or("Invalid destination path")?);
+    if std::fs::canonicalize(&canonical_target).ok().as_ref() == Some(&canonical_source) {
+        return Err("COPY_FAILED|Source and destination are the same file".into());
+    }
+    let mut source = std::fs::File::open(&canonical_source).map_err(|e| format!("COPY_FAILED|{e}"))?;
+    let mut destination = open_export_destination(&canonical_target)?;
+    destination.set_len(0).map_err(|e| format!("COPY_FAILED|{e}"))?;
+    std::io::copy(&mut source, &mut destination).map_err(|e| format!("COPY_FAILED|{e}"))?;
     Ok(())
 }
 
@@ -784,12 +838,18 @@ fn merge_json_into_table(
 /// config has none — e.g. a legacy SOCKS-only config being converted to TUN.
 fn default_tun_table() -> toml_edit::Table {
     let mut tun = toml_edit::Table::new();
-    tun.insert("mtu_size", toml_edit::value(1280));
+    tun.insert("mtu_size", toml_edit::value(1350));
     tun.insert("change_system_dns", toml_edit::value(true));
     let mut inc = toml_edit::Array::new();
     inc.push("0.0.0.0/0");
+    inc.push("::/1");
+    inc.push("8000::/1"); // pii-gate-allow: Required IPv6 half-space route, not a server address.
     tun.insert("included_routes", toml_edit::value(inc));
-    tun.insert("excluded_routes", toml_edit::value(toml_edit::Array::new()));
+    let mut exc = toml_edit::Array::new();
+    for route in ["::1/128", "fe80::/10", "ff00::/8", "fc00::/7"] {
+        exc.push(route);
+    }
+    tun.insert("excluded_routes", toml_edit::value(exc));
     tun
 }
 
@@ -1012,6 +1072,29 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
 
 #[cfg(test)]
 mod tests {
+    struct ExportTestDir(std::path::PathBuf);
+
+    impl ExportTestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("tt-export-security-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &std::path::Path { &self.0 }
+    }
+
+    impl Drop for ExportTestDir {
+        fn drop(&mut self) {
+            // Fixtures contain only immediate files and links. Never recurse through them.
+            if let Ok(entries) = std::fs::read_dir(&self.0) {
+                for entry in entries.flatten() {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
     use super::*;
 
     // ── delete_staged_temp_file: CR-01 end to end through the COMMAND ─────────────────
@@ -1336,6 +1419,69 @@ some_future_key = "value"
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn security_export_write_rejects_hardlink_without_truncating_target() {
+        let dir = ExportTestDir::new();
+        let original = dir.path().join("original.txt");
+        let destination = dir.path().join("linked.txt");
+        std::fs::write(&original, "preserve original").unwrap();
+        std::fs::hard_link(&original, &destination).unwrap();
+        let error = write_string_to_path("replacement".into(), destination.to_string_lossy().into())
+            .await.unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "preserve original");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn security_export_copy_rejects_hardlink_without_truncating_target() {
+        let dir = ExportTestDir::new();
+        let source = dir.path().join("source.toml");
+        let original = dir.path().join("original.toml");
+        let destination = dir.path().join("linked.toml");
+        std::fs::write(&source, "new export").unwrap();
+        std::fs::write(&original, "preserve original").unwrap();
+        std::fs::hard_link(&original, &destination).unwrap();
+        let error = copy_file(source.to_string_lossy().into(), destination.to_string_lossy().into())
+            .unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "preserve original");
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), "new export");
+    }
+
+    #[test]
+    fn security_export_copy_to_itself_keeps_the_profile_intact() {
+        let dir = ExportTestDir::new();
+        let path = dir.path().join("profile.toml");
+        std::fs::write(&path, "preserve profile").unwrap();
+        let error = copy_file(path.to_string_lossy().into(), path.to_string_lossy().into()).unwrap_err();
+        assert!(error.contains("same file"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "preserve profile");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "Requires Windows symlink rights; run explicitly in filesystem security checks"]
+    async fn security_export_leaf_symlink_never_changes_the_target() {
+        let dir = ExportTestDir::new();
+        let source = dir.path().join("source.toml");
+        let target = dir.path().join("protected.toml");
+        let link = dir.path().join("decoy.toml");
+        std::fs::write(&source, "exported profile").unwrap();
+        std::fs::write(&target, "preserve target").unwrap();
+        std::os::windows::fs::symlink_file(&target, &link).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        let error = write_string_to_path("replacement".into(), link.to_string_lossy().into())
+            .await.unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "preserve target");
+        let error = copy_file(source.to_string_lossy().into(), link.to_string_lossy().into()).unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "preserve target");
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), "exported profile");
+    }
+
     // ── FLOW-01 / D-04: `copy_file` end to end, on the shape the UI really uses ──────
     //
     // These call the REAL command function, not the validator in isolation. The Phase-19
@@ -1557,6 +1703,102 @@ excluded_routes = []
         assert!(out.contains("password = \"secret\""), "password lost:\n{out}");
     }
 
+    #[test]
+    fn apply_edit_synthesizes_tun_with_upstream_mtu_default() {
+        let existing = "[endpoint]\nhostname = \"vpn.example.com\"\n";
+        let config = serde_json::json!({ "endpoint": { "name": "Renamed" } });
+
+        let out = apply_config_edit(existing, &config).unwrap();
+        let parsed: toml::Value = toml::from_str(&out).unwrap();
+
+        assert_eq!(parsed["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
+        assert_eq!(parsed["endpoint"]["hostname"].as_str(), Some("vpn.example.com"));
+    }
+
+    #[test]
+    fn default_tun_table_captures_ipv6_and_preserves_local_control() {
+        let tun = default_tun_table();
+        let included: Vec<_> = tun["included_routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|route| route.as_str().unwrap())
+            .collect();
+        let excluded: Vec<_> = tun["excluded_routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|route| route.as_str().unwrap())
+            .collect();
+        assert_eq!(included, ["0.0.0.0/0", "::/1", "8000::/1"]); // pii-gate-allow: Required IPv6 half-space route, not a server address.
+        assert_eq!(excluded, ["::1/128", "fe80::/10", "ff00::/8", "fc00::/7"]);
+    }
+
+    #[test]
+    fn config_edit_preserves_existing_route_scopes_without_ipv6_migration() {
+        for included in [
+            "[]",
+            "[\"0.0.0.0/0\"]",
+            "[\"192.0.2.0/24\"]",
+            "[\"0.0.0.0/0\", \"2001:db8::/32\"]",
+        ] {
+            let existing = format!(
+                "[endpoint]\nhostname = \"vpn.example.com\"\nname = \"Old\"\n\
+                 [listener.tun]\nmtu_size = 1280\nincluded_routes = {included}\n\
+                 excluded_routes = [\"2001:db8:1::/48\", \"192.0.2.1/32\"]\n"
+            );
+            let before: toml::Value = toml::from_str(&existing).unwrap();
+            let out = apply_config_edit(&existing, &serde_json::json!({ "endpoint": { "name": "Renamed" } })).unwrap();
+            let after: toml::Value = toml::from_str(&out).unwrap();
+            assert_eq!(after["listener"]["tun"], before["listener"]["tun"]);
+            assert!(normalize_config_socks_to_tun(&existing).is_none());
+        }
+    }
+
+    #[test]
+    fn apply_edit_preserves_explicit_and_omitted_tun_mtu() {
+        for mtu in [Some(1280), Some(1350), Some(1400), None] {
+            let mtu_line = mtu.map(|value| format!("mtu_size = {value}\n")).unwrap_or_default();
+            let existing = format!(
+                "[endpoint]\nhostname = \"vpn.example.com\"\nname = \"Old\"\n\
+                 [listener.tun]\n{mtu_line}change_system_dns = true\n\
+                 included_routes = [\"0.0.0.0/0\"]\n"
+            );
+            let config = serde_json::json!({
+                "endpoint": { "name": "Renamed" },
+                "listener": { "tun": { "change_system_dns": false } }
+            });
+
+            let out = apply_config_edit(&existing, &config).unwrap();
+            let parsed: toml::Value = toml::from_str(&out).unwrap();
+            let tun = parsed["listener"]["tun"].as_table().unwrap();
+
+            assert_eq!(tun.get("mtu_size").and_then(|value| value.as_integer()), mtu);
+            assert_eq!(tun["change_system_dns"].as_bool(), Some(false));
+            assert_eq!(parsed["endpoint"]["name"].as_str(), Some("Renamed"));
+            assert!(normalize_config_socks_to_tun(&existing).is_none(), "existing TUN config must not be rewritten");
+        }
+    }
+
+    #[test]
+    fn normalize_preserves_explicit_and_omitted_tun_mtu() {
+        for mtu in [Some(1280), Some(1350), Some(1400), None] {
+            let mtu_line = mtu.map(|value| format!("mtu_size = {value}\n")).unwrap_or_default();
+            let existing = format!(
+                "[listener.tun]\n{mtu_line}change_system_dns = true\n\
+                 [listener.socks]\naddress = \"127.0.0.1:1080\"\n"
+            );
+
+            let out = normalize_config_socks_to_tun(&existing).expect("legacy SOCKS block must be removed");
+            let parsed: toml::Value = toml::from_str(&out).unwrap();
+            let listener = parsed["listener"].as_table().unwrap();
+            let tun = listener["tun"].as_table().unwrap();
+
+            assert_eq!(tun.get("mtu_size").and_then(|value| value.as_integer()), mtu);
+            assert!(!listener.contains_key("socks"));
+        }
+    }
+
     /// SOCKS5 client mode was removed — an incoming `[listener.socks]` payload is stripped on save
     /// and the `[listener.tun]` listener is preserved. No socks block can ever be written.
     #[test]
@@ -1594,6 +1836,8 @@ password = "secret"
 address = "127.0.0.1:1080"
 "#;
         let out = normalize_config_socks_to_tun(socks).expect("socks config should be rewritten");
+        let parsed: toml::Value = toml::from_str(&out).unwrap();
+        assert_eq!(parsed["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
         assert!(!out.contains("[listener.socks]"), "socks block survived:\n{out}");
         assert!(out.contains("[listener.tun]"), "tun listener missing:\n{out}");
         assert!(out.contains("0.0.0.0/0"), "full-tunnel route missing:\n{out}");

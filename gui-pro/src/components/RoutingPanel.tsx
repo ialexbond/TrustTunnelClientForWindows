@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -12,9 +12,11 @@ import { Button } from "../shared/ui/Button";
 import { useConfirm } from "../shared/ui/useConfirm";
 import StatusPanel from "./StatusPanel";
 import { useRoutingState } from "./routing/useRoutingState";
+import type { RouteAction } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
 import { PresetGrid } from "./routing/PresetGrid";
 import { RoutingBlockCard } from "./routing/RoutingBlockCard";
+import type { RoutingBlockCardHandle } from "./routing/RoutingBlockCard";
 import { ProcessFilterSection } from "./routing/ProcessFilterSection";
 import { ExportImportButtons } from "./routing/ExportImportButtons";
 import { RoutingRulesUnreadable } from "./routing/RoutingRulesUnreadable";
@@ -41,6 +43,20 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
   const { t } = useTranslation();
   const state = useRoutingState({ configPath, status, vpnMode, onReconnect });
   const confirm = useConfirm();
+  const directRevealRef = useRef<RoutingBlockCardHandle>(null);
+  const proxyRevealRef = useRef<RoutingBlockCardHandle>(null);
+
+  // Both typed rules and presets share this user-add path. Passive loading and
+  // unrelated list changes never request a scroll.
+  const handleAddEntry = (action: RouteAction, value: string) => {
+    const previousIds = new Set(state.rules[action].map((entry) => entry.id));
+    const result = state.addEntry(action, value);
+    if (result === null) {
+      const pending = action === "direct" ? directRevealRef : proxyRevealRef;
+      pending.current?.revealAddedEntry(previousIds);
+    }
+    return result;
+  };
 
   // D-02 (30.1 blocker 2): the reset destroys every rule the user ever typed, so it asks first.
   // The confirmation lives HERE rather than inside the hook because the dialog is a UI concern and
@@ -182,7 +198,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
             geodata-downloaded (Pitfall #3). */}
         <PresetGrid
           rules={state.rules}
-          onAdd={state.addEntry}
+          onAdd={handleAddEntry}
           ensureGroupCache={state.ensureGroupCache}
           geodataDownloaded={state.geodataStatus.downloaded}
         />
@@ -195,7 +211,8 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}
           iplistGroups={state.iplistGroups}
-          onAdd={state.addEntry}
+          onAdd={handleAddEntry}
+          ref={directRevealRef}
           onRemove={state.removeEntry}
           onMove={state.moveEntry}
           onEnsureGroupCache={state.ensureGroupCache}
@@ -208,7 +225,8 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}
           iplistGroups={state.iplistGroups}
-          onAdd={state.addEntry}
+          onAdd={handleAddEntry}
+          ref={proxyRevealRef}
           onRemove={state.removeEntry}
           onMove={state.moveEntry}
           onEnsureGroupCache={state.ensureGroupCache}

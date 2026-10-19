@@ -919,7 +919,7 @@ void ag::DnsHandler::on_dns_request(const ConnectionInfo &info, U8View message) 
     }
 
     DomainFilterMatchStatus status = ServerUpstream::vpn->domain_filter.match_domain(request.name);
-    bool included = (ServerUpstream::vpn->exclusions_mode == VPN_MODE_GENERAL) ? (status == DFMS_DEFAULT)
+    bool included = (ServerUpstream::vpn->exclusions_mode == VPN_MODE_GENERAL) ? (status != DFMS_EXCLUSION)
                                                                                : (status == DFMS_EXCLUSION);
 
     if (included && m_client) {
@@ -941,7 +941,8 @@ void ag::DnsHandler::on_dns_response(uint64_t upstream_conn_id, U8View message) 
     auto decode_result = dns_utils::decode_packet(message);
     if (auto *response = std::get_if<dns_utils::DecodedReply>(&decode_result)) {
         if (std::ranges::any_of(response->names, [&](const std::string &name) {
-                return DFMS_EXCLUSION == ServerUpstream::vpn->domain_filter.match_domain(name);
+                auto status = ServerUpstream::vpn->domain_filter.match_domain(name);
+                return status == DFMS_EXCLUSION || status == DFMS_DEFAULT_OVERRIDE;
             })) {
             // Add exclusion suspects.
             for (const auto &addr : response->addresses) {

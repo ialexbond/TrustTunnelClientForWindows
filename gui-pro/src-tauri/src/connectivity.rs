@@ -954,6 +954,18 @@ pub fn give_up_reason(queue_exhausted: bool) -> &'static str {
 /// is worth.
 pub fn terminal_reason_for_give_up(recorded: Option<&str>, queue_exhausted: bool) -> &'static str {
     match recorded {
+        Some(c) if c == crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON => {
+            crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON
+        }
+        Some(c) if c == crate::lifecycle::CORE_VERSION_MISMATCH_REASON => {
+            crate::lifecycle::CORE_VERSION_MISMATCH_REASON
+        }
+        Some(c) if c == crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON => {
+            crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON
+        }
+        Some(c) if c == crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON => {
+            crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON
+        }
         Some(c) if c == crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON => {
             crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON
         }
@@ -978,6 +990,9 @@ pub enum SupervisorOutcome {
     /// All `RECONNECT_MAX_ATTEMPTS` failed — caller surfaces the terminal Error
     /// carrying `RECONNECT_GAVE_UP_REASON`.
     GaveUp,
+    /// A local failure shared by every server, such as an incompatible engine.
+    /// Stop the whole failover walk and preserve the recorded diagnosis.
+    TerminalFailure,
     /// The user disconnected, or the captured generation was advanced by a manual
     /// reconnect / disconnect — the supervisor is stale and must NOT act (D-04 +
     /// Codex HIGH stale-actor guard). No respawn, no status-write.
@@ -1087,6 +1102,12 @@ where
         // loop and surface the honest Error now, instead of burning the remaining
         // attempts. Only the specific never-recoverable reasons match; transient
         // failures fall through to the normal retry path below.
+        // A future certificate can belong to this server alone. Its terminal
+        // classification below stops retries of this candidate, then permits
+        // the bounded walk to try another saved server.
+        if failure_reason.as_deref() == Some(crate::lifecycle::CORE_VERSION_MISMATCH_REASON) {
+            return SupervisorOutcome::TerminalFailure;
+        }
         if failure_reason
             .as_deref()
             .is_some_and(crate::lifecycle::is_terminal_reason)
@@ -1197,7 +1218,9 @@ where
 
         let outcome = run_one_candidate(index).await;
         match outcome {
-            SupervisorOutcome::Recovered | SupervisorOutcome::Aborted => {
+            SupervisorOutcome::Recovered
+            | SupervisorOutcome::Aborted
+            | SupervisorOutcome::TerminalFailure => {
                 return FailoverWalkResult {
                     outcome,
                     candidate_index: index,
@@ -2439,7 +2462,7 @@ pub fn start_reconnect_supervisor(
                     crate::commands::vpn::teardown_session_sidecar(&app).await;
                 }
             }
-            SupervisorOutcome::GaveUp => {
+            SupervisorOutcome::GaveUp | SupervisorOutcome::TerminalFailure => {
                 // One final generation re-check before the terminal write so a
                 // session that was reconnected/disconnected during the last attempt
                 // is not clobbered with an Error (Codex HIGH).
@@ -3457,6 +3480,16 @@ mod detection_cadence_tests {
 
 #[cfg(test)]
 mod reconnect_supervisor_tests {
+    #[test]
+    fn routing_preparation_failure_is_terminal_and_preserved() {
+        for reason in [crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON,
+            crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON] {
+            assert!(crate::lifecycle::is_terminal_reason(reason));
+            assert_eq!(super::terminal_reason_for_give_up(Some(reason), false), reason);
+            assert_eq!(super::terminal_reason_for_give_up(Some(reason), true), reason);
+        }
+    }
+
     use super::*;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
@@ -3873,6 +3906,89 @@ mod reconnect_supervisor_tests {
         assert_eq!(sleeps.get(), 0);
     }
 
+    async fn run_core_1111_candidates(
+        reasons: &[Option<&'static str>],
+    ) -> (FailoverWalkResult, u32, u32, u32) {
+        let candidates = Cell::new(0u32);
+        let attempts = Cell::new(0u32);
+        let sleeps = Cell::new(0u32);
+        let result = run_failover_walk(
+            reasons.len(),
+            |index| {
+                candidates.set(candidates.get() + 1);
+                let reason = reasons[index];
+                let attempts = &attempts;
+                let sleeps = &sleeps;
+                async move {
+                    run_reconnect_loop(
+                        7,
+                        crate::lifecycle::RECONNECT_MAX_ATTEMPTS,
+                        |_attempt| {
+                            attempts.set(attempts.get() + 1);
+                            async move {
+                                (reason.is_none(), Duration::ZERO, reason.map(str::to_owned))
+                            }
+                        },
+                        || false,
+                        || 7,
+                        |_attempt| {},
+                        || {
+                            sleeps.set(sleeps.get() + 1);
+                            async {}
+                        },
+                    )
+                    .await
+                }
+            },
+            || true,
+        )
+        .await;
+        (result, candidates.get(), attempts.get(), sleeps.get())
+    }
+
+    #[tokio::test]
+    async fn core_1111_future_certificate_skips_the_failed_server_and_recovers_on_the_next() {
+        let reason = crate::sidecar::core_exit_error_reason("Error: 8 certificate is not yet valid")
+            .expect("the paired core's certificate-time error must be understood");
+        assert!(crate::lifecycle::is_terminal_reason(reason));
+        let (result, candidates, attempts, sleeps) =
+            run_core_1111_candidates(&[Some(reason), None, None]).await;
+        assert_eq!(result.outcome, SupervisorOutcome::Recovered);
+        assert_eq!(result.candidate_index, 1);
+        assert!(!result.queue_exhausted);
+        assert_eq!((candidates, attempts, sleeps), (2, 2, 0));
+    }
+
+    #[tokio::test]
+    async fn core_1111_all_future_certificates_finish_one_pass_and_keep_the_diagnosis() {
+        let reason = crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON;
+        let (result, candidates, attempts, sleeps) =
+            run_core_1111_candidates(&[Some(reason), Some(reason), Some(reason)]).await;
+        assert_eq!(result.outcome, SupervisorOutcome::GaveUp);
+        assert_eq!(result.candidate_index, 2);
+        assert!(result.queue_exhausted);
+        assert_eq!((candidates, attempts, sleeps), (3, 3, 0));
+        assert_eq!(
+            crate::lifecycle::never_connected_exit_reason(false, false, true, Some(reason)),
+            Some(reason),
+        );
+        for exhausted in [false, true] {
+            assert_eq!(terminal_reason_for_give_up(Some(reason), exhausted), reason);
+        }
+    }
+
+    #[tokio::test]
+    async fn core_1111_version_mismatch_stops_before_trying_any_other_server() {
+        let reason = crate::lifecycle::CORE_VERSION_MISMATCH_REASON;
+        let (result, candidates, attempts, sleeps) =
+            run_core_1111_candidates(&[Some(reason), None, None]).await;
+        assert_eq!(result.outcome, SupervisorOutcome::TerminalFailure);
+        assert_eq!(result.candidate_index, 0);
+        assert!(!result.queue_exhausted);
+        assert_eq!((candidates, attempts, sleeps), (1, 1, 0));
+        assert_eq!(terminal_reason_for_give_up(Some(reason), false), reason);
+    }
+
     #[test]
     fn the_terminal_write_prefers_our_own_recorded_cause_and_nothing_else() {
         use crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON;
@@ -3979,7 +4095,10 @@ mod reconnect_supervisor_tests {
         // source it searches, so a literal needle matches ITSELF — measured: the locate-first arm
         // reported 2 hits on the first run. Assembling it here keeps the guard's subject to the
         // production arm alone. (Same trap, same fix, as `updater.rs::function_body`.)
-        let needle = format!("SupervisorOutcome::{}{} => {{", "Gave", "Up");
+        let needle = format!(
+            "SupervisorOutcome::{}{} | SupervisorOutcome::{}{} => {{",
+            "Gave", "Up", "Terminal", "Failure"
+        );
         let needle = needle.as_str();
         let hits = source.matches(needle).count();
         assert_eq!(

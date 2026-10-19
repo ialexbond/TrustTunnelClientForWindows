@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <iostream>
@@ -16,12 +18,14 @@
 #include "common/logger.h"
 #include "common/net_utils.h"
 #include "common/socket_address.h"
+#include "endpoint_probe.h"
 #include "net/network_manager.h"
 #include "net/tls.h"
 #include "utils.h"
 #include "vpn/trusttunnel/auto_network_monitor.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
+#include "vpn/trusttunnel/connection_info.h"
 #include "vpn/trusttunnel/version.h"
 
 #ifdef __APPLE__
@@ -29,7 +33,7 @@
 #endif
 
 #ifdef _WIN32
-#include <filesystem>
+#include "net/windows_network_guard.h"
 #endif
 
 #ifdef __linux__
@@ -57,6 +61,24 @@ static int service_uninstall();
 static int service_install(const std::string &config_path);
 static void report_service_status(DWORD current_state, DWORD win32_exit_code, DWORD wait_hint);
 static bool g_svc_running = false;
+
+static int run_network_guard_cleanup() {
+    auto state = network_guard_cleanup_with_deadline(
+            std::chrono::seconds(7),
+            [] {
+                auto result = WindowsNetworkGuard::release();
+                // Keep the deadline active until the final machine result is flushed.
+                std::cout << result.to_json() << std::endl;
+                return result;
+            },
+            [] {
+                // A hung RPC must not trap the installer. Avoid DLL teardown,
+                // which can deadlock when the interrupted thread holds a lock.
+                TerminateProcess(GetCurrentProcess(), ERROR_TIMEOUT);
+            });
+    return state.success ? 0 : 1;
+}
+
 #endif
 
 int run_client(const cxxopts::ParseResult &cli_args);
@@ -112,18 +134,45 @@ static void setup_sighandler() {
 }
 
 int main(int argc, char **argv) {
+#ifdef _WIN32
+    // A new installer may overwrite an old core before this call. Old cores
+    // safely recognize --version and exit; new cores perform cleanup only.
+    if (argc == 3
+            && ((std::string_view(argv[1]) == "--version" && std::string_view(argv[2]) == "--network-guard-release")
+                    || (std::string_view(argv[2]) == "--version"
+                            && std::string_view(argv[1]) == "--network-guard-release"))) {
+        return run_network_guard_cleanup();
+    }
+    // Legacy-safe uninstaller capability probe: old cores recognize --version,
+    // and this exact composite never reaches config loading or any WFP operation.
+    if (argc == 3
+            && ((std::string_view(argv[1]) == "--version" && std::string_view(argv[2]) == "--network-guard-version")
+                    || (std::string_view(argv[2]) == "--version"
+                            && std::string_view(argv[1]) == "--network-guard-version"))) {
+        std::cout << "2\n";
+        return 0;
+    }
+#endif
     setup_sighandler();
 
     cxxopts::Options args("trusttunnel_client", "TrustTunnel console client");
     // clang-format off
     args.add_options()
             ("v,version", "Print version")
+            ("routing-policy-version", "Print supported Windows routing policy format")
+            ("endpoint-probe-version", "Print supported direct endpoint probe format")
+            ("probe-endpoint", "Measure one physical TCP connection to numeric IP:port (no tunnel)", cxxopts::value<std::string>())
+            ("probe-timeout-ms", "Endpoint probe timeout in milliseconds (1..10000)", cxxopts::value<uint32_t>()->default_value("3000"))
             ("s", "Skip verify certificate", cxxopts::value<bool>()->default_value("false"))
             ("c,config", "Config file name.", cxxopts::value<std::string>()->default_value(std::string(DEFAULT_CONFIG_FILE)))
             ("l,loglevel", "Logging level. Possible values: error, warn, info, debug, trace.", cxxopts::value<std::string>()->default_value("info"))
             ("h,help", "Print usage");
 #ifdef _WIN32
     args.add_options()
+            ("network-guard-version", "Print legacy cleanup result format")
+            ("network-guard-cleanup-version", "Print cleanup-only helper capability")
+            ("network-guard-status", "Read obsolete Pro network guard state without changing networking")
+            ("network-guard-release", "Remove only obsolete, positively identified Pro network guard objects")
             ("service-install", "Install as Windows service", cxxopts::value<bool>()->default_value("false"))
             ("service-uninstall", "Uninstall Windows service", cxxopts::value<bool>()->default_value("false"));
     args.add_options("internal")
@@ -132,6 +181,14 @@ int main(int argc, char **argv) {
     // clang-format on
 
     auto result = args.parse(argc, argv);
+    if (result.count("routing-policy-version")) {
+        std::cout << "1\n";
+        return 0;
+    }
+    if (result.count("endpoint-probe-version")) {
+        std::cout << "1\n";
+        return 0;
+    }
     if (result.count("version")) {
         std::cout << args.program() << " " TRUSTTUNNEL_VERSION << '\n';
         return 0;
@@ -143,7 +200,40 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // One-shot measurements must return before config loading, service handling,
+    // network monitors, TUN/DNS setup or a firewall session can be created.
+    if (result.count("probe-endpoint")) {
+        Logger::set_log_level(LOG_LEVEL_ERROR);
+        std::cout << probe_endpoint_tcp(
+                result["probe-endpoint"].as<std::string>(), result["probe-timeout-ms"].as<uint32_t>())
+                             .to_json()
+                  << '\n';
+        return 0;
+    }
+
 #ifdef _WIN32
+    // Explicit one-shot helpers return before profile parsing and tunnel/service creation.
+    // No helper can create filters, start a tunnel or change user profiles.
+    if (result.count("network-guard-version")) {
+        std::cout << "2\n";
+        return 0;
+    }
+    if (result.count("network-guard-cleanup-version")) {
+        std::cout << "1\n";
+        return 0;
+    }
+    if (result.count("network-guard-status") || result.count("network-guard-release")) {
+        if (result.count("network-guard-status") + result.count("network-guard-release") != 1) {
+            std::cout << NetworkGuardResult{false, true, "network-guard-invalid-operation"}.to_json() << '\n';
+            return 1;
+        }
+        if (result.count("network-guard-release")) {
+            return run_network_guard_cleanup();
+        }
+        auto state = WindowsNetworkGuard::status();
+        std::cout << state.to_json() << '\n';
+        return state.success ? 0 : 1;
+    }
     if (result.count("service-install") && result.count("service-uninstall")) {
         errlog(g_logger, "--service-install and --service-uninstall are mutually exclusive");
         return 1;
@@ -157,6 +247,7 @@ int main(int argc, char **argv) {
     if (result["service-run"].as<bool>()) {
         return service_run(&result);
     }
+
 #endif
 
     return run_client(result);
@@ -304,13 +395,13 @@ std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const Trus
 
 static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback() {
     return [](VpnVerifyCertificateEvent *event) {
-        const char *err = tls_verify_cert(event->cert, event->chain, nullptr);
-        if (err == nullptr) {
+        auto verification = tls_verify_cert_detailed(event->cert, event->chain, nullptr);
+        if (verification.error == nullptr) {
             tracelog(g_logger, "Certificate verified successfully");
             event->result = 0;
         } else {
-            errlog(g_logger, "Failed to verify certificate: {}", err);
-            event->result = -1;
+            errlog(g_logger, "Failed to verify certificate: {}", verification.error);
+            event->result = verification.not_yet_valid ? VPN_VCR_CERT_NOT_YET_VALID : -1;
         }
     };
 }
@@ -343,22 +434,9 @@ static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback() 
 
 static std::function<void(VpnConnectionInfoEvent *)> get_connection_info_callback() {
     return [](VpnConnectionInfoEvent *event) {
-        std::string src = SocketAddress(*event->src).host_str(/*ipv6_brackets=*/true);
-        std::string proto = event->proto == IPPROTO_TCP ? "TCP" : "UDP";
-        std::string dst;
-        if (event->domain) {
-            dst = event->domain;
-        }
-        if (event->dst) {
-            dst = AG_FMT("{}({})", dst, src);
-        }
-        auto action = magic_enum::enum_name(event->action);
-
-        std::string log_message;
-
-        log_message = fmt::format("{}, {} -> {}. Action: {}", proto, src, dst, action);
-
-        dbglog(g_logger, "{}", log_message);
+        // This is the core's final action, not the application's preliminary DEFAULT decision.
+        // Keep both socket ports so an OS ownership snapshot can identify the network process.
+        dbglog(g_logger, "[ROUTE] Final {}", ConnectionInfo::to_json(event, true));
     };
 }
 

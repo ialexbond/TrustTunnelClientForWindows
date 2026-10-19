@@ -198,7 +198,7 @@ ipv4 | gui-pro/src-tauri/src/routing_rules.rs | 1.2.3.4 | 3
 ipv4 | gui-pro/src-tauri/src/ssh/deploy.rs | 1.2.3.4 | 1
 ipv4 | gui-pro/src-tauri/src/ssh/mod.rs | 1.2.3.4 | 1
 ipv4 | gui-pro/src-tauri/src/ssh/sanitize.rs | 1.2.3.4 | 4
-ipv4 | gui-pro/src-tauri/src/ssh/server/server_config.rs | 1.2.3.4 | 3
+ipv4 | gui-pro/src-tauri/src/ssh/server/server_config.rs | 1.2.3.4 | 2
 ipv4 | gui-pro/src-tauri/src/ssh/server/server_security.rs | 1.2.3.0 | 1
 ipv4 | gui-pro/src-tauri/src/ssh/server/server_security.rs | 1.2.3.4 | 3
 ipv4 | gui-pro/src-tauri/src/ssh/server/server_security.rs | 5.6.7.8 | 2

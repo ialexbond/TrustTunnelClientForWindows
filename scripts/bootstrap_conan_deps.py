@@ -6,12 +6,15 @@ for building the project. Clean build scenario requires running this script
 before running the cmake command. Besides that, it may be also required after
 the dependencies updates.
 
+Exports use Conan directly and work with native Python on Windows; Git Bash
+is not required. Git and Conan must be available on PATH.
+
 Usage:
     bootstrap_conan_deps.py [nlc_url [dns_libs_url]]
 
 `nlc_url` is the URL of AdGuard's NativeLibsCommon repository
 (defaults to https://github.com/AdguardTeam/NativeLibsCommon.git).
-`nlc_url` is the URL of AdGuard's DnsLibs repository
+`dns_libs_url` is the URL of AdGuard's DnsLibs repository
 (defaults to https://github.com/AdguardTeam/DnsLibs.git).
 """
 
@@ -61,8 +64,8 @@ def revision_for_version(version):
         `2.8.58-2-g2c375f1c`                     -> check out the commit `<rev>`
 
     This mirrors how the dns-libs/native_libs_common recipes resolve their
-    source revision, so `git describe` in `export_conan.sh` reports exactly the
-    requested version.
+    source revision. Export the exact requested version separately so snapshot
+    versions do not depend on whichever tag `git describe` happens to select.
     """
     described = re.search(r"-g([0-9a-f]+)$", version)
     if described:
@@ -72,15 +75,24 @@ def revision_for_version(version):
 
 def export_conan(repo_dir, version):
     """
-    Check out the revision matching `version` and export the package to the
-    local Conan cache. `export_conan.sh` derives the version from `git describe`
-    (it no longer accepts a version argument), so the checked-out revision is
-    what determines the exported version.
+    Export the requested NativeLibsCommon revision and its bundled recipes.
+
+    This is the native equivalent of its scripts/export_conan.sh: the root
+    package uses the exact requested version; bundled recipes retain their own
+    versions declared in their conanfile.py files.
     """
     subprocess.run(["git", "-C", repo_dir, "checkout", revision_for_version(version)],
                    check=True)
-    subprocess.run([os.path.join(repo_dir, "scripts", "export_conan.sh")],
+    subprocess.run(["conan", "export", repo_dir, "--user", "adguard", "--channel", "oss",
+                    "--version", version],
                    check=True, cwd=repo_dir)
+    recipes_dir = os.path.join(repo_dir, "conan", "recipes")
+    if os.path.isdir(recipes_dir):
+        for name in sorted(os.listdir(recipes_dir)):
+            recipe_dir = os.path.join(recipes_dir, name)
+            if os.path.isdir(recipe_dir) and os.path.isfile(os.path.join(recipe_dir, "conanfile.py")):
+                subprocess.run(["conan", "export", recipe_dir, "--user", "adguard", "--channel", "oss"],
+                               check=True, cwd=repo_dir)
 
 
 with open(os.path.join(project_dir, "conanfile.py"), "r") as file:
@@ -105,7 +117,8 @@ try:
                     and ('@adguard/oss"' in line):
                 nlc_versions.append(line.split('@')[0].split('/')[1])
 
-    subprocess.run([os.path.join("scripts", "export_conan.sh")], check=True)
+    subprocess.run(["conan", "export", dns_libs_dir, "--user", "adguard", "--channel", "oss",
+                    "--version", dns_libs_version], check=True, cwd=dns_libs_dir)
 finally:
     remove_dir_if_exists(dns_libs_dir)
 

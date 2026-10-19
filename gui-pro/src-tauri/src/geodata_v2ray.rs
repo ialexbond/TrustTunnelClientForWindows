@@ -492,7 +492,18 @@ fn format_cidr(entry: &CidrEntry) -> Option<String> {
 ///   the only shapes the core understands are the two above.
 fn format_geo_domain(domain: &GeoDomain) -> Vec<String> {
     match domain.domain_type {
-        2 => crate::domain_scope::expand_domain_rule(&domain.value),
+        2 => {
+            // GeoSite Domain is a suffix even when it is a single label (ru, xn--p1ai).
+            // The hand-typed-domain guard deliberately treats dotless input differently.
+            if !domain.value.contains('.') {
+                if let Ok(label) = idna::domain_to_ascii(&domain.value) {
+                    if !label.is_empty() && label.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
+                        return vec![label.clone(), format!("*.{label}")];
+                    }
+                }
+            }
+            crate::domain_scope::expand_domain_rule(&domain.value)
+        }
         3 => vec![domain.value.clone()],
         _ => Vec::new(),
     }
@@ -955,6 +966,15 @@ pub async fn download_geodata(
     // runs too — not only during a background one. Dropped with the guard on every exit path.
     let _busy = BusyFlag::acquire();
 
+    download_geodata_locked(&app, state.inner()).await
+}
+
+/// Download through the existing guarded writer. The caller owns `update_in_flight`.
+pub(crate) async fn download_geodata_locked(
+    app: &tauri::AppHandle,
+    state: &Arc<GeoDataState>,
+) -> Result<GeoDataStatus, String> {
+
     // Validate the release-API constant up front rather than after the two downloads, so a
     // mis-edited constant fails before tens of megabytes are pulled.
     validate_geodata_url(RELEASES_API)?;
@@ -964,8 +984,8 @@ pub async fn download_geodata(
     // matches. Both are always fetched together (the old code fetched only the missing one when
     // exactly one file was absent), so the committed pair always comes from a single release
     // instead of possibly mixing an old geoip with a new geosite.
-    let geoip_bytes = download_bytes(Some(&app), &client, GEOIP_URL, "geoip.dat").await?;
-    let geosite_bytes = download_bytes(Some(&app), &client, GEOSITE_URL, "geosite.dat").await?;
+    let geoip_bytes = download_bytes(Some(app), &client, GEOIP_URL, "geoip.dat").await?;
+    let geosite_bytes = download_bytes(Some(app), &client, GEOSITE_URL, "geosite.dat").await?;
 
     // Parsing step
     app.emit("geodata-progress", GeoDataProgressPayload {
@@ -998,7 +1018,7 @@ pub async fn download_geodata(
     // protobuf parses parked a shared worker while the user watched a progress bar that had already
     // reached 100%.
     commit_and_cache_blocking(
-        state.inner().clone(),
+        Arc::clone(state),
         geoip_bytes,
         geosite_bytes,
         release_tag,
@@ -1010,7 +1030,7 @@ pub async fn download_geodata(
         step: "Done!".into(),
     }).ok();
 
-    get_geodata_status_inner(&state)
+    get_geodata_status_inner(state)
 }
 
 #[tauri::command]
@@ -1050,11 +1070,16 @@ fn get_geodata_status_inner(state: &GeoDataState) -> Result<GeoDataStatus, Strin
 
 #[tauri::command]
 pub fn load_geodata_categories(state: tauri::State<'_, Arc<GeoDataState>>) -> Result<GeoDataIndex, String> {
+    load_cached_geodata(&state)
+}
+
+/// Connections must load saved data without requiring the Routing tab to mount first.
+pub(crate) fn load_cached_geodata(state: &GeoDataState) -> Result<GeoDataIndex, String> {
     // Try from cache first
     {
         let geoip = state.geoip_categories.lock().map_err(|e| e.to_string())?;
         let geosite = state.geosite_categories.lock().map_err(|e| e.to_string())?;
-        if !geoip.is_empty() || !geosite.is_empty() {
+        if !geoip.is_empty() && !geosite.is_empty() {
             return Ok(GeoDataIndex {
                 geoip: geoip.clone(),
                 geosite: geosite.clone(),
@@ -1076,7 +1101,7 @@ pub fn load_geodata_categories(state: tauri::State<'_, Arc<GeoDataState>>) -> Re
     let geoip_bytes = std::fs::read(&geoip_path).unwrap_or_default();
     let geosite_bytes = std::fs::read(&geosite_path).unwrap_or_default();
 
-    load_and_cache_geodata(&state, &geoip_bytes, &geosite_bytes);
+    load_and_cache_geodata(state, &geoip_bytes, &geosite_bytes);
 
     let geoip = state.geoip_categories.lock().map_err(|e| e.to_string())?;
     let geosite = state.geosite_categories.lock().map_err(|e| e.to_string())?;
@@ -1272,6 +1297,18 @@ pub fn start_geodata_watcher(app: tauri::AppHandle, state: Arc<GeoDataState>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn geosite_tld_suffixes_keep_their_wildcard_scope() {
+        let mut entries = super::format_geo_domain(&super::GeoDomain {
+            domain_type: 2, value: "ru".to_string(),
+        });
+        entries.extend(super::format_geo_domain(&super::GeoDomain {
+            domain_type: 2, value: "рф".to_string(),
+        }));
+        assert_eq!(entries.join("\n"),
+            include_str!("../../../core/test/fixtures/geosite_tld_suffixes.txt").trim_end());
+    }
+
     use super::*;
 
     // ─── protobuf fixture builders ──────────────────

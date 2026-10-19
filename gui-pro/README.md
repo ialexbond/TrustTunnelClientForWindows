@@ -69,12 +69,12 @@ The tunnel, the WinTUN adapter, route interception and the killswitch belong to 
 core** (`trusttunnel_client-*.exe`). Rust/Tauri only spawns and kills that process — it never
 implements tunnelling itself.
 
-**Its sources ARE in this repository**, on each version's `release/tt-win-X.Y.Z` branch
-and release tag, and now in the synchronized `master`. The current release source
-is `release/tt-win-3.1.0`. Only the compiled binary is absent (it is gitignored). The shipped
-core is upstream `1.1.7` plus our changes, listed at the top of the root `CHANGELOG.md`,
-synced from upstream on 2026-09-30. Set `TT_CLIENT_VERSION=1.1.7` explicitly when building
-this core; see [release synchronization notes](../docs/RELEASE_SYNC_3_1_0.md).
+**Its sources are in this repository**, in `master` and the corresponding release tag.
+Pro **3.2.0** is identified by `v3.2.0-pro` and uses
+upstream core **1.1.11** plus the fork's Windows process and routing changes. The compiled
+binary is gitignored and must be built from the matching fork source. Set
+`TT_CLIENT_VERSION=1.1.11` explicitly: otherwise the automatic version logic may use a GUI tag.
+The earlier [3.1.0 synchronization notes](../docs/RELEASE_SYNC_3_1_0.md) remain historical.
 
 > This paragraph used to say the sources were "not in this repository", and the sentence sat on the
 > very branch that carries them. It was true before the core sync and has been wrong since.
@@ -91,8 +91,16 @@ gui-pro/src-tauri/
 
 Three runtime DLLs live alongside it on disk — `wintun.dll`, `vcruntime140.dll`,
 `vcruntime140_1.dll` — but **only `wintun.dll` is bundled into the installer** (see the config
-below). In a git worktree these files are not duplicated — copy them in from the main checkout before
-running Rust commands (see root `CLAUDE.md` § «Критические правила»).
+below). Build resources are not duplicated into a worktree. Stage the newly built fork core
+and genuine WinTUN DLL before packaging. An installed 1.1.7 core, an official 1.1.11 binary
+without the fork changes, and zero-byte CI stubs are not valid release resources.
+
+Both Tauri's build and bundle hooks run `npm run core:check`. The check reads the actual
+Windows x64 executable, requires `--version` to report `trusttunnel_client 1.1.11`, and
+requires the advertised `--routing-policy-version` capability to return `1`. It queries
+version/help/capability only, with a timeout; it never starts a tunnel or reads a VPN profile.
+It also prints the measured SHA-256 for the build record. This is a compatibility check,
+not a source provenance or digital signature check.
 
 ### Configuration in `tauri.conf.json`
 
@@ -149,9 +157,11 @@ npx tauri build --bundles nsis
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint src --max-warnings 0
 npm run test         # vitest run  (test:watch for watch mode)
+npm run core:test    # compatibility gate regressions; no VPN binary or network required
+npm run core:check   # requires the genuine matching Windows x64 fork sidecar
 npm run rust:check   # cargo clippy -- -D warnings  (run from src-tauri/)
 npm run storybook    # component gallery on :6006
-npm run prerelease   # typecheck + lint + test + rust:check + build
+npm run prerelease   # core compatibility, frontend/Rust checks, and existing release gates
 ```
 
 ## Requirements
@@ -160,3 +170,21 @@ npm run prerelease   # typecheck + lint + test + rust:check + build
 - **Rust** stable (1.94) — toolchain inherited from the repo-root pin (no per-crate `rust-toolchain.toml`)
 - **Tauri CLI** (installed as a devDependency)
 - The prebuilt `trusttunnel_client-*.exe` (plus the runtime DLLs) present in `src-tauri/`
+
+### Building the Pro 3.2.0 core
+
+Use an MSVC x64 developer environment, CMake, Ninja, Conan, Rust, Git, Perl and NASM.
+Bootstrap the exact recipes from `conanfile.py` after an upstream dependency change. A prior
+build cache is not evidence that the new dependency versions are available. The bootstrap
+script uses native Python and Conan on Windows; it does not require Git Bash.
+
+```powershell
+python scripts/bootstrap_conan_deps.py
+cmake --preset msvc-relwithdebinfo -DTT_CLIENT_VERSION=1.1.11 -DVPNLIBS_ENABLE_LIVE_TESTS=OFF
+cmake --build cmake-build-msvc-relwithdebinfo --target trusttunnel_client tests
+ctest --test-dir cmake-build-msvc-relwithdebinfo --output-on-failure -LE live
+Copy-Item cmake-build-msvc-relwithdebinfo/trusttunnel/trusttunnel_client.exe gui-pro/src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe
+```
+
+Run these commands from the repository root; then run `npm run core:check` in `gui-pro/`.
+This builds and stages local artifacts. It does not replace an installed application.

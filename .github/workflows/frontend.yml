@@ -61,6 +61,8 @@ on:
       # with no other file changing — it has to trigger its own run.
       - "scripts/build-label-gate.cjs"
       - "scripts/build-label-gate.test.cjs"
+      - "scripts/core-compatibility-gate.cjs"
+      - "scripts/core-compatibility-gate.test.cjs"
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
@@ -155,6 +157,9 @@ jobs:
       # to `artifact:check` (CLAUDE.md, D-09).
       - name: Build label gate self-tests
         run: npm run label:test
+
+      - name: Core compatibility gate self-tests
+        run: npm run core:test
 
   # gui-light job removed 2026-05-23 — the Light edition is out of scope
   # until its dedicated redesign milestone. Last on-fork typecheck failed

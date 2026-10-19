@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import { spawnSync } from "node:child_process";
 import {
   useTomlConfigState,
   deepEqual,
@@ -48,6 +49,35 @@ describe("useTomlConfigState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInvoke.mockReset();
+  });
+
+  it("keeps the editor responsive on an unfinished array comment and can reload a corrected config", async () => {
+    // Bound the parser probe in another process: an affected dependency must fail
+    // this regression instead of blocking the test runner's own event loop forever.
+    const probe = spawnSync("node", ["-e", `
+      const { parse } = require("smol-toml");
+      try { parse("a=[1 #"); process.exitCode = 1; }
+      catch { console.log("rejected"); }
+    `], { timeout: 2000, encoding: "utf8", windowsHide: true });
+    expect(probe.status).toBe(0);
+    expect(probe.stdout.trim()).toBe("rejected");
+
+    mockInvoke.mockResolvedValueOnce({ ...MOCK_BUNDLE, vpnToml: "a=[1 #" });
+    const { result } = renderHook(() =>
+      useTomlConfigState(SSH_PARAMS, {
+        defaultsMaps: EMPTY_DEFAULTS,
+        disruptSets: EMPTY_DISRUPT,
+      }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.trees?.vpn.flatMap.size).toBe(0);
+    expect(result.current.trees?.hosts.flatMap.size).toBeGreaterThan(0);
+
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    await act(async () => { await result.current.reloadBundle(); });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.trees?.vpn.flatMap.size).toBeGreaterThan(0);
+    expect(result.current.bundle?.vpnToml).toBe(MOCK_BUNDLE.vpnToml);
   });
 
   it("loads bundle via single server_get_config_bundle invoke (Pitfall 4)", async () => {

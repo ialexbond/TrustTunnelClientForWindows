@@ -221,7 +221,7 @@ fn note_adapter_failure(line: &str, adapter_failure_seen: &mut bool) {
 /// D-04). Only a FIXED set of `VpnErrorCode` values (`core/include/vpn/vpn.h`) map to a
 /// known reason; every other code — AND the code itself, AND the `text` half of the
 /// line — is discarded (D-29/D-10). `None` means either no `"Error: "` marker was found
-/// on this line, or the code after it is not one of the six this function knows.
+/// on this line, or the code after it is not one of the paired core's known failures.
 ///
 /// Deliberately does NOT match the recovery line's `error=N` shape (`Waiting recovery:
 /// to next=…ms error=N …`) — that string never contains the literal `"Error: "` marker
@@ -234,14 +234,14 @@ fn note_adapter_failure(line: &str, adapter_failure_seen: &mut bool) {
 /// auth failure. A bare substring search would have named the wrong cause (deep review of
 /// AUD-08, L-1), so an occurrence glued to a preceding letter or digit is skipped and the
 /// next one on the line is tried.
-fn core_exit_error_reason(line: &str) -> Option<&'static str> {
+pub(crate) fn core_exit_error_reason(line: &str) -> Option<&'static str> {
     const MARKER: &str = "Error: ";
     let (at, _) = line.match_indices(MARKER).find(|(i, _)| {
         *i == 0 || !line.as_bytes()[*i - 1].is_ascii_alphanumeric()
     })?;
     let after = &line[at + MARKER.len()..];
     let bytes = after.as_bytes();
-    // At most 2 ASCII digits (every known VpnErrorCode is 0-10) — longer runs (e.g. a
+    // At most 2 ASCII digits (the paired v1.1.11 core uses 0-11) — longer runs (e.g. a
     // Windows socket error like "10054") must NOT truncate-match a shorter known code.
     let mut len = 0usize;
     while len < bytes.len() && len < 2 && bytes[len].is_ascii_digit() {
@@ -268,12 +268,14 @@ fn core_exit_error_reason(line: &str) -> Option<&'static str> {
     }
     let code: u8 = after[..len].parse().ok()?;
     match code {
-        6 | 9 => Some(crate::lifecycle::CORE_SERVER_UNREACHABLE_REASON),
+        6 | 10 => Some(crate::lifecycle::CORE_SERVER_UNREACHABLE_REASON),
         5 => Some(crate::lifecycle::CORE_AUTH_FAILED_REASON),
         7 => Some(crate::lifecycle::CORE_CERTIFICATE_FAILED_REASON),
+        8 => Some(crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON),
+        9 => Some(crate::lifecycle::SIDECAR_EXIT_REASON),
         2 => Some(crate::lifecycle::CORE_INVALID_SETTINGS_REASON),
         3 => Some(crate::lifecycle::CORE_ADDRESS_IN_USE_REASON),
-        10 => Some(crate::lifecycle::CORE_FATAL_CONNECTIVITY_REASON),
+        11 => Some(crate::lifecycle::CORE_FATAL_CONNECTIVITY_REASON),
         _ => None,
     }
 }
@@ -310,7 +312,15 @@ fn handle_fatal_markers(
     // phrase — NEVER the raw `&trimmed[pos..]` slice, which could carry a credential out of a malformed
     // config (D-29 / Codex HIGH). `.or_else` keeps the original precedence (fatal markers first) and the
     // single early return keeps a line from double-emitting (WR-02).
-    let Some(derived) = fatal_marker_error(trimmed).or_else(|| config_parse_error(trimmed)) else {
+    // Record the clock diagnosis before process-exit polling can observe a dead child.
+    // Both log streams use this path, and the existing intent/generation guards apply.
+    let Some(derived) = fatal_marker_error(trimmed)
+        .or_else(|| config_parse_error(trimmed))
+        .or_else(|| {
+            core_exit_error_reason(trimmed)
+                .filter(|reason| *reason == crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON)
+        })
+    else {
         return;
     };
     let Some(state) = app.try_state::<AppState>() else {
@@ -397,6 +407,65 @@ pub struct SidecarChild {
     pub job: Option<crate::job_object::OwnedJobHandle>,
 }
 
+fn core_version_is_compatible(output: &str) -> bool {
+    output.trim() == "trusttunnel_client 1.1.11"
+}
+
+async fn run_core_probe(
+    binary: &std::path::Path,
+    argument: &str,
+) -> Result<std::process::Output, &'static str> {
+    let mut probe = tokio::process::Command::new(binary);
+    probe.arg(argument).kill_on_drop(true);
+    #[cfg(windows)]
+    probe.creation_flags(CREATE_NO_WINDOW);
+    tokio::time::timeout(std::time::Duration::from_secs(5), probe.output())
+        .await
+        .map_err(|_| crate::lifecycle::CORE_VERSION_MISMATCH_REASON)?
+        .map_err(|_| crate::lifecycle::CORE_VERSION_MISMATCH_REASON)
+}
+
+fn core_policy_help_is_compatible(exit_code: Option<i32>, output: &str) -> bool {
+    // The official CLI prints --help and exits 1, while --version exits 0.
+    matches!(exit_code, Some(0 | 1)) && crate::routing_policy::core_supports_overrides(output)
+}
+
+fn core_policy_version_is_compatible(exit_code: Option<i32>, output: &str) -> bool {
+    exit_code == Some(0) && output.trim() == "1"
+}
+
+async fn verify_core_compatibility(binary: &std::path::Path) -> Result<(), &'static str> {
+    // One total budget covers all probes. Dropping a timed-out probe kills its
+    // process; none of these commands receives a config or opens a tunnel.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let version = run_core_probe(binary, "--version").await?;
+        if !version.status.success()
+            || !core_version_is_compatible(&String::from_utf8_lossy(&version.stdout))
+        {
+            return Err(crate::lifecycle::CORE_VERSION_MISMATCH_REASON);
+        }
+        let help = run_core_probe(binary, "--help").await?;
+        if !core_policy_help_is_compatible(
+            help.status.code(),
+            &String::from_utf8_lossy(&help.stdout),
+        ) {
+            return Err(crate::lifecycle::CORE_VERSION_MISMATCH_REASON);
+        }
+        // An old CLI may treat an unknown argument as a request to start its
+        // default config, so query only after help advertised this capability.
+        let policy = run_core_probe(binary, "--routing-policy-version").await?;
+        if !core_policy_version_is_compatible(
+            policy.status.code(),
+            &String::from_utf8_lossy(&policy.stdout),
+        ) {
+            return Err(crate::lifecycle::CORE_VERSION_MISMATCH_REASON);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| crate::lifecycle::CORE_VERSION_MISMATCH_REASON)?
+}
+
 pub async fn spawn_trusttunnel(
     app: &tauri::AppHandle,
     config_path: &str,
@@ -410,10 +479,42 @@ pub async fn spawn_trusttunnel(
 ) -> Result<SidecarChild, Box<dyn std::error::Error>> {
     let shell = app.shell();
 
-    eprintln!("[sidecar] Spawning trusttunnel_client with args: -c {config_path} -l {log_level}");
+    // Numeric error codes changed in v1.1.11. Check every spawn, including
+    // profiles without routing metadata, before the executable can open a tunnel.
+    let binary = std::env::current_exe()
+        .map_err(|_| crate::lifecycle::CORE_VERSION_MISMATCH_REASON)?
+        .with_file_name(if cfg!(windows) {
+            "trusttunnel_client.exe"
+        } else {
+            "trusttunnel_client"
+        });
+    verify_core_compatibility(&binary).await?;
+
+    // Old cores ignore !entries. Refuse the mixed GUI/core pair before starting a tunnel.
+    let policy_text = std::fs::read_to_string(config_path)
+        .map_err(|_| "Could not read routing policy metadata")?;
+    let policy_doc: toml::Value = policy_text.parse()
+        .map_err(|_| "Could not parse routing policy metadata")?;
+    if let Some(version) = policy_doc.get("routing_policy_version").and_then(toml::Value::as_integer) {
+        if version != 1 {
+            return Err(crate::lifecycle::CORE_VERSION_MISMATCH_REASON.into());
+        }
+    }
+
+    eprintln!("[sidecar] Spawning trusttunnel_client with prepared configuration");
     // G-03.1-10: never start a core while an earlier one is still running its own cleanup — it
     // would reuse the adapter that cleanup is about to remove (see CORE_STOPS_IN_FLIGHT).
     wait_for_core_stops_in_flight().await;
+    let current = app.try_state::<AppState>().is_some_and(|state| {
+        crate::lifecycle::respawn_may_store(
+            session_generation,
+            state.connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+            state.user_disconnect_requested.load(std::sync::atomic::Ordering::SeqCst),
+        )
+    });
+    if !current {
+        return Err("connect-superseded".into());
+    }
     // G-03.1-10: the core must inherit "Ctrl+C enabled", or `kill_sidecar`'s graceful stop never
     // reaches its SIGINT handler (console_ctrl.rs).
     crate::console_ctrl::prepare_spawn();
@@ -1373,13 +1474,12 @@ pub fn stop_sidecar_on_exit(sidecar: SidecarChild) {
 
 /// Tear down the session's sidecar (T-22 B1 + B2).
 ///
-/// CRITICAL invariant: the sidecar PROCESS owns the WinTUN adapter, the routing
-/// hijack AND the fail-closed killswitch (WFP filters / routes) in C++. Rust has NO
-/// independent path to remove those filters — the ONLY way they are torn down is the
-/// sidecar running its OWN cleanup-on-exit. A hard `TerminateProcess` (what the old
-/// code did FIRST, and what the KILL_ON_JOB_CLOSE Job Object does on app death) gives
-/// the sidecar NO chance to run that cleanup, so a hard-only kill can LEAK the
-/// all-traffic killswitch block (the T-22 "Docker hang" / "boot stall" mechanism).
+/// The sidecar owns the WinTUN adapter, routes and process-scoped Windows filters.
+/// Closing its filtering session removes those dynamic filters, including after a
+/// process crash. Graceful shutdown also restores its adapter and route state
+/// before the next connection starts. A hard kill cannot run the core's own DNS
+/// cleanup, so the GUI's disconnect and exit paths restore the saved DNS settings.
+/// There is no separate network-blocking process or persistent GUI-owned filter.
 ///
 /// So we now:
 ///   1. B1 — send a GRACEFUL stop first: a Ctrl+C into the core's own console
@@ -2427,8 +2527,8 @@ mod tests {
         );
         // D-29/D-10: the returned code carries none of the line's text — even a
         // password embedded in the core's own text must never survive the parse.
-        let line_with_secret = "... Error: 9 some text with password=hunter2";
-        let reason = core_exit_error_reason(line_with_secret).expect("code 9 should map");
+        let line_with_secret = "... Error: 10 some text with password=hunter2";
+        let reason = core_exit_error_reason(line_with_secret).expect("code 10 should map");
         assert_eq!(reason, crate::lifecycle::CORE_SERVER_UNREACHABLE_REASON);
         assert!(!reason.contains("hunter2"));
         assert!(!reason.contains("password"));
@@ -2447,12 +2547,12 @@ mod tests {
             Some(crate::lifecycle::CORE_ADDRESS_IN_USE_REASON)
         );
         assert_eq!(
-            core_exit_error_reason("Error: 10 fatal connectivity"),
+            core_exit_error_reason("Error: 11 fatal connectivity"),
             Some(crate::lifecycle::CORE_FATAL_CONNECTIVITY_REASON)
         );
 
         // Unmapped / generic codes fall back to None (classifier then uses sidecar-exit).
-        for code in [0, 1, 4, 8] {
+        for code in [0, 1, 4] {
             assert_eq!(core_exit_error_reason(&format!("Error: {code} generic")), None, "code {code} must not map");
         }
         // A longer digit run than any known code — must not truncate-match "10".
@@ -2476,6 +2576,139 @@ mod tests {
         // Non-numeric / missing marker.
         assert_eq!(core_exit_error_reason("Error: abc"), None);
         assert_eq!(core_exit_error_reason("no marker on this line at all"), None);
+    }
+
+    #[test]
+    fn core_1111_error_codes_match_the_actual_native_header() {
+        // Enum insertion changed three later numbers. Check the real header so a
+        // future core update cannot silently label a connection failure as a device limit.
+        let header = include_str!("../../../core/include/vpn/vpn.h");
+        let declaration = header
+            .split("typedef enum {")
+            .nth(1)
+            .unwrap()
+            .split("} VpnErrorCode;")
+            .next()
+            .unwrap();
+        let names: Vec<_> = declaration
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("VPN_EC_"))
+            .map(|line| line.split(',').next().unwrap().trim())
+            .collect();
+        assert_eq!(names.len(), 12);
+        for (code, name) in names.into_iter().enumerate() {
+            let expected = match name {
+                "VPN_EC_INVALID_SETTINGS" => Some(crate::lifecycle::CORE_INVALID_SETTINGS_REASON),
+                "VPN_EC_ADDR_IN_USE" => Some(crate::lifecycle::CORE_ADDRESS_IN_USE_REASON),
+                "VPN_EC_AUTH_REQUIRED" => Some(crate::lifecycle::CORE_AUTH_FAILED_REASON),
+                "VPN_EC_LOCATION_UNAVAILABLE" | "VPN_EC_INITIAL_CONNECT_FAILED" => {
+                    Some(crate::lifecycle::CORE_SERVER_UNREACHABLE_REASON)
+                }
+                "VPN_EC_CERTIFICATE_VERIFICATION_FAILED" => {
+                    Some(crate::lifecycle::CORE_CERTIFICATE_FAILED_REASON)
+                }
+                "VPN_EC_CERTIFICATE_NOT_YET_VALID" => {
+                    Some(crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON)
+                }
+                "VPN_EC_EVENT_LOOP_FAILURE" => Some(crate::lifecycle::SIDECAR_EXIT_REASON),
+                "VPN_EC_FATAL_CONNECTIVITY_ERROR" => {
+                    Some(crate::lifecycle::CORE_FATAL_CONNECTIVITY_REASON)
+                }
+                "VPN_EC_NOERROR" | "VPN_EC_ERROR" | "VPN_EC_INVALID_STATE" => None,
+                unknown => panic!("new native error {unknown} needs an explicit GUI decision"),
+            };
+            assert_eq!(
+                core_exit_error_reason(&format!("Error: {code} private diagnostic")),
+                expected,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn core_1111_clock_error_is_recorded_before_exit_on_both_streams() {
+        let source = production_source();
+        let handler = span_between(&source, "fn handle_fatal_markers(", "\n}\n");
+        assert!(handler.contains("core_exit_error_reason(trimmed)"));
+        assert!(handler.contains("CORE_CERTIFICATE_NOT_YET_VALID_REASON"));
+        assert!(handler.contains("set_vpn_status("));
+        for (start, end) in [
+            ("CommandEvent::Stdout(line)", "CommandEvent::Stderr(line)"),
+            (
+                "CommandEvent::Stderr(line)",
+                "CommandEvent::Terminated(payload)",
+            ),
+        ] {
+            let stream = span_between(&source, start, end);
+            assert!(stream.contains("handle_fatal_markers("));
+        }
+    }
+
+    #[test]
+    fn core_1111_version_gate_rejects_old_and_unrecognised_engines_for_all_profiles() {
+        assert!(core_version_is_compatible("trusttunnel_client 1.1.11\r\n"));
+        for output in [
+            "trusttunnel_client 1.1.7",
+            "trusttunnel_client 1.1.10",
+            "trusttunnel_client 1.1.12",
+            "trusttunnel_client 11.1.11",
+            "unexpected output trusttunnel_client 1.1.11",
+            "",
+        ] {
+            assert!(!core_version_is_compatible(output));
+        }
+        let source = production_source();
+        let spawn = span_between(&source, "pub async fn spawn_trusttunnel(", "\n}\n");
+        let version_gate = spawn
+            .find("verify_core_compatibility(&binary).await?")
+            .unwrap();
+        let policy_gate = spawn.find("if let Some(version)").unwrap();
+        let tunnel_spawn = spawn.find(".sidecar(\"trusttunnel_client\")").unwrap();
+        assert!(version_gate < policy_gate && version_gate < tunnel_spawn);
+        let compatibility = span_between(&source, "async fn verify_core_compatibility(", "\n}\n");
+        let version = compatibility
+            .find("run_core_probe(binary, \"--version\")")
+            .unwrap();
+        let help = compatibility
+            .find("run_core_probe(binary, \"--help\")")
+            .unwrap();
+        let policy = compatibility
+            .find("run_core_probe(binary, \"--routing-policy-version\")")
+            .unwrap();
+        assert!(version < help && help < policy);
+        assert!(compatibility.contains("std::time::Duration::from_secs(5)"));
+        let commands = include_str!("./commands/vpn.rs");
+        let respawn = span_between(
+            commands,
+            "pub async fn respawn_sidecar(",
+            "\npub fn start_adapter_retry(",
+        );
+        assert!(respawn.contains("CORE_VERSION_MISMATCH_REASON"));
+        assert!(respawn.contains("VpnStatus::Error"));
+    }
+
+    #[test]
+    fn core_1111_policy_gate_accepts_official_help_exit_one_and_checks_exact_policy_version() {
+        let help =
+            "Options:\n  --routing-policy-version Print the supported routing policy version\n";
+        assert!(core_policy_help_is_compatible(Some(1), help));
+        assert!(core_policy_help_is_compatible(Some(0), help));
+        assert!(!core_policy_help_is_compatible(Some(2), help));
+        assert!(!core_policy_help_is_compatible(None, help));
+        assert!(!core_policy_help_is_compatible(
+            Some(1),
+            "Options: --version --help"
+        ));
+        assert!(core_policy_version_is_compatible(Some(0), "1\r\n"));
+        for (exit, output) in [
+            (Some(1), "1"),
+            (Some(0), "2"),
+            (Some(0), ""),
+            (Some(0), "1.1.11"),
+        ] {
+            assert!(!core_policy_version_is_compatible(exit, output));
+        }
     }
 
     #[test]

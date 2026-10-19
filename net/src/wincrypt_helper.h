@@ -12,6 +12,8 @@ enum WinCryptValidateError {
     WCRYPT_E_TRUST_STATUS,
     WCRYPT_E_CERT_VERIFY_CERTIFICATE_CHAIN_POLICY,
     WCRYPT_E_POLICY_STATUS,
+    WCRYPT_E_CERT_NOT_YET_VALID,
 };
 
-WinCryptValidateError wcrypt_validate_cert(X509 *leaf, STACK_OF(X509) * chain);
+// An optional private chain engine permits tests to use in-memory trust roots.
+WinCryptValidateError wcrypt_validate_cert(X509 *leaf, STACK_OF(X509) * chain, void *chain_engine = nullptr);

@@ -562,15 +562,38 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
                 return;
             }
         };
+        // FAB-R4 (Fable-5 review of Phase 14) — CONSUME the switch-authorized stamp on
+        // this connect entry point too. A tray «Подключиться» is a fresh user-initiated
+        // connect, NOT a switch destination, so it must NEVER bail on the stamp — but a
+        // stamp left alive by an aborted switch (whose `vpn_connect(B)` never ran, so it
+        // never consumed the stamp) must not survive PAST this connect into a later
+        // `vpn_connect` and false-bail it. Resetting the stamp to the sentinel here makes
+        // that leftover harmless (mirrors the consume-once reset `vpn_connect` performs at
+        // its guard read). `swap` to keep it a single atomic op.
+        state
+            .switch_authorized_generation
+            .swap(u64::MAX, Ordering::SeqCst);
+
         // Item 13: the tray connect reports skipped entries too — the tray is a spawn door like
         // any other, and a user who connects from it sees the same log panel.
-        if let Err(e) = routing_rules::resolve_and_apply_reporting(
+        match routing_rules::prepare_and_apply_for_connect(
             &config_path,
             &rules,
             &geodata_state,
             Some(&app),
-        ) {
-            eprintln!("[tray_vpn_connect] Warning: routing rules resolve failed: {e}");
+            &state.connection_generation,
+            connect_generation,
+        ).await {
+            Ok(true) => {}
+            Ok(false) => {
+                set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+                return;
+            }
+            Err(e) => {
+                crate::logging::log_app("ERROR", &format!("[tray] routing policy preparation failed: {}", e.detail));
+                set_vpn_status(&app, &state, VpnStatus::Error, Some(e.reason.to_string()));
+                return;
+            }
         }
 
         // Reset flags
@@ -596,18 +619,6 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         if preflight_offline {
             sidecar::emit_preflight_offline_marker(&app);
         }
-        // FAB-R4 (Fable-5 review of Phase 14) — CONSUME the switch-authorized stamp on
-        // this connect entry point too. A tray «Подключиться» is a fresh user-initiated
-        // connect, NOT a switch destination, so it must NEVER bail on the stamp — but a
-        // stamp left alive by an aborted switch (whose `vpn_connect(B)` never ran, so it
-        // never consumed the stamp) must not survive PAST this connect into a later
-        // `vpn_connect` and false-bail it. Resetting the stamp to the sentinel here makes
-        // that leftover harmless (mirrors the consume-once reset `vpn_connect` performs at
-        // its guard read). `swap` to keep it a single atomic op.
-        state
-            .switch_authorized_generation
-            .swap(u64::MAX, Ordering::SeqCst);
-
         // CR-03: the connection-generation bump moved UP (Phase 19 UAT G-19-2) — to right after
         // the in-lock liveness re-check, BEFORE kill_stale_sidecar + the 500ms sleep — so a
         // superseded child's late Terminated is suppressed by F12 (see the long note above). It
@@ -692,6 +703,14 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
                 spawn_connect_timeout_watchdog(&app, connect_generation);
             }
             Err(e) => {
+                if !crate::lifecycle::respawn_may_store(
+                        connect_generation,
+                        state.connection_generation.load(Ordering::SeqCst),
+                        state.user_disconnect_requested.load(Ordering::SeqCst),
+                    )
+                {
+                    return;
+                }
                 eprintln!("[tray_vpn_connect] Failed: {e}");
                 // e is a derived spawn error string, not a credential (D-29).
                 set_vpn_status(&app, &state, VpnStatus::Error, Some(e.to_string()));
@@ -1007,13 +1026,14 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             Some(state) => Some(Arc::clone(&state.lifecycle_flow).lock_owned().await),
             None => None,
         };
+        let mut stop_failed = false;
         if let Some(child) = child {
             // D-08 lifecycle marker (8): sidecar killed on exit (tray quit path) —
             // fixed phrase, DEV-gated (D-11). Our own child C_A — killing it is idempotent (a
             // newer session's stale-sweep may have already reaped it), so it is safe to run
             // regardless of the generation guard below.
             sidecar::emit_killed_on_exit_marker(&app_clone);
-            sidecar::kill_sidecar(child).await.ok();
+            stop_failed = sidecar::kill_sidecar(child).await.is_err();
         }
         // Re-look up state inside the 'static task and route through the mutator.
         if let Some(state) = app_clone.try_state::<AppState>() {
@@ -1057,6 +1077,11 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             // AUDIT-2026-06-11 #5 / FIX-A (RC-2): restore the pre-VPN system DNS, exactly like
             // `vpn_disconnect`. The hard-killed sidecar never restores it itself.
             crate::dns_guard::restore_system_dns();
+            if stop_failed {
+                set_vpn_status(&app_clone, &state, VpnStatus::Error, Some("disconnect-failed".to_owned()));
+                if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
+                return;
+            }
             // AUDIT-2026-06-11 #7: on the empty-slot path only write Disconnected
             // when the session is genuinely active (the supervisor/recovery states a
             // tray «Отмена» is cancelling). A settled Disconnected/Error stays put —

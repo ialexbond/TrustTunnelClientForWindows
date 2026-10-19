@@ -5,18 +5,27 @@
 > The GUI desktop app (Pro / Light) is versioned separately and its user-facing release notes live with
 > the app, not here. The release entries below are upstream's own changelog (TrustTunnel /
 > TrustTunnelClient), copied as they are; the fork's own core changes are not recorded in them. The
-> core that ships with the application is upstream `v1.1.7` plus the fork changes listed in the section
+> core prepared for Pro 3.2.0 is upstream `v1.1.11` plus the fork changes listed in the section
 > right below.
 
-## Fork changes on top of upstream v1.1.7 (not in the entries below)
+## Fork changes on top of upstream v1.1.11 (not in the entries below)
 
-The core sources carrying these changes are on the `release/tt-win-3.1.0` branch and in the release
-tags such as `v3.1.0-pro`, not on `master`.
+The 3.2.0 development sources are on `codex/release-3.2.0`. The published Pro 3.1.0
+continues to contain core 1.1.7 until a new matched GUI/core package is released.
 
 - `exclusions_file` (`trusttunnel/src/config.cpp:314`, plus the matching field in `trusttunnel/include/vpn/trusttunnel/config.h`) — exclusions read from a file and appended to `exclusions`.
 - `process_direct_file`, `process_proxy_file`, `process_block_file` (`trusttunnel/src/config.cpp:352-354`, plus the matching fields in `trusttunnel/include/vpn/trusttunnel/config.h`) — per-program rule lists (direct / proxy / block) loaded from files.
 - Per-process routing in `trusttunnel/src/client.cpp` (~223 changed lines, plus the matching members and `#include`s in `trusttunnel/include/vpn/trusttunnel/client.h`) — including copying the application name into the task context instead of holding a pointer into event memory.
 - `trusttunnel/CMakeLists.txt` links `iphlpapi` and `ws2_32` on Windows.
+- Explicit site/address routing overrides group lists in both routing modes. Process rules
+  retain priority. The private policy-v1 syntax requires a matching rebuilt GUI and core.
+- Configured routing/process files are required at startup; unreadable files fail configuration.
+- Connection diagnostics report the actual requested/final action instead of swapped labels.
+- Certificate verification preserves a structured not-yet-valid cause for the GUI while
+  retaining certificate trust checks. It does not accept an invalid certificate.
+- A read-only, one-shot physical TCP endpoint probe reports server latency without
+  accepting the tunnel's early TCP acknowledgement as a remote server response. It
+  does not initialize a VPN session or modify routes, DNS or firewall policy.
 - The remainder: a settings re-export in `trusttunnel/settings/src/lib.rs`, setup-wizard lint fixes and a Windows-only build dependency under `trusttunnel/setup_wizard/`, and a comment in `conanfile.py`.
 
 All notable changes to this project will be documented in this file.
@@ -36,6 +45,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 ### Security
+
+## [1.1.11] - 2026-10-07
+
+### Added
+
+- A way for the application to communicate the reason for certificate verification failure
+  and a new VPN error code for "endpoint certificate is not yet valid". The intention is to
+  help the application to identify and warn the user of a possibly incorrectly set wall clock.
+    - See `ag::VpnVerifyCertificateResult`, `ag::VpnErrorCode::VPN_EC_CERTIFICATE_NOT_YET_VALID`.
+
+## [1.1.10] - 2026-10-02
+
+### Fixed
+
+- Linux network monitor: a stale default route through a re-enumerated (dead) interface is no longer selected.
+
+## [1.1.9] - 2026-10-01
+
+### Fixed
+
+- Fixed TLS certificate parsing with OpenSSL 4.0.2
+
+## [1.1.8] - 2026-09-29
+
+### Changed
+
+- On MIPS, OpenSSL 4.0.2 now replaces the quictls build of OpenSSL 3.1.5, and QUIC is handled by ngtcp2's OpenSSL backend instead of the patched quictls fork.
 
 ## [1.1.7] - 2026-09-24
 
@@ -459,7 +495,11 @@ For this purpose, new event `VPN_EVENT_CONNECTION_INFO` was introduced in `VpnEv
 
 - VpnLibs is now open-source.
 
-[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.7...HEAD
+[Unreleased]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.11...HEAD
+[1.1.11]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.10...v1.1.11
+[1.1.10]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.9...v1.1.10
+[1.1.9]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.8...v1.1.9
+[1.1.8]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.6...v1.1.7
 [1.1.6]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.4...v1.1.5
