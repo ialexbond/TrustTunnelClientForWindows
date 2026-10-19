@@ -954,9 +954,6 @@ pub fn give_up_reason(queue_exhausted: bool) -> &'static str {
 /// is worth.
 pub fn terminal_reason_for_give_up(recorded: Option<&str>, queue_exhausted: bool) -> &'static str {
     match recorded {
-        Some(c) if crate::network_guard::spawn_failure_reason(c).is_some() => {
-            crate::network_guard::spawn_failure_reason(c).unwrap()
-        }
         Some(c) if c == crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON => {
             crate::lifecycle::CORE_CERTIFICATE_NOT_YET_VALID_REASON
         }
@@ -965,6 +962,9 @@ pub fn terminal_reason_for_give_up(recorded: Option<&str>, queue_exhausted: bool
         }
         Some(c) if c == crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON => {
             crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON
+        }
+        Some(c) if c == crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON => {
+            crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON
         }
         Some(c) if c == crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON => {
             crate::lifecycle::ROUTING_RULES_UNREADABLE_REASON
@@ -1105,8 +1105,7 @@ where
         // A future certificate can belong to this server alone. Its terminal
         // classification below stops retries of this candidate, then permits
         // the bounded walk to try another saved server.
-        if matches!(failure_reason.as_deref(),
-            Some(crate::lifecycle::CORE_VERSION_MISMATCH_REASON | crate::network_guard::FAILED)) {
+        if failure_reason.as_deref() == Some(crate::lifecycle::CORE_VERSION_MISMATCH_REASON) {
             return SupervisorOutcome::TerminalFailure;
         }
         if failure_reason
@@ -3483,10 +3482,12 @@ mod detection_cadence_tests {
 mod reconnect_supervisor_tests {
     #[test]
     fn routing_preparation_failure_is_terminal_and_preserved() {
-        let reason = crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON;
-        assert!(crate::lifecycle::is_terminal_reason(reason));
-        assert_eq!(super::terminal_reason_for_give_up(Some(reason), false), reason);
-        assert_eq!(super::terminal_reason_for_give_up(Some(reason), true), reason);
+        for reason in [crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON,
+            crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON] {
+            assert!(crate::lifecycle::is_terminal_reason(reason));
+            assert_eq!(super::terminal_reason_for_give_up(Some(reason), false), reason);
+            assert_eq!(super::terminal_reason_for_give_up(Some(reason), true), reason);
+        }
     }
 
     use super::*;
@@ -3986,24 +3987,6 @@ mod reconnect_supervisor_tests {
         assert!(!result.queue_exhausted);
         assert_eq!((candidates, attempts, sleeps), (1, 1, 0));
         assert_eq!(terminal_reason_for_give_up(Some(reason), false), reason);
-    }
-
-    #[tokio::test]
-    async fn guard_failure_stops_the_entire_walk_without_weakening_protection() {
-        let (result, candidates, attempts, sleeps) =
-            run_core_1111_candidates(&[Some(crate::network_guard::FAILED), None]).await;
-        assert_eq!(result.outcome, SupervisorOutcome::TerminalFailure);
-        assert_eq!((candidates, attempts, sleeps), (1, 1, 0));
-        assert_eq!(terminal_reason_for_give_up(Some(crate::network_guard::FAILED), false), crate::network_guard::FAILED);
-    }
-
-    #[tokio::test]
-    async fn unprotected_candidate_cannot_downgrade_a_retained_guard() {
-        let (result, candidates, attempts, sleeps) =
-            run_core_1111_candidates(&[Some(crate::network_guard::ACTIVE), None]).await;
-        assert_eq!(result.outcome, SupervisorOutcome::Recovered);
-        assert_eq!(result.candidate_index, 1);
-        assert_eq!((candidates, attempts, sleeps), (2, 2, 0));
     }
 
     #[test]

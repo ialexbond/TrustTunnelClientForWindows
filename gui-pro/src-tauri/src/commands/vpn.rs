@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1948,28 +1948,6 @@ pub async fn vpn_connect(
             return Err(reason.to_string());
         }
     };
-    // Item 13: the reporting variant, so a geo entry that could not be resolved reaches the user
-    // on the same `vpn-log` channel this block already warns on — instead of an `eprintln!` that
-    // goes nowhere in a packaged build.
-    if let Err(e) = routing_rules::resolve_and_apply_reporting(
-        &config_path,
-        &rules,
-        geodata_state.as_ref(),
-        Some(&app),
-    ) {
-        crate::logging::log_app("ERROR", &format!("[vpn_connect] routing policy preparation failed: {e}"));
-        let reason = crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON;
-        set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
-        return Err(reason.to_string());
-    }
-
-    // Egress guard (net_egress.rs): if the core's own interface picker would choose a foreign
-    // virtual adapter (Radmin VPN & co) instead of the interface that actually reaches the server,
-    // spawn an override COPY that pins `bound_if` (and, when suspect, in-tunnel DNS). `None` on a
-    // healthy machine → the real config is spawned unchanged. The real config is never modified.
-    let egress_override = crate::net_egress::override_for_connect(&config_path)
-        .map(|p| p.to_string_lossy().into_owned());
-
     // FAB-R4 (Fable-5 review of Phase 14) — DECOUPLE-STAMP-FROM-BOOL re-fix: a genuine
     // tray/manual «Отключить» that lands DURING a config switch / save-and-reconnect (in
     // the teardown→connect gap) must WIN over the blind intent-clear — otherwise
@@ -2009,6 +1987,36 @@ pub async fn vpn_connect(
         // immediately (no 15s park, no revert, no phantom «остались на A» notice).
         return Ok(ConnectOutcome::superseded());
     }
+
+    // Item 13: the reporting variant, so a geo entry that could not be resolved reaches the user
+    // on the same `vpn-log` channel this block already warns on — instead of an `eprintln!` that
+    // goes nowhere in a packaged build.
+    match routing_rules::prepare_and_apply_for_connect(
+        &config_path,
+        &rules,
+        geodata_state.inner(),
+        Some(&app),
+        &state.connection_generation,
+        connect_generation,
+    ).await {
+        Ok(true) => {}
+        Ok(false) => {
+            set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+            return Ok(ConnectOutcome::superseded());
+        }
+        Err(e) => {
+            crate::logging::log_app("ERROR", &format!("[vpn_connect] routing policy preparation failed: {}", e.detail));
+            set_vpn_status(&app, &state, VpnStatus::Error, Some(e.reason.to_string()));
+            return Err(e.reason.to_string());
+        }
+    }
+
+    // Egress guard (net_egress.rs): if the core's own interface picker would choose a foreign
+    // virtual adapter (Radmin VPN & co) instead of the interface that actually reaches the server,
+    // spawn an override COPY that pins `bound_if` (and, when suspect, in-tunnel DNS). `None` on a
+    // healthy machine → the real config is spawned unchanged. The real config is never modified.
+    let egress_override = crate::net_egress::override_for_connect(&config_path)
+        .map(|p| p.to_string_lossy().into_owned());
 
     // Reset flags for new connection
     if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
@@ -2092,11 +2100,6 @@ pub async fn vpn_connect(
                 state.user_disconnect_requested.load(Ordering::SeqCst),
             ) {
                 return "connect-superseded".to_string();
-            }
-            if let Some(reason) = crate::network_guard::spawn_failure_reason(&e.to_string()) {
-                record_failure_cause(&state, reason);
-                set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
-                return reason.to_string();
             }
             if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON {
                 let reason = crate::lifecycle::CORE_VERSION_MISMATCH_REASON;
@@ -2360,22 +2363,21 @@ pub async fn respawn_sidecar(
                 return;
             }
         };
-        if let Err(e) =
-            // Item 13: same reporting channel on the reconnect path — a user watching a
-            // reconnect has the same right to know which entries stopped being in force.
-            routing_rules::resolve_and_apply_reporting(
+        match routing_rules::prepare_and_apply_for_connect(
                 &config_path,
                 &rules,
-                geodata_state.as_ref(),
+                geodata_state.inner(),
                 Some(app),
-            )
-        {
-            crate::logging::log_app(
-                "WARN",
-                &format!("[reconnect] routing rules resolve failed: {e}"),
-            );
-            record_failure_cause(&state, crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON);
-            return;
+                &state.connection_generation,
+                captured_generation,
+            ).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(e) => {
+                crate::logging::log_app("WARN", &format!("[reconnect] routing rules resolve failed: {}", e.detail));
+                record_failure_cause(&state, e.reason);
+                return;
+            }
         }
     }
 
@@ -2448,16 +2450,6 @@ pub async fn respawn_sidecar(
     {
         Ok(c) => c,
         Err(e) => {
-            if let Some(reason) = crate::network_guard::spawn_failure_reason(&e.to_string()) {
-                if crate::lifecycle::respawn_may_store(
-                    captured_generation,
-                    state.connection_generation.load(Ordering::SeqCst),
-                    state.user_disconnect_requested.load(Ordering::SeqCst),
-                ) {
-                    record_failure_cause(&state, reason);
-                    set_vpn_status(app, &state, VpnStatus::Error, Some(reason.to_string()));
-                }
-            }
             if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON
                 && crate::lifecycle::respawn_may_store(
                     captured_generation,
@@ -2555,82 +2547,6 @@ pub async fn respawn_sidecar(
     // the in-progress status the session already shows untouched (no status write at all).
     if let Some(status) = after_spawn_status {
         set_vpn_status(app, &state, status, None);
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct NetworkGuardFailure {
-    generation: u64,
-    session_id: u64,
-}
-
-pub(crate) fn parse_network_guard_failure(payload: &str) -> Option<NetworkGuardFailure> {
-    if payload.len() > 256 {
-        return None;
-    }
-    let failure: NetworkGuardFailure = serde_json::from_str(payload).ok()?;
-    (failure.session_id != 0).then_some(failure)
-}
-
-fn claim_network_guard_failure(
-    generation: &AtomicU64,
-    disconnect_requested: &AtomicBool,
-    failure_generation: u64,
-    helper_is_current: bool,
-) -> Option<u64> {
-    if !helper_is_current || disconnect_requested.load(Ordering::SeqCst) {
-        return None;
-    }
-    let next_generation = failure_generation.checked_add(1)?;
-    generation
-        .compare_exchange(
-            failure_generation,
-            next_generation,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        )
-        .ok()
-        .map(|_| next_generation)
-}
-
-/// A dead guardian invalidates only the connection that still owns its failure event.
-/// Acquire the lifecycle lock before setting cancellation: a delayed event must never
-/// cancel or kill a newer manual connection that won this lock first.
-pub(crate) async fn handle_network_guard_failure(
-    app: tauri::AppHandle,
-    failure: NetworkGuardFailure,
-) {
-    let Some(state) = app.try_state::<AppState>() else { return; };
-    let flow = Arc::clone(&state.lifecycle_flow);
-    let _flow_guard = flow.lock().await;
-    let helper_is_current = crate::network_guard::failure_is_current(failure.session_id).await;
-    let Some(generation) = claim_network_guard_failure(
-        &state.connection_generation,
-        &state.user_disconnect_requested,
-        failure.generation,
-        helper_is_current,
-    ) else { return; };
-
-    state.user_disconnect_requested.store(true, Ordering::SeqCst);
-    if let Ok(mut flag) = state.disconnecting.lock() { *flag = true; }
-    let child = state.sidecar_child.lock().unwrap_or_else(|error| error.into_inner()).take();
-    let stopped = if let Some(child) = child {
-        if let Ok(mut flag) = child.disconnecting.lock() { *flag = true; }
-        sidecar::kill_sidecar(child).await.is_ok()
-    } else {
-        true
-    };
-    crate::dns_guard::restore_system_dns();
-    if stopped {
-        // A newer disconnect may have advanced the generation during the confirmed kill.
-        // The cleanup API rechecks ownership after taking the guardian operation lock.
-        let _ = crate::network_guard::release_after_disconnect(&app, &state, generation).await;
-    }
-    if state.connection_generation.load(Ordering::SeqCst) == generation {
-        crate::logging::log_app("WARN", "[vpn] network guardian failed; stopping its connection");
-        set_vpn_status(&app, &state, VpnStatus::Error, Some(crate::network_guard::FAILED.to_string()));
-        if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
     }
 }
 
@@ -2780,7 +2696,7 @@ pub async fn vpn_disconnect(
     // the session being torn down sees a generation mismatch and neutralizes itself
     // (Codex HIGH stale-actor guard) — a user disconnect must never be fought, and
     // the watchdog must never kill the next session a fast reconnect may start.
-    let disconnect_generation = state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    state.connection_generation.fetch_add(1, Ordering::SeqCst);
 
     // 3.3 R-SERIAL (F13/F14): the intent preamble above (disconnecting + durable intent + generation
     // bump) runs FIRST as a fast SYNC cancel signal — an in-flight vpn_connect sees it and bails.
@@ -2889,21 +2805,10 @@ pub async fn vpn_disconnect(
         return Err(err);
     }
 
-    let guard_released = match crate::network_guard::release_after_disconnect(
-        &app, &state, disconnect_generation,
-    ).await {
-        Ok(released) => released,
-        Err(reason) => {
-            set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
-            if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
-            return Err(reason.to_string());
-        }
-    };
-
     // F-4 (Fable-5): gate the final settled Disconnected the same way — a no-op disconnect writes no
     // wire status at all (a kill failure is only reachable when had_child, so the Error path above is
     // always a real teardown and stays unconditional).
-    if is_real_teardown || guard_released {
+    if is_real_teardown {
         set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
     }
 
@@ -3252,44 +3157,6 @@ pub fn set_plate_language(language: String, state: tauri::State<'_, AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn guardian_failure_payload_is_bounded_and_strict() {
-        let failure = parse_network_guard_failure(r#"{"generation":7,"session_id":11}"#).unwrap();
-        assert_eq!((failure.generation, failure.session_id), (7, 11));
-        for invalid in [
-            r#"{"generation":7,"session_id":0}"#,
-            r#"{"generation":7,"session_id":11,"other":true}"#,
-            r#"{"generation":7,"session_id":-1}"#,
-            r#"{"generation":7,"session_id":18446744073709551616}"#,
-            r#"{"generation":7}"#,
-        ] {
-            assert!(parse_network_guard_failure(invalid).is_none());
-        }
-        let oversized = format!("{}{{\"generation\":7,\"session_id\":11}}", " ".repeat(256));
-        assert!(parse_network_guard_failure(&oversized).is_none());
-    }
-
-    #[test]
-    fn guardian_failure_claim_never_advances_a_newer_cancelled_or_replaced_session() {
-        let generation = AtomicU64::new(20);
-        let disconnected = AtomicBool::new(false);
-        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 19, true), None);
-        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, false), None);
-        disconnected.store(true, Ordering::SeqCst);
-        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, true), None);
-        assert_eq!(generation.load(Ordering::SeqCst), 20);
-
-        disconnected.store(false, Ordering::SeqCst);
-        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, true), Some(21));
-        assert_eq!(claim_network_guard_failure(&generation, &disconnected, 20, true), None);
-        assert_eq!(generation.load(Ordering::SeqCst), 21);
-        assert!(!disconnected.load(Ordering::SeqCst));
-
-        generation.store(u64::MAX, Ordering::SeqCst);
-        assert_eq!(claim_network_guard_failure(&generation, &disconnected, u64::MAX, true), None);
-        assert_eq!(generation.load(Ordering::SeqCst), u64::MAX);
-    }
 
     /// **The pid file follows the BINARIES, not the user's data.** (Phase 32, D-05.)
     ///

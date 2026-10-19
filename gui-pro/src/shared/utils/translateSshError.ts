@@ -74,6 +74,8 @@ export function translateSshError(error: string, t: TFunction): string {
       });
     case "SSH_TLS_HANDSHAKE_FAILED":
       return t("sshErrors.tlsHandshakeFailed", { host: parts[1] || "" });
+    case "SSH_CERT_INVALID":
+      return t("sshErrors.certInvalid");
 
     // ─── Authentication ───
     case "SSH_AUTH_FAILED":

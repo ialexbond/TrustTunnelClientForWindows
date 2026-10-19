@@ -232,6 +232,8 @@ The verified installer and adjacent `.exe.sha256` replace the known previous `53
 
 ## GUI session lifetime correction
 
+This candidate was withdrawn after the reproduced installer-maintenance failure. See [the incident and correction](INSTALLER_RECOVERY_INCIDENT_2026_10_18.md). The external guardian is removed from the replacement build; the hashes below remain historical evidence.
+
 Source fix: `36bddfde02e1bfe10c88ad66d780668b5b4538b8`.
 
 The user rejected persistent blocking as unsuitable for a nontechnical audience and explicitly chose protection only while the GUI is running. A VPN-core failure must retain protection while that GUI session remains open. Closing or crashing the entire GUI must remove the blocking rules automatically. Ordinary internet access after complete GUI termination can expose the ISP address; this is the approved product tradeoff, not an all-state privacy guarantee.
@@ -274,6 +276,27 @@ The verified installer and adjacent checksum replace the known `73e8c6db...` per
 
 Final preservation comparison confirms all nine saved settings/configuration files retain exact bytes, sizes and modification times, and both installed executable hashes remain unchanged. The actual generated NSIS script copies the core before the post-install legacy cleanup; optional GUI launch occurs afterwards on the finish page. Desktop installer/checksum and archived predecessor/checksum are independently verified.
 
+## Installer incident correction and external-guardian withdrawal
+
+The user's screenshots and compiled NSIS fixtures reproduce the maintenance failure: Unicode output capture misread a successful core version response, and a fatal cleanup handler aborted after writing the new uninstaller. The same handler then prevented removal. Ordinary Internet access remained available; the unavailable client prevented VPN access. See [the full incident record](INSTALLER_RECOVERY_INCIDENT_2026_10_18.md).
+
+The replacement removes the external guardian and its GUI dependencies, makes old-rule cleanup optional and nonfatal, and always replaces files without executing the recorded old uninstaller. The pinned template preserves the normal installation/uninstall and user-data retention sections. Ten cleanup-failure fixtures and seven maintenance-mode fixtures pass; a deliberately restored old-uninstaller call is detected. Existing core Kill Switch, IPv6 routing, MTU, ping and routing corrections remain.
+
+The real production Tauri/NSIS build succeeds. All seven actual package gates pass, including **16/16** emitted NSIS checks with no warnings. Extracted core/WinTUN match the verified inputs; the GUI comparison allows only the expected Tauri bundle marker. The embedded frontend is `main-B83IJ7Nn.js`.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TrustTunnel Client Pro_3.2.0_x64-setup.exe` | 9,818,090 | `bd1adf067b70daabd6cdb1acb2fdf00512b49011777419dd3d1e5d8b9cddf860` |
+| Packaged `trusttunnel.exe` | 18,990,592 | `46510939ae940187a5cea6e3810aac4b3138f87cc2f18204110366f0edda805f` |
+| Packaged `trusttunnel_client.exe` | 15,681,536 | `bb8923643c34c97c17df5387637b4f7264a3f68461a7f51a475655c7cc3eefff` |
+| Packaged `wintun.dll` | 427,552 | `e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce` |
+
+The verified installer and correct adjacent checksum are on the Desktop. Its 743 GUI/script inputs and twelve native inputs match the tested working-tree snapshot; source provenance is the base commit plus exact manifests, not a new fix commit. The new template is explicitly included, and the removed guardian sources are absent from staging.
+
+The post-restore baseline Desktop executable was the known `5381bc52...` candidate, not the defective `5838694f...` candidate. That baseline EXE is archived and verified. Its already-stale checksum text referred to `5838694f...`; both are preserved as observed rather than rewriting historical evidence. The replacement's own checksum matches its executable exactly.
+
+Independent final comparison confirms all nine settings/configuration files retain bytes, sizes and modification times, and both installed executables are unchanged. The actual emitted maintenance functions match the compiled fixture, cannot invoke the old uninstaller and cannot abort for cleanup output/errors. No production installation, uninstall, WFP cleanup, publication, push or tag was performed. The existing unsigned configuration is unchanged. Live installation and network acceptance remain a separate stage; compiled synthetic maintenance and package verification are not represented as a production installation on the user's machine.
+
 ## Recovery and run-owned resources
 
 The pre-upgrade routing patch is committed independently, followed by baseline ancestry and official-release merge commits. Reverting only the later release work restores the original development baseline without changing installed files.
@@ -281,6 +304,24 @@ The pre-upgrade routing patch is committed independently, followed by baseline a
 Installation is a separate stage: save the currently installed GUI/core pair and a private complete application-data backup, install the matched candidate, then exercise routing/process exceptions and connection failures in a controlled environment. Rollback restores the matched old binaries together with that pre-upgrade data snapshot. Do not start the old core with newly generated policy-prefix files; the old core does not interpret those rules.
 
 Private run output is under this task's visualization directory in `release-3.2.0/`: official dependency source checkouts, build runner and logs. Prior `vpn-investigation/` tools/caches are reused as pre-existing resources and must not be treated as cleanup targets. Conan exports and compiled dependency packages remain in the development cache. The ignored worktree CMake build directory is run-owned. The production rebuild uses the new neutral directory `C:\ttb-pro-3.2.0-codex` with separate Conan/Cargo homes; old compiled dependency archives are not copied into it. No background VPN process is started for build probes.
+
+## Pro 3.2.0 publication inputs
+
+The release installer includes the final routing-readiness correction and the humanized
+3.2.0 notes, compared with published Pro 3.1.0. The GitHub description is generated directly
+from that same section of `gui-pro/src/shared/release-notes/RELEASE_NOTES.ru.md`.
+The release follows the Pro 3.1.0 asset layout:
+
+- `TrustTunnel.Client.Pro_3.2.0_x64-setup.exe`, 9,825,229 bytes.
+- `TrustTunnel.Client.Pro_3.2.0_x64-setup.exe.sha256`, containing the installer checksum.
+
+Installer SHA-256: `273042537b046058a9360d6d80d28585b6d664adceb561c47fe6d42bb85724d1`.
+The packaged core remains `ed44123abae84992f431755a4e0dff302892d96dcdd306e329b036b45c543699`.
+Verification covers 131 focused Rust cases, 4,110 frontend cases, 49 release-notes cases,
+strict Rust checks, and eight actual-package checks including the embedded notes asset.
+The publication metadata also removes one obsolete synthetic-address occurrence from the
+PII baseline; this changes no runtime behavior or installer payload. No production installation,
+VPN reconnect, route change, or firewall operation is part of publication verification.
 
 ## Sources
 

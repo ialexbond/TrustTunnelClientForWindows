@@ -56,4 +56,4 @@ LangString uninstallDataKept ${LANG_RUSSIAN} "Данные пользовате�
 LangString uninstallCleaningRegistry ${LANG_RUSSIAN} "Очистка записей в реестре..."
 LangString uninstallRemovingUpdateFiles ${LANG_RUSSIAN} "Удаление временных файлов обновления..."
 
-LangString networkGuardReleaseFailed ${LANG_RUSSIAN} "Не удалось завершить очистку сетевой защиты. Файлы программы сохранены. Закройте приложение, подождите несколько секунд и повторите операцию. Если ошибка повторяется, запустите установщик последней версии."
+LangString networkGuardCleanupWarning ${LANG_RUSSIAN} "Не удалось удалить часть старых сетевых правил. Операция будет продолжена."

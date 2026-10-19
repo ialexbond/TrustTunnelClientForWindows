@@ -183,6 +183,8 @@ pub const RECOVERY_TIMEOUT_REASON: &str = "recovery-timeout";
 pub const ROUTING_RULES_UNREADABLE_REASON: &str = "routing-rules-unreadable";
 /// Resolving/writing routing policy failed; never spawn a stale policy after this error.
 pub const ROUTING_RULES_APPLY_FAILED_REASON: &str = "routing-rules-apply-failed";
+/// A required list could not be downloaded. An ordinary in-flight download is not an error.
+pub const ROUTING_DATA_UNAVAILABLE_REASON: &str = "routing-data-unavailable";
 
 /// The fixed English status reason written when Windows did not create the WinTUN adapter for the
 /// core and the automatic retries (`ADAPTER_RETRY_MAX_ATTEMPTS`) are used up.
@@ -667,10 +669,9 @@ pub fn is_terminal_reason(reason: &str) -> bool {
         // list onto a Russian screen.
         | ROUTING_RULES_UNREADABLE_REASON
           | ROUTING_RULES_APPLY_FAILED_REASON
+          | ROUTING_DATA_UNAVAILABLE_REASON
         | CORE_CERTIFICATE_NOT_YET_VALID_REASON
         | CORE_VERSION_MISMATCH_REASON
-        | crate::network_guard::FAILED
-        | crate::network_guard::ACTIVE
     )
 }
 
@@ -5151,49 +5152,21 @@ pub(crate) mod tests {
     /// Its sibling `no_child_process_output_reaches_the_details_window` forbids the LOGGING form
     /// as well, over the whole file rather than these two macros — that one is about what the
     /// person watching the uninstall reads, not about what the script branches on.
-    // Only our fixed ASCII capability protocol is safe to inspect. Localized
-    // Windows tool output remains prohibited; cleanup failure must not delete the
-    // only executable capable of releasing persistent network protection.
-    fn is_owned_guard_machine_call(line: &str) -> bool {
-        matches!(line,
-            r#"nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --version --network-guard-version'"#
-            | r#"nsExec::ExecToStack /TIMEOUT=10000 '"$INSTDIR\trusttunnel_client.exe" --network-guard-release'"#)
-    }
-
-    #[test]
-    fn only_the_two_owned_guard_protocol_calls_can_capture_output() {
-        assert!(!is_owned_guard_machine_call("nsExec::ExecToStack 'schtasks /Query'"));
-        assert!(!is_owned_guard_machine_call("nsExec::ExecToStack 'powershell anything'"));
-        let calls: Vec<_> = HOOK_NSH.lines().map(str::trim)
-            .filter(|line| !line.starts_with(';') && line.contains("ExecToStack"))
-            .collect();
-        assert_eq!(calls.len(), 2);
-        assert!(calls.iter().all(|line| is_owned_guard_machine_call(line)));
-        let start = HOOK_NSH.find("  ; Protection must be removed before").unwrap();
-        let end = HOOK_NSH[start..].find("  tt_guard_uninstall_done:").unwrap() + start;
-        let guard = &HOOK_NSH[start..end];
-        assert!(guard.contains("Abort"));
-        for line in guard.lines().map(str::trim).filter(|line| line.starts_with("DetailPrint")) {
-            assert_eq!(line, r#"DetailPrint "$(networkGuardReleaseFailed)""#);
-        }
-    }
-
     #[test]
     fn the_uninstall_macros_never_branch_on_a_tool_s_output() {
         for macro_name in ["NSIS_HOOK_PREUNINSTALL", "NSIS_HOOK_POSTUNINSTALL"] {
             let body = hook_macro_statements(HOOK_NSH, macro_name);
             for (i, l) in body.iter().enumerate() {
                 assert!(
-                    !l.contains("ExecToStack") || is_owned_guard_machine_call(l),
+                    !l.contains("nsExec::ExecToStack") && !l.contains("ExecToStack"),
                     "{macro_name} captures a tool's output: {l}\n      Console output is \
                      localized and code-page-dependent on this platform — nothing here may read \
                      it. Use plain nsExec::Exec and ignore the result."
                 );
                 let follows_exec = i > 0
                     && (body[i - 1].contains("nsExec::") || body[i - 1].starts_with("Exec"));
-                let owned_guard_result = i > 0 && is_owned_guard_machine_call(&body[i - 1]);
                 assert!(
-                    !(follows_exec && l.starts_with("Pop ") && !owned_guard_result),
+                    !(follows_exec && l.starts_with("Pop ")),
                     "{macro_name} pops a value left by an external call: {l}\n      That is a \
                      branch on a tool's result, which this project does not do on Windows."
                 );
@@ -5249,7 +5222,7 @@ pub(crate) mod tests {
         let capturing_form: Vec<&str> = HOOK_NSH
             .lines()
             .map(str::trim)
-            .filter(|l| !l.starts_with(';') && l.contains("ExecToStack") && !is_owned_guard_machine_call(l))
+            .filter(|l| !l.starts_with(';') && l.contains("ExecToStack"))
             .collect();
         assert!(
             capturing_form.is_empty(),

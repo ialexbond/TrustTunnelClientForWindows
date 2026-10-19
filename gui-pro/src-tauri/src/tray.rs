@@ -562,18 +562,38 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
                 return;
             }
         };
+        // FAB-R4 (Fable-5 review of Phase 14) — CONSUME the switch-authorized stamp on
+        // this connect entry point too. A tray «Подключиться» is a fresh user-initiated
+        // connect, NOT a switch destination, so it must NEVER bail on the stamp — but a
+        // stamp left alive by an aborted switch (whose `vpn_connect(B)` never ran, so it
+        // never consumed the stamp) must not survive PAST this connect into a later
+        // `vpn_connect` and false-bail it. Resetting the stamp to the sentinel here makes
+        // that leftover harmless (mirrors the consume-once reset `vpn_connect` performs at
+        // its guard read). `swap` to keep it a single atomic op.
+        state
+            .switch_authorized_generation
+            .swap(u64::MAX, Ordering::SeqCst);
+
         // Item 13: the tray connect reports skipped entries too — the tray is a spawn door like
         // any other, and a user who connects from it sees the same log panel.
-        if let Err(e) = routing_rules::resolve_and_apply_reporting(
+        match routing_rules::prepare_and_apply_for_connect(
             &config_path,
             &rules,
             &geodata_state,
             Some(&app),
-        ) {
-            crate::logging::log_app("ERROR", &format!("[tray] routing policy preparation failed: {e}"));
-            let reason = crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON;
-            set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
-            return;
+            &state.connection_generation,
+            connect_generation,
+        ).await {
+            Ok(true) => {}
+            Ok(false) => {
+                set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+                return;
+            }
+            Err(e) => {
+                crate::logging::log_app("ERROR", &format!("[tray] routing policy preparation failed: {}", e.detail));
+                set_vpn_status(&app, &state, VpnStatus::Error, Some(e.reason.to_string()));
+                return;
+            }
         }
 
         // Reset flags
@@ -599,18 +619,6 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         if preflight_offline {
             sidecar::emit_preflight_offline_marker(&app);
         }
-        // FAB-R4 (Fable-5 review of Phase 14) — CONSUME the switch-authorized stamp on
-        // this connect entry point too. A tray «Подключиться» is a fresh user-initiated
-        // connect, NOT a switch destination, so it must NEVER bail on the stamp — but a
-        // stamp left alive by an aborted switch (whose `vpn_connect(B)` never ran, so it
-        // never consumed the stamp) must not survive PAST this connect into a later
-        // `vpn_connect` and false-bail it. Resetting the stamp to the sentinel here makes
-        // that leftover harmless (mirrors the consume-once reset `vpn_connect` performs at
-        // its guard read). `swap` to keep it a single atomic op.
-        state
-            .switch_authorized_generation
-            .swap(u64::MAX, Ordering::SeqCst);
-
         // CR-03: the connection-generation bump moved UP (Phase 19 UAT G-19-2) — to right after
         // the in-lock liveness re-check, BEFORE kill_stale_sidecar + the 500ms sleep — so a
         // superseded child's late Terminated is suppressed by F12 (see the long note above). It
@@ -869,20 +877,13 @@ pub fn tray_menu_action(app: tauri::AppHandle, action: String) {
         // menu can never hand back a window that is visible but still minimized.
         "show" => restore_main_window_to_front(&app),
         "quit" => {
-            // Try normal serialized cleanup, then always honor Quit. Session-owned
-            // jobs remove both core and guard on process exit, including IPC failure.
-            tauri::async_runtime::spawn(async move {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let _ = tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        crate::commands::vpn::vpn_disconnect(app.clone(), state),
-                    ).await;
-                    if let Some(state) = app.try_state::<AppState>() {
-                        crate::commands::begin_shutdown(&state);
-                    }
-                }
-                app.exit(0);
-            });
+            if let Some(state) = app.try_state::<AppState>() {
+                // R4: signal shutdown (intent + generation bump) before the kill so a
+                // live reconnect supervisor can't respawn a sidecar after the user quit.
+                crate::commands::begin_shutdown(&state);
+                crate::commands::kill_sidecar_from_state(&state);
+            }
+            app.exit(0);
         }
         _ => {}
     }
@@ -1081,16 +1082,6 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
                 if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
                 return;
             }
-            let guard_released = match crate::network_guard::release_after_disconnect(
-                &app_clone, &state, teardown_generation,
-            ).await {
-                Ok(released) => released,
-                Err(reason) => {
-                    set_vpn_status(&app_clone, &state, VpnStatus::Error, Some(reason.to_string()));
-                    if let Ok(mut flag) = state.disconnecting.lock() { *flag = false; }
-                    return;
-                }
-            };
             // AUDIT-2026-06-11 #7: on the empty-slot path only write Disconnected
             // when the session is genuinely active (the supervisor/recovery states a
             // tray «Отмена» is cancelling). A settled Disconnected/Error stays put —
@@ -1098,7 +1089,7 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             // R2-1 (Fable-5 re-review): `Disconnecting` is ACTIVE here too — when a rapid twin tray
             // disconnect already wrote «Отключение» and THIS surviving actor's slot is empty, the
             // settling Disconnected must still be written, else the wire strands on «Отключение».
-            let write_disconnected = had_child || guard_released || {
+            let write_disconnected = had_child || {
                 let status_now = *state
                     .vpn_status
                     .lock()

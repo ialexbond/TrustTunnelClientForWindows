@@ -388,18 +388,15 @@ fn handle_fatal_markers(
 pub struct SidecarChild {
     pub child: CommandChild,
     pub disconnecting: Arc<Mutex<bool>>,
-    // Retain the password-bearing numeric bootstrap copy until the core exits.
-    #[allow(dead_code)]
-    pub guard_runtime_config: Option<crate::network_guard::RuntimeConfig>,
     /// RAII handle to the KILL_ON_JOB_CLOSE Job Object this sidecar is assigned
     /// to (D-06 / STATUS-04). Keeping it alive == the OS kill stays armed for the
     /// connection's lifetime; dropping the `SidecarChild` (on kill or session
     /// end) closes the handle exactly once via `OwnedJobHandle::drop` — so there
     /// is NO manual `CloseHandle` anywhere (Codex MEDIUM).
     ///
-    /// Windows GUI connections require an owned job before the native startup
-    /// token is sent. Assignment failure aborts that connection instead of
-    /// allowing a process that might outlive the GUI.
+    /// `None` is the explicit DEGRADED MODE: the job could not be assigned (the
+    /// parent is already in a job under a debugger / CI / some launchers). That
+    /// is logged + tolerated, never fatal — the PID-file fallback still cleans up.
     ///
     /// `#[allow(dead_code)]`: this field is a DROP-GUARD. It is never *read* — its
     /// entire purpose is to live as long as the `SidecarChild` so that
@@ -469,16 +466,6 @@ async fn verify_core_compatibility(binary: &std::path::Path) -> Result<(), &'sta
     .map_err(|_| crate::lifecycle::CORE_VERSION_MISMATCH_REASON)?
 }
 
-const GUI_START_TOKEN: &[u8] = b"TRUSTTUNNEL_GUI_READY_V2\n";
-
-fn gui_core_start_args<'a>(config: &'a str, level: &'a str, windows: bool) -> Vec<&'a str> {
-    let mut args = vec!["-c", config, "-l", level];
-    if windows {
-        args.push("--gui-session");
-    }
-    args
-}
-
 pub async fn spawn_trusttunnel(
     app: &tauri::AppHandle,
     config_path: &str,
@@ -514,12 +501,6 @@ pub async fn spawn_trusttunnel(
         }
     }
 
-    let mut protection = crate::network_guard::prepare_spawn(
-        app, &binary, std::path::Path::new(config_path), session_generation,
-    ).await?;
-    let guarded_path = protection.config_path(std::path::Path::new(config_path))
-        .to_string_lossy().into_owned();
-    let config_path = guarded_path.as_str();
     eprintln!("[sidecar] Spawning trusttunnel_client with prepared configuration");
     // G-03.1-10: never start a core while an earlier one is still running its own cleanup — it
     // would reuse the adapter that cleanup is about to remove (see CORE_STOPS_IN_FLIGHT).
@@ -537,10 +518,10 @@ pub async fn spawn_trusttunnel(
     // G-03.1-10: the core must inherit "Ctrl+C enabled", or `kill_sidecar`'s graceful stop never
     // reaches its SIGINT handler (console_ctrl.rs).
     crate::console_ctrl::prepare_spawn();
-    let (mut rx, mut child) = shell
+    let (mut rx, child) = shell
         .sidecar("trusttunnel_client")
         .map_err(|e| format!("Failed to create sidecar command: {e}"))?
-        .args(gui_core_start_args(config_path, log_level, cfg!(windows)))
+        .args(["-c", config_path, "-l", log_level])
         .spawn()
         .map_err(|e| format!("Failed to spawn sidecar: {e}"))?;
     eprintln!("[sidecar] Process spawned successfully");
@@ -556,11 +537,12 @@ pub async fn spawn_trusttunnel(
     // PID of trusttunnel_client.exe — the same PID `kill_sidecar` already taskkills
     // (A2). We keep the returned handle alive in `SidecarChild.job`.
     //
-    // Windows GUI sessions require this ownership before the native startup token.
-    // Before that token the child cannot create a tunnel or network filters. A GUI
-    // crash before assignment closes stdin; afterwards the job kills the child.
-    // This deliberately replaces the older Windows degraded mode: a PID-file
-    // fallback cannot guarantee that protection ends when the GUI process dies.
+    // Codex MEDIUM — EXPLICIT degraded mode: if the assign fails (parent already
+    // in a job under a debugger / CI / some launchers), we DO NOT abort the
+    // connect. We log a fixed phrase + the failed Win32 call name (no secret, the
+    // PID is non-secret — D-09) noting the Job Object is unavailable and cleanup
+    // falls back to the PID file, then continue with `job: None`. A Job failure
+    // must NEVER block connecting (D-06); the PID-file stale-cleanup still applies.
     let job = match crate::job_object::assign_to_kill_on_close_job(child.pid()) {
         Ok(handle) => {
             let msg = format!(
@@ -579,7 +561,9 @@ pub async fn spawn_trusttunnel(
         Err(call) => {
             // `call` is a FIXED phrase naming the failed Win32 call (e.g.
             // "AssignProcessToJobObject failed") — never config text or a secret.
-            let msg = format!("[vpn] Job Object unavailable ({call}); refusing an unowned GUI session");
+            let msg = format!(
+                "[vpn] Job Object unavailable ({call}); falling back to PID-file cleanup (degraded mode)"
+            );
             eprintln!("{msg}");
             crate::logging::log_app("WARN", &msg);
             app.emit(
@@ -587,16 +571,9 @@ pub async fn spawn_trusttunnel(
                 serde_json::json!({ "message": msg, "level": "warn" }),
             )
             .ok();
-            let _ = child.kill();
-            return Err(crate::network_guard::FAILED.into());
+            None
         }
     };
-
-    if cfg!(windows) && child.write(GUI_START_TOKEN).is_err() {
-        let _ = child.kill();
-        drop(job);
-        return Err(crate::network_guard::FAILED.into());
-    }
 
     let app_handle = app.clone();
     let disc_for_child = Arc::clone(&disconnecting);
@@ -1227,10 +1204,7 @@ pub async fn spawn_trusttunnel(
     // `job` is kept alive here for the connection's lifetime — dropping the
     // SidecarChild (on kill / session end) closes the handle once and arms the
     // OS kill. No manual CloseHandle anywhere (OwnedJobHandle::drop owns it).
-    Ok(SidecarChild {
-        child, disconnecting: disc_for_child, job,
-        guard_runtime_config: protection.take_runtime(),
-    })
+    Ok(SidecarChild { child, disconnecting: disc_for_child, job })
 }
 
 /// How long the sidecar is given to run its OWN cleanup-on-exit (WFP / route /
@@ -1500,13 +1474,12 @@ pub fn stop_sidecar_on_exit(sidecar: SidecarChild) {
 
 /// Tear down the session's sidecar (T-22 B1 + B2).
 ///
-/// The sidecar owns the WinTUN adapter, routes and dynamic tunnel allowance.
-/// The independent persistent network guard is deliberately NOT removed here;
-/// only a serialized explicit user disconnect can release that separate barrier.
-/// Graceful core cleanup remains necessary for its adapter/DNS state. A hard `TerminateProcess` (what the old
-/// code did FIRST, and what the KILL_ON_JOB_CLOSE Job Object does on app death) gives
-/// the sidecar NO chance to run that cleanup, so a hard-only kill can LEAK the
-/// all-traffic killswitch block (the T-22 "Docker hang" / "boot stall" mechanism).
+/// The sidecar owns the WinTUN adapter, routes and process-scoped Windows filters.
+/// Closing its filtering session removes those dynamic filters, including after a
+/// process crash. Graceful shutdown also restores its adapter and route state
+/// before the next connection starts. A hard kill cannot run the core's own DNS
+/// cleanup, so the GUI's disconnect and exit paths restore the saved DNS settings.
+/// There is no separate network-blocking process or persistent GUI-owned filter.
 ///
 /// So we now:
 ///   1. B1 — send a GRACEFUL stop first: a Ctrl+C into the core's own console
@@ -2024,7 +1997,6 @@ fn parse_log_level(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     // ── G-03.1-7: Connected needs the endpoint AND the TUN listener ──
     // Synthetic lines shaped like the core's INFO output (prefix: `[time] date time INFO [tid]`).

@@ -10,7 +10,7 @@ const { spawnSync } = require("node:child_process");
 const EXPECTED_VERSION = "1.1.11";
 const EXPECTED_POLICY_VERSION = "1";
 const EXPECTED_ENDPOINT_PROBE_VERSION = "1";
-const EXPECTED_NETWORK_GUARD_VERSION = "2";
+const EXPECTED_CLEANUP_VERSION = "1";
 const DEFAULT_CORE = path.join(__dirname, "..", "gui-pro", "src-tauri",
   "trusttunnel_client-x86_64-pc-windows-msvc.exe");
 
@@ -91,21 +91,25 @@ function verifyCore(filePath = DEFAULT_CORE, options = {}) {
   if (endpointProbe !== EXPECTED_ENDPOINT_PROBE_VERSION) {
     throw new Error(`the bundled core must support endpoint probe ${EXPECTED_ENDPOINT_PROBE_VERSION}`);
   }
-  for (const flag of ["--gui-session", "--network-guard-version", "--network-guard-status",
-    "--network-guard-session", "--network-guard-release", "--network-guard-resolve"]) {
-    if (!help.split(/\s+/).some((word) => word.replace(/,$/, "").split("=")[0] === flag)) {
-      throw new Error("the bundled core does not advertise the GUI-lifetime network guard capability");
+  const advertised = (flag) => help.split(/\s+/)
+    .some((word) => word.replace(/,$/, "").split("=")[0] === flag);
+  for (const flag of ["--network-guard-cleanup-version", "--network-guard-release"]) {
+    if (!advertised(flag)) {
+      throw new Error("the bundled core does not advertise cleanup-only support for obsolete network rules");
     }
   }
-  const networkGuard = query(filePath, "--network-guard-version", probe);
-  if (networkGuard !== EXPECTED_NETWORK_GUARD_VERSION) {
-    throw new Error(`the bundled core must support network guard ${EXPECTED_NETWORK_GUARD_VERSION}`);
+  if (["--network-guard-arm", "--network-guard-session", "--gui-session"].some(advertised)) {
+    throw new Error("the bundled core must not advertise an external network guard or GUI startup lock");
+  }
+  const cleanup = query(filePath, "--network-guard-cleanup-version", probe);
+  if (cleanup !== EXPECTED_CLEANUP_VERSION) {
+    throw new Error(`the bundled core must support cleanup-only capability ${EXPECTED_CLEANUP_VERSION}`);
   }
   return {
     version: EXPECTED_VERSION,
     policyVersion: EXPECTED_POLICY_VERSION,
     endpointProbeVersion: EXPECTED_ENDPOINT_PROBE_VERSION,
-    networkGuardVersion: EXPECTED_NETWORK_GUARD_VERSION,
+    cleanupVersion: EXPECTED_CLEANUP_VERSION,
     sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
   };
 }
@@ -117,7 +121,7 @@ if (require.main === module) {
   } else {
     try {
       const result = verifyCore(process.argv[2] ? path.resolve(process.argv[2]) : DEFAULT_CORE);
-      console.log(`core-compatibility: PASS; core ${result.version}; routing policy ${result.policyVersion}; endpoint probe ${result.endpointProbeVersion}; network guard ${result.networkGuardVersion}; SHA-256 ${result.sha256}`);
+      console.log(`core-compatibility: PASS; core ${result.version}; routing policy ${result.policyVersion}; endpoint probe ${result.endpointProbeVersion}; cleanup-only ${result.cleanupVersion}; SHA-256 ${result.sha256}`);
     } catch (error) {
       console.error(`core-compatibility: FAIL; ${error.message}`);
       process.exitCode = 1;
@@ -125,4 +129,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { EXPECTED_VERSION, EXPECTED_POLICY_VERSION, EXPECTED_NETWORK_GUARD_VERSION, DEFAULT_CORE, validateWindowsExecutable, verifyCore };
+module.exports = { EXPECTED_VERSION, EXPECTED_POLICY_VERSION, EXPECTED_CLEANUP_VERSION, DEFAULT_CORE, validateWindowsExecutable, verifyCore };

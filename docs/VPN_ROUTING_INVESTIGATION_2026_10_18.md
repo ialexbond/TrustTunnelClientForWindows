@@ -1,6 +1,6 @@
 # VPN routing investigation — 18 October 2026
 
-This report records the original observed installation. Later 3.2.0 source and packaging follow-ups, including IPv6 capture and the user's approved GUI-session-only protection, are recorded in [the release verification ledger](RELEASE_SYNC_3_2_0.md#gui-session-lifetime-correction). Controlled live crash/dual-stack acceptance of that new candidate remains pending; the original observations below are retained as historical evidence.
+This report records the original observed installation. Later routing/IPv6 corrections are recorded in [the release ledger](RELEASE_SYNC_3_2_0.md). The subsequently added external guardian was withdrawn after [a reproduced installer-maintenance incident](INSTALLER_RECOVERY_INCIDENT_2026_10_18.md). Controlled live crash/dual-stack acceptance remains pending; the original observations below are retained as historical evidence.
 
 The reported mismatch was reproduced: the checker's main HTTPS result used the local ISP address (`HOME_A`), while WebRTC used the Netherlands VPN address (`VPN_A`). Independent HTTPS and both configured STUN probes also returned `VPN_A`. The checker is currently explicitly configured DIRECT, and its destination additionally belongs to a DIRECT Russian IP range. This is consistent with the observed split, rather than evidence that WebRTC is leaking the home address.
 

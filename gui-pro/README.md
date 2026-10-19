@@ -69,8 +69,8 @@ The tunnel, the WinTUN adapter, route interception and the killswitch belong to 
 core** (`trusttunnel_client-*.exe`). Rust/Tauri only spawns and kills that process — it never
 implements tunnelling itself.
 
-**Its sources ARE in this repository**, on each version's `release/tt-win-X.Y.Z` branch
-and release tag, and in the synchronized `master`. Development for Pro **3.2.0** uses
+**Its sources are in this repository**, in `master` and the corresponding release tag.
+Pro **3.2.0** is identified by `v3.2.0-pro` and uses
 upstream core **1.1.11** plus the fork's Windows process and routing changes. The compiled
 binary is gitignored and must be built from the matching fork source. Set
 `TT_CLIENT_VERSION=1.1.11` explicitly: otherwise the automatic version logic may use a GUI tag.

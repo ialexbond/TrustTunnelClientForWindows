@@ -21,6 +21,7 @@
     "connected": "Connected",
     "connecting": "Connecting...",
     "connecting_short": "Connecting",
+    "connecting_detail": "Preparing the connection and site lists…",
     "disconnected": "Disconnected",
     "disconnecting": "Disconnecting...",
     "disconnecting_short": "Disconnecting",
@@ -192,14 +193,7 @@
     "auto_switched_unnamed": "Switched automatically to another server",
     "auto_connect_no_target": "Auto-connect has no server to connect to yet. Connect once manually and it will remember"
   },
-  "network_guard": {
-    "blocked": "VPN is disconnected. While the app is open, protection stops traffic outside the VPN. Reconnect or continue without VPN.",
-    "release": "Continue without VPN"
-  },
   "errors": {
-    "network_guard_failed": "Could not check or change protection. Try again, or close the app to continue without VPN.",
-    "network_guard_active": "Protection is still enabled. Select Continue without VPN, or choose a connection with protection on connection loss enabled.",
-    "network_guard_bootstrap_failed": "Could not resolve the VPN server address. Try again or continue without VPN.",
     "internet_lost_disconnecting": "Internet connection lost. Disconnecting VPN, waiting for network recovery...",
     "server_connection_lost": "Lost connection to the server. Reconnecting…",
     "network_recovery_timeout": "Network recovery timed out (5 min). Please reconnect manually.",
@@ -215,7 +209,8 @@
     "sidecar_exit": "The VPN core exited unexpectedly. Try connecting again.",
     "disconnect_failed": "Could not stop the VPN core — it may still be blocking traffic. Try disconnecting again or restart the application.",
     "routing_rules_unreadable": "The routing rules file could not be read, so the connection was cancelled. Open the Routing tab to restore your rules.",
-    "routing_rules_apply_failed": "Could not prepare the routing rules. The connection was cancelled to avoid using old settings. Check your routing lists and available disk space, then try again.",
+    "routing_rules_apply_failed": "Could not apply the rules. Check them under Routing and try connecting again.",
+    "routing_data_unavailable": "Could not download the site lists. Try connecting again to retry the download.",
     "config_outside_data_dir": "This server's configuration file is outside the folder where the application keeps its data, so the connection was cancelled — the server was never contacted. Add the server again so the app stores the config in its own data folder.",
     "core_server_unreachable": "The server is not responding. Check the server address and that the VPN service is running on it.",
     "core_certificate_failed": "The server's certificate failed verification.",
@@ -1522,6 +1517,7 @@
     "exit": "Exit"
   },
   "sshErrors": {
+    "certInvalid": "The server returned an invalid certificate. The new profile was not saved. Check the server certificate settings and try again. Existing connections have not been changed.",
     "timeout": "Could not connect to {{target}} — connection timed out (15s)",
     "invalidHost": "The server address is not valid. Enter a domain name or IP address: Latin letters, digits, dots and dashes are allowed — plus colons and square brackets for IPv6.",
     "invalidUser": "The SSH username is not valid. Allowed: Latin letters, digits, dash, underscore, dot and dollar sign; length 1 to 64 characters.",
