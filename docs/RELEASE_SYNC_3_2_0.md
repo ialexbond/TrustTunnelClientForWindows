@@ -305,7 +305,10 @@ Installation is a separate stage: save the currently installed GUI/core pair and
 
 Private run output is under this task's visualization directory in `release-3.2.0/`: official dependency source checkouts, build runner and logs. Prior `vpn-investigation/` tools/caches are reused as pre-existing resources and must not be treated as cleanup targets. Conan exports and compiled dependency packages remain in the development cache. The ignored worktree CMake build directory is run-owned. The production rebuild uses the new neutral directory `C:\ttb-pro-3.2.0-codex` with separate Conan/Cargo homes; old compiled dependency archives are not copied into it. No background VPN process is started for build probes.
 
-## Pro 3.2.0 publication inputs
+## Initial Pro 3.2.0 publication inputs
+
+This records the initial publication before the SSH security refresh below. For the current
+rebuilt installer, use the checksum asset attached to the existing Pro 3.2.0 release.
 
 The release installer includes the final routing-readiness correction and the humanized
 3.2.0 notes, compared with published Pro 3.1.0. The GitHub description is generated directly
@@ -327,6 +330,47 @@ Release preparation uses native Send futures in the private endpoint-probe execu
 activates Common Controls for the Windows test harness, preserves exact routing-fixture
 line endings, and guards notification animation updates after the window closes.
 The installer was rebuilt with those runtime changes and its extracted payloads verified.
+
+## SSH dependency security refresh (Pro 3.2.0)
+
+The SSH transport moves from `russh 0.60.3` to `0.64.1`. Its Windows agent dependency moves
+from `pageant 0.2.1` to `0.2.3`. The application version stays `3.2.0`, and the existing
+release receives a rebuilt installer and matching checksum after verification.
+The previously locked `chacha20 0.10.0` was withdrawn upstream. Its compatible `0.10.2`
+replacement fixes an SSE2 processor compatibility defect and permits fresh dependency resolution.
+
+The migration keeps stable `ssh-key 0.6.7` generation and existing OpenSSH PEM keys.
+The upgraded transport uses its own key types across that serialized boundary. Stored
+SHA-256 host fingerprints remain identical. The new certificate-aware callback rejects
+host certificates because the application has no certificate-authority trust configuration;
+the upstream default also advertises no host-certificate algorithms. Existing RSA keys
+negotiate the server's supported SHA-2 signature instead of assuming an unspecified hash.
+
+Eight isolated protocol and identity scenarios pass against a temporary loopback SSH server:
+password acceptance and rejection, generated-key acceptance and rejection, RSA SHA-2,
+command output and exit status, changed-host rejection, and certificate/fingerprint handling.
+Two existing key-generation tests and sixteen existing SSH policy tests also pass.
+Strict all-target Clippy passes with the existing Rust 1.94 compiler; upstream requires 1.89.
+The full Windows library suite, frontend checks, and packaging checks run again in CI.
+
+The application release notes add one user-facing security item and retain the earlier
+3.1.0 and 3.0.0 sections. VPN core sources, the matched 1.1.11 executable, routing rules,
+saved profiles, installer maintenance behavior, and the running host connection are outside
+this dependency change. Live installation and contact with user servers are not exercised.
+
+The three previously disclosed russh advisories are outside the new version's affected ranges.
+The baseline audit also contains unrelated notices and the pre-existing RSA timing advisory;
+this focused update does not claim a clean audit of every application dependency or remove
+supported RSA keys to hide a warning. The previous published installer and release metadata
+are retained privately for rollback before any replacement of the current release assets.
+
+- [russh 0.64.1 release](https://github.com/Eugeny/russh/releases/tag/v0.64.1).
+- [Invalid-channel callback fix](https://github.com/advisories/GHSA-47hw-gvq5-r2gm).
+- [Bounded SSH parsing fix](https://github.com/advisories/GHSA-4r3c-5hpg-58qr).
+- [Bounded decompression fix](https://github.com/advisories/GHSA-wwx6-x28x-8259).
+- [Windows Pageant bounds fix](https://github.com/advisories/GHSA-g4mp-vgx3-xrvm).
+- [Existing RSA timing advisory](https://rustsec.org/advisories/RUSTSEC-2023-0071.html).
+- [Current installer checksum](https://github.com/ialexbond/TrustTunnelClientForWindows/releases/download/v3.2.0-pro/TrustTunnel.Client.Pro_3.2.0_x64-setup.exe.sha256).
 
 ## Sources
 

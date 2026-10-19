@@ -755,24 +755,40 @@ pub struct SshHandler {
     host_key_changed: Arc<AtomicBool>,
 }
 
-// russh 0.60 switched `client::Handler` to native `async fn` (RPITIT, returning
-// `impl Future + Send`) — it is no longer an `#[async_trait]` trait. Applying the
-// async_trait attribute here boxes the future and produces a lifetime/signature
-// mismatch against the trait (E0195). We implement the method as a plain `async fn`.
+fn bare_host_key_fingerprint(key: &russh::keys::PublicKeyOrCertificate) -> Option<String> {
+    match key {
+        russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => Some(
+            key.fingerprint(russh::keys::ssh_key::HashAlg::Sha256).to_string(),
+        ),
+        // Host-certificate authorities are not configured by this application.
+        // Never silently treat a certificate as a trusted bare host key.
+        russh::keys::PublicKeyOrCertificate::Certificate(_) => None,
+    }
+}
+
+async fn signing_key<H: client::Handler>(
+    handle: &client::Handle<H>,
+    key: russh::keys::PrivateKey,
+) -> Result<russh::keys::PrivateKeyWithHashAlg, russh::Error> {
+    let hash_alg = if key.algorithm().is_rsa() {
+        handle.best_supported_rsa_hash().await?.flatten()
+    } else {
+        None
+    };
+    Ok(russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), hash_alg))
+}
+
 impl client::Handler for SshHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        // russh 0.60 merged russh-keys into `russh::keys` and the host-key param is now
-        // the re-exported ssh-key `PublicKey` (was `&russh_keys::key::PublicKey` in 0.46).
-        server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        // ssh-key's `fingerprint` takes a HashAlg and returns a `Fingerprint` (was a bare
-        // `String` in russh-keys 0.46). Mirror server_ssh_key.rs:51 exactly: SHA-256.
-        let fingerprint = server_public_key
-            .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
-            .to_string();
+        // Preserve the existing SHA-256 known-host entries across the upgrade.
+        let Some(fingerprint) = bare_host_key_fingerprint(server_public_key) else {
+            return Ok(false);
+        };
         let mut hosts = load_known_hosts();
 
         match hosts.get(&self.host_key) {
@@ -1071,16 +1087,11 @@ pub async fn ssh_connect(
             if !kp.is_empty() {
                 let key = russh::keys::load_secret_key(kp, None)
                     .map_err(|_| "SSH_KEY_REENTER_REQUIRED|file".to_string())?;
-                // russh 0.60: authenticate_publickey takes a `PrivateKeyWithHashAlg`
-                // (None hash-alg works for Ed25519; RSA would need Sha256/Sha512) and
-                // returns an `AuthResult` enum instead of a bare `bool`. We map
-                // Success → true so the downstream Some(true)/Some(false) arms (and
-                // their exact error codes) stay byte-for-byte unchanged.
+                // Negotiate SHA-2 for existing RSA keys when the server supports it.
+                let key = signing_key(handle, key).await
+                    .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
                 let result = handle
-                    .authenticate_publickey(
-                        ssh_user,
-                        russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None),
-                    )
+                    .authenticate_publickey(ssh_user, key)
                     .await
                     .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
                 let ok = matches!(result, russh::client::AuthResult::Success);
@@ -1091,11 +1102,10 @@ pub async fn ssh_connect(
             if !kd.is_empty() {
                 let key = russh::keys::decode_secret_key(kd, None)
                     .map_err(|_| "SSH_KEY_REENTER_REQUIRED|pasted".to_string())?;
+                let key = signing_key(handle, key).await
+                    .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
                 let result = handle
-                    .authenticate_publickey(
-                        ssh_user,
-                        russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None),
-                    )
+                    .authenticate_publickey(ssh_user, key)
                     .await
                     .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
                 let ok = matches!(result, russh::client::AuthResult::Success);
@@ -1184,8 +1194,8 @@ static CHANNEL_OPEN_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(
 ///      вернул transient failure (gate не защищает от sshd-side race).
 ///      6 attempts × (50/100/200/400/800 ms + 0-99ms jitter) = up to ~1.8s
 ///      total retry window — достаточно для cold fork latency recovery.
-pub(crate) async fn open_session_with_retry(
-    handle: &client::Handle<SshHandler>,
+pub(crate) async fn open_session_with_retry<H: client::Handler>(
+    handle: &client::Handle<H>,
 ) -> Result<russh::Channel<russh::client::Msg>, russh::Error> {
     const MAX_ATTEMPTS: u32 = 6; // 1 initial try + 5 retries
 
@@ -1277,8 +1287,8 @@ pub(crate) async fn exec_command(
 /// secret-bearing read that echo is a leak, even though `logging::sanitize` now
 /// redacts the known key shapes as belt-and-suspenders. The transport path is
 /// identical to `exec_command`; only the per-line `emit_log` is dropped.
-pub(crate) async fn exec_command_quiet(
-    handle: &client::Handle<SshHandler>,
+pub(crate) async fn exec_command_quiet<H: client::Handler>(
+    handle: &client::Handle<H>,
     command: &str,
 ) -> Result<(String, i32), String> {
     let mut channel = open_session_with_retry(handle)
@@ -1394,6 +1404,9 @@ pub(crate) async fn exec_command_cancellable(
 
     Ok((stdout, exit_code))
 }
+
+#[cfg(test)]
+mod compatibility_tests;
 
 #[cfg(test)]
 mod tests {
