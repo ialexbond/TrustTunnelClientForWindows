@@ -1948,29 +1948,6 @@ pub async fn vpn_connect(
             return Err(reason.to_string());
         }
     };
-    // Item 13: the reporting variant, so a geo entry that could not be resolved reaches the user
-    // on the same `vpn-log` channel this block already warns on — instead of an `eprintln!` that
-    // goes nowhere in a packaged build.
-    if let Err(e) = routing_rules::resolve_and_apply_reporting(
-        &config_path,
-        &rules,
-        geodata_state.as_ref(),
-        Some(&app),
-    ) {
-        eprintln!("[vpn_connect] Warning: failed to resolve routing rules: {e}");
-        app.emit("vpn-log", VpnLogPayload {
-            message: format!("Warning: routing rules resolve failed: {e}"),
-            level: "warn".into(),
-        }).ok();
-    }
-
-    // Egress guard (net_egress.rs): if the core's own interface picker would choose a foreign
-    // virtual adapter (Radmin VPN & co) instead of the interface that actually reaches the server,
-    // spawn an override COPY that pins `bound_if` (and, when suspect, in-tunnel DNS). `None` on a
-    // healthy machine → the real config is spawned unchanged. The real config is never modified.
-    let egress_override = crate::net_egress::override_for_connect(&config_path)
-        .map(|p| p.to_string_lossy().into_owned());
-
     // FAB-R4 (Fable-5 review of Phase 14) — DECOUPLE-STAMP-FROM-BOOL re-fix: a genuine
     // tray/manual «Отключить» that lands DURING a config switch / save-and-reconnect (in
     // the teardown→connect gap) must WIN over the blind intent-clear — otherwise
@@ -2010,6 +1987,36 @@ pub async fn vpn_connect(
         // immediately (no 15s park, no revert, no phantom «остались на A» notice).
         return Ok(ConnectOutcome::superseded());
     }
+
+    // Item 13: the reporting variant, so a geo entry that could not be resolved reaches the user
+    // on the same `vpn-log` channel this block already warns on — instead of an `eprintln!` that
+    // goes nowhere in a packaged build.
+    match routing_rules::prepare_and_apply_for_connect(
+        &config_path,
+        &rules,
+        geodata_state.inner(),
+        Some(&app),
+        &state.connection_generation,
+        connect_generation,
+    ).await {
+        Ok(true) => {}
+        Ok(false) => {
+            set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+            return Ok(ConnectOutcome::superseded());
+        }
+        Err(e) => {
+            crate::logging::log_app("ERROR", &format!("[vpn_connect] routing policy preparation failed: {}", e.detail));
+            set_vpn_status(&app, &state, VpnStatus::Error, Some(e.reason.to_string()));
+            return Err(e.reason.to_string());
+        }
+    }
+
+    // Egress guard (net_egress.rs): if the core's own interface picker would choose a foreign
+    // virtual adapter (Radmin VPN & co) instead of the interface that actually reaches the server,
+    // spawn an override COPY that pins `bound_if` (and, when suspect, in-tunnel DNS). `None` on a
+    // healthy machine → the real config is spawned unchanged. The real config is never modified.
+    let egress_override = crate::net_egress::override_for_connect(&config_path)
+        .map(|p| p.to_string_lossy().into_owned());
 
     // Reset flags for new connection
     if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
@@ -2087,6 +2094,24 @@ pub async fn vpn_connect(
     let child = sidecar::spawn_trusttunnel(&app, spawn_config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
         .await
         .map_err(|e| {
+            if !crate::lifecycle::respawn_may_store(
+                connect_generation,
+                state.connection_generation.load(Ordering::SeqCst),
+                state.user_disconnect_requested.load(Ordering::SeqCst),
+            ) {
+                return "connect-superseded".to_string();
+            }
+            if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON {
+                let reason = crate::lifecycle::CORE_VERSION_MISMATCH_REASON;
+                if crate::lifecycle::respawn_may_store(
+                    connect_generation,
+                    state.connection_generation.load(Ordering::SeqCst),
+                    state.user_disconnect_requested.load(Ordering::SeqCst),
+                ) {
+                    set_vpn_status(&app, &state, VpnStatus::Error, Some(reason.to_string()));
+                }
+                return reason.to_string();
+            }
             let msg = format!("Failed to start sidecar: {e}");
             eprintln!("[vpn_connect] {msg}");
             crate::logging::log_app("ERROR", &msg);
@@ -2338,20 +2363,21 @@ pub async fn respawn_sidecar(
                 return;
             }
         };
-        if let Err(e) =
-            // Item 13: same reporting channel on the reconnect path — a user watching a
-            // reconnect has the same right to know which entries stopped being in force.
-            routing_rules::resolve_and_apply_reporting(
+        match routing_rules::prepare_and_apply_for_connect(
                 &config_path,
                 &rules,
-                geodata_state.as_ref(),
+                geodata_state.inner(),
                 Some(app),
-            )
-        {
-            crate::logging::log_app(
-                "WARN",
-                &format!("[reconnect] routing rules resolve failed: {e}"),
-            );
+                &state.connection_generation,
+                captured_generation,
+            ).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(e) => {
+                crate::logging::log_app("WARN", &format!("[reconnect] routing rules resolve failed: {}", e.detail));
+                record_failure_cause(&state, e.reason);
+                return;
+            }
         }
     }
 
@@ -2424,6 +2450,20 @@ pub async fn respawn_sidecar(
     {
         Ok(c) => c,
         Err(e) => {
+            if e.to_string() == crate::lifecycle::CORE_VERSION_MISMATCH_REASON
+                && crate::lifecycle::respawn_may_store(
+                    captured_generation,
+                    state.connection_generation.load(Ordering::SeqCst),
+                    state.user_disconnect_requested.load(Ordering::SeqCst),
+                )
+            {
+                set_vpn_status(
+                    app,
+                    &state,
+                    VpnStatus::Error,
+                    Some(crate::lifecycle::CORE_VERSION_MISMATCH_REASON.to_string()),
+                );
+            }
             crate::logging::log_app("WARN", &format!("[reconnect] respawn failed: {e}"));
             return;
         }

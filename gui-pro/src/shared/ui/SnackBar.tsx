@@ -57,6 +57,7 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
   const [items, setItems] = useState<SnackItem[]>([]);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const seenCount = useRef(0);
+  const mountedRef = useRef(true);
 
   const dismiss = useCallback((id: number) => {
     const timer = timersRef.current.get(id);
@@ -66,6 +67,7 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
     }
     setItems(prev => prev.map(s => (s.id === id ? { ...s, phase: "exit" } : s)));
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setItems(prev => prev.filter(s => s.id !== id));
     }, 400);
   }, []);
@@ -100,6 +102,7 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
           timersRef.current.delete(idToRemove);
         }
         setTimeout(() => {
+          if (!mountedRef.current) return;
           setItems(p => p.filter(x => x.id !== idToRemove));
         }, 400);
       };
@@ -156,6 +159,7 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
 
       // Enter -> visible
       setTimeout(() => {
+        if (!mountedRef.current) return;
         setItems(prev =>
           prev.map(s => (s.id === id ? { ...s, phase: "visible" } : s)),
         );
@@ -181,10 +185,12 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
     }
   }, [messages.length]);
 
-  // Cleanup all timers on unmount
+  // Stop auto-dismiss work and ignore phase updates after the component closes.
   useEffect(() => {
+    mountedRef.current = true;
     const map = timersRef.current;
     return () => {
+      mountedRef.current = false;
       map.forEach((t) => clearTimeout(t));
       map.clear();
     };

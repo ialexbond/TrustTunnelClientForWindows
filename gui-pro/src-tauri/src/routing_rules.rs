@@ -47,7 +47,10 @@ pub struct RoutingRules {
     pub direct: Vec<RuleEntry>,
     #[serde(default)]
     pub proxy: Vec<RuleEntry>,
-    #[serde(default = "default_process_mode")]
+    #[serde(
+        default = "default_process_mode",
+        deserialize_with = "deserialize_process_mode"
+    )]
     pub process_mode: String, // "exclude" | "only"
     #[serde(default)]
     pub processes: Vec<String>,
@@ -55,6 +58,22 @@ pub struct RoutingRules {
 
 fn default_process_mode() -> String {
     "exclude".to_string()
+}
+
+fn validate_process_mode(mode: &str) -> Result<(), String> {
+    match mode {
+        "exclude" | "only" => Ok(()),
+        _ => Err("Unsupported routing process mode; expected 'exclude' or 'only'".to_string()),
+    }
+}
+
+fn deserialize_process_mode<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mode = String::deserialize(deserializer)?;
+    validate_process_mode(&mode).map_err(serde::de::Error::custom)?;
+    Ok(mode)
 }
 
 /// Keys that belonged to the removed site-blocking feature and are carried through every save
@@ -94,79 +113,6 @@ fn carry_forward_legacy_keys(previous: &str, next: &mut serde_json::Value) {
             obj.insert(key.to_string(), value.clone());
         }
     }
-}
-
-// ─── Default private/local exclusions (T-33) ────────
-//
-// In "general" mode every destination goes THROUGH the VPN tunnel except for
-// the `direct` bypass list. Standard split-tunnel VPNs additionally keep
-// private/local traffic OFF the tunnel by default — otherwise Docker's and
-// WSL's INTERNAL networking (172.16.0.0/12 for Docker, link-local /
-// private ranges for WSL/Hyper-V) gets routed into the tunnel, the host can
-// no longer reach its own VM/containers, and Docker fails to start while the
-// VPN is connected (see .planning/debug/docker-system-hang-on-connect.md).
-//
-// These CIDRs are added as an ADDITIVE baseline to the bypass set so LAN /
-// Docker / WSL keep working while connected. They never override an explicit
-// user rule: a default entry is skipped if the user forced that exact CIDR
-// THROUGH the VPN via `proxy` (see `build_general_exclusions`).
-const DEFAULT_PRIVATE_EXCLUSIONS: &[&str] = &[
-    // RFC1918 private IPv4 (covers Docker bridge 172.17.0.0/16 + WSL/Hyper-V NAT).
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    // Loopback.
-    "127.0.0.0/8",
-    // Link-local IPv4 (incl. WSL/Hyper-V auto-config and APIPA).
-    "169.254.0.0/16",
-    // IPv6 loopback / unique-local (ULA) / link-local.
-    "::1/128",
-    "fc00::/7",
-    "fe80::/10",
-];
-
-/// Build the final exclusions (bypass) list for "general" mode.
-///
-/// Starts from the user's resolved `direct` entries, then APPENDS the
-/// `DEFAULT_PRIVATE_EXCLUSIONS` baseline (T-33) so Docker/WSL/LAN bypass the
-/// tunnel by default. The override rule preserves user intent:
-///
-/// * A default-private CIDR is skipped if the user forced that **exact** CIDR
-///   through the VPN via `proxy` — the user's explicit "route through VPN"
-///   rule wins, so the CIDR stays tunnelled. Override granularity is
-///   exact-string CIDR match (simple and predictable): forcing
-///   `192.168.0.0/16` through VPN does NOT keep `192.168.1.0/24` excluded,
-///   and vice-versa.
-/// * A default-private CIDR already present in `direct` is not duplicated.
-///
-/// User `direct` entries are always preserved as-is (the baseline is additive
-/// only — it never removes or reorders user rules).
-fn build_general_exclusions(direct_entries: &[String], proxy_entries: &[String]) -> Vec<String> {
-    // Non-empty user direct entries form the base bypass set, order preserved.
-    let mut result: Vec<String> = direct_entries
-        .iter()
-        .filter(|e| !e.is_empty())
-        .cloned()
-        .collect();
-
-    // Exact-string set of what the user forced THROUGH the VPN (override signal)
-    // and of what is already a bypass entry (dedup guard).
-    let forced_through_vpn: HashSet<&str> =
-        proxy_entries.iter().map(|s| s.as_str()).collect();
-    let mut already_present: HashSet<String> = result.iter().cloned().collect();
-
-    for &cidr in DEFAULT_PRIVATE_EXCLUSIONS {
-        // User rule wins: keep this private range tunnelled if explicitly proxied.
-        if forced_through_vpn.contains(cidr) {
-            continue;
-        }
-        // Never duplicate a CIDR the user already listed as direct.
-        if already_present.insert(cidr.to_string()) {
-            result.push(cidr.to_string());
-        }
-    }
-
-    result
 }
 
 impl Default for RoutingRules {
@@ -230,7 +176,7 @@ pub fn load_routing_rules() -> Result<RoutingRules, String> {
 /// The two error dispositions here are deliberately different and must stay that way:
 ///   * no file at all → `Ok(default)`. Nothing has ever been routed; there is no policy to
 ///     misread, so a fresh install connects.
-///   * a file that will not parse → `Err`. Something IS written there and we cannot read it.
+///   * an unreadable or invalid file → `Err`. Something IS written there and we cannot read it.
 ///     Answering `default` would be the app inventing an empty routing policy and attributing
 ///     it to the user, which is the exact lie this phase exists to remove.
 pub fn load_routing_rules_from(path: &std::path::Path) -> Result<RoutingRules, String> {
@@ -245,22 +191,27 @@ pub fn load_routing_rules_from(path: &std::path::Path) -> Result<RoutingRules, S
             );
             Ok(rules)
         }
-        Err(_) => {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             eprintln!("[routing] No routing_rules.json found, returning defaults");
             Ok(RoutingRules::default())
         }
+        Err(e) => Err(format!("Failed to read routing_rules.json: {e}")),
     }
 }
 
 #[tauri::command]
 pub fn save_routing_rules(rules: RoutingRules) -> Result<(), String> {
-    let path = routing_rules_path();
+    save_routing_rules_to(&routing_rules_path(), &rules)
+}
+
+fn save_routing_rules_to(path: &std::path::Path, rules: &RoutingRules) -> Result<(), String> {
+    validate_process_mode(&rules.process_mode)?;
     let mut document =
-        serde_json::to_value(&rules).map_err(|e| format!("Failed to serialize: {e}"))?;
+        serde_json::to_value(rules).map_err(|e| format!("Failed to serialize: {e}"))?;
     // The removed feature's data rides through. Best-effort by construction: no previous file (a
     // fresh install) and an unreadable one (the D-02 corrupt case, whose only exit is a reset that
     // must NOT resurrect fragments) both contribute nothing, and neither is an error.
-    if let Ok(previous) = std::fs::read_to_string(&path) {
+    if let Ok(previous) = std::fs::read_to_string(path) {
         carry_forward_legacy_keys(&previous, &mut document);
     }
     let json = serde_json::to_string_pretty(&document)
@@ -271,7 +222,7 @@ pub fn save_routing_rules(rules: RoutingRules) -> Result<(), String> {
     // invalid JSON, and `load_routing_rules` turns invalid JSON into a hard error (:164) — i.e. the
     // user silently loses every rule they ever typed. temp → fsync → rename → parent-dir fsync
     // swaps the file in whole or not at all. D-29: the writer never logs the bytes.
-    crate::commands::manifest::write_bytes_atomic(&path, json.as_bytes())
+    crate::commands::manifest::write_bytes_atomic(path, json.as_bytes())
         .map_err(|e| format!("Failed to write routing_rules.json: {e}"))?;
     eprintln!(
         "[routing] Saved: {} direct, {} proxy, {} processes",
@@ -439,8 +390,112 @@ pub fn migrate_legacy_exclusions(config_path: String) -> Result<RoutingRules, St
     Ok(rules)
 }
 
-/// Core logic: resolve all rules and generate config files for sidecar.
-/// Called both from the Tauri command and from vpn_connect before sidecar spawn.
+/// Separate unavailable data from invalid rules or a failed policy write.
+#[derive(Debug)]
+pub struct RoutingPreparationError {
+    pub reason: &'static str,
+    pub detail: String,
+}
+
+fn required_geodata_missing(rules: &RoutingRules, state: &GeoDataState) -> Result<bool, String> {
+    let entries = || rules.direct.iter().chain(rules.proxy.iter());
+    let geoip_missing = entries().any(|entry| entry.entry_type == "geoip")
+        && state.geoip_data.lock().map_err(|e| e.to_string())?
+            .as_ref().is_none_or(Vec::is_empty);
+    let geosite_missing = entries().any(|entry| entry.entry_type == "geosite")
+        && state.geosite_data.lock().map_err(|e| e.to_string())?
+            .as_ref().is_none_or(Vec::is_empty);
+    Ok(geoip_missing || geosite_missing)
+}
+
+async fn prepare_required_routing_data(
+    rules: &RoutingRules,
+    state: &Arc<GeoDataState>,
+    app: Option<&tauri::AppHandle>,
+) -> Result<(), String> {
+    if required_geodata_missing(rules, state)? {
+        // Join an existing update, then recheck its result before requesting any download.
+        // The scheduler releases this lock before acquiring lifecycle_flow, so no cycle forms.
+        let _update_guard = state.update_in_flight.lock().await;
+        let cached_state = Arc::clone(state);
+        tokio::task::spawn_blocking(move || geodata_v2ray::load_cached_geodata(&cached_state))
+            .await.map_err(|e| format!("Cached geodata load task failed: {e}"))??;
+        if required_geodata_missing(rules, state)? {
+            let app = app.ok_or("Required geodata is not available")?;
+            let _busy = geodata_v2ray::BusyFlag::acquire();
+            geodata_v2ray::download_geodata_locked(app, state).await?;
+        }
+        if required_geodata_missing(rules, state)? {
+            return Err("Required geodata was not loaded".into());
+        }
+    }
+
+    let mut seen = HashSet::new();
+    for entry in rules.direct.iter().chain(rules.proxy.iter()) {
+        if entry.entry_type != "iplist_group" { continue; }
+        let group = entry.value.strip_prefix("iplist_group:").unwrap_or(&entry.value);
+        if !seen.insert(group) || group_cache_path_pub(group).exists() { continue; }
+        if app.is_none() { return Err("A required group is not available".into()); }
+        // Reuse the existing validation, source selection, parse guard and atomic cache writer.
+        if matches!(
+            crate::geodata::refresh_group_cache_if_stale(group, std::time::Duration::ZERO).await?,
+            crate::geodata::GroupRefreshOutcome::Rejected
+        ) {
+            return Err("A required group download was rejected".into());
+        }
+    }
+    Ok(())
+}
+
+/// Prepare required lists before applying policy. `false` means the user cancelled the connect.
+/// A download never becomes a terminal routing error merely because it is still in progress.
+pub async fn prepare_and_apply_for_connect(
+    config_path: &str,
+    rules: &RoutingRules,
+    state: &Arc<GeoDataState>,
+    app: Option<&tauri::AppHandle>,
+    generation: &std::sync::atomic::AtomicU64,
+    expected_generation: u64,
+) -> Result<bool, RoutingPreparationError> {
+    use std::sync::atomic::Ordering;
+    if generation.load(Ordering::SeqCst) != expected_generation { return Ok(false); }
+    // A cancelled connection must not drop an updater's lock while its blocking atomic
+    // commit is still running. Keep data preparation alive independently; only this caller
+    // may apply policy or proceed to the VPN spawn after preparation has completed.
+    let prepare_rules = rules.clone();
+    let prepare_state = Arc::clone(state);
+    let prepare_app = app.cloned();
+    let preparing = tokio::spawn(async move {
+        prepare_required_routing_data(&prepare_rules, &prepare_state, prepare_app.as_ref()).await
+    });
+    let cancelled = async {
+        while generation.load(Ordering::SeqCst) == expected_generation {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = cancelled => return Ok(false),
+        prepared = preparing => {
+            if generation.load(Ordering::SeqCst) != expected_generation { return Ok(false); }
+            prepared.map_err(|e| RoutingPreparationError {
+                reason: crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON,
+                detail: format!("Routing data preparation task failed: {e}"),
+            })?.map_err(|detail| RoutingPreparationError {
+                reason: crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON, detail,
+            })?;
+        }
+    }
+    if generation.load(Ordering::SeqCst) != expected_generation { return Ok(false); }
+    let applied = resolve_and_apply_reporting(config_path, rules, state, app);
+    if generation.load(Ordering::SeqCst) != expected_generation { return Ok(false); }
+    applied.map_err(|detail| RoutingPreparationError {
+            reason: crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON, detail,
+        })?;
+    Ok(generation.load(Ordering::SeqCst) == expected_generation)
+}
+
+/// Resolve and write a complete policy. Background refreshes never initiate downloads here.
 pub fn resolve_and_apply_inner(
     config_path: &str,
     rules: &RoutingRules,
@@ -461,6 +516,8 @@ pub fn resolve_and_apply_reporting(
     state: &GeoDataState,
     app: Option<&tauri::AppHandle>,
 ) -> Result<(), String> {
+    // Reject an unsupported mode before resolving or replacing any policy files.
+    let (process_direct, process_proxy, process_block) = resolve_process_rules(rules)?;
     eprintln!("[routing] Resolving rules and generating config files...");
 
     // Item 13: accumulated across BOTH lists, so one notice names everything that is not in force
@@ -473,9 +530,7 @@ pub fn resolve_and_apply_reporting(
     let proxy_entries = resolve_entries_collecting(&rules.proxy, state, &mut unresolved)?;
 
     // Item 13: tell the user WHICH entries are not in force, on the channel the connect already
-    // uses for its own warning line six lines further down the caller. The resolve still SUCCEEDS
-    // and the connect still proceeds — the reasoning for that asymmetry with D-02 is written out
-    // at `resolve_entries_collecting`.
+    // uses for its own warning line six lines further down the caller. The collected names are shown before the complete policy is refused below.
     if let (Some(app), Some(notice)) = (app, unresolved_entries_notice(&unresolved)) {
         use tauri::Emitter;
         crate::logging::log_app("WARN", &format!("[routing] {notice}"));
@@ -484,6 +539,10 @@ pub fn resolve_and_apply_reporting(
             serde_json::json!({ "message": notice, "level": "warn" }),
         )
         .ok();
+    }
+
+    if !crate::routing_policy::resolution_is_complete(&unresolved) {
+        return Err("One or more routing lists could not be resolved; refusing a partial policy".to_string());
     }
 
     // Read the vpn_mode chosen by the user in Settings (don't override it!)
@@ -505,15 +564,17 @@ pub fn resolve_and_apply_reporting(
     // - "selective": everything direct, EXCEPT proxy entries (they go through VPN)
     //   → exclusions = proxy entries. Private nets already bypass in this mode,
     //     so no default-private baseline is added here.
-    let resolved_exclusions: Vec<String> = if vpn_mode == "selective" {
-        proxy_entries
-            .iter()
-            .filter(|e| !e.is_empty())
-            .cloned()
-            .collect()
-    } else {
-        build_general_exclusions(&direct_entries, &proxy_entries)
+    let explicit_entries = |entries: &[RuleEntry]| -> Vec<String> {
+        entries.iter().flat_map(|entry| match entry.entry_type.as_str() {
+            "domain" => crate::domain_scope::expand_domain_rule(&entry.value),
+            "ip" | "cidr" => vec![entry.value.clone()],
+            _ => Vec::new(),
+        }).collect()
     };
+    let resolved_exclusions = crate::routing_policy::build_policy(
+        &vpn_mode, &direct_entries, &proxy_entries,
+        &explicit_entries(&rules.direct), &explicit_entries(&rules.proxy),
+    );
 
     let exclusions_content = resolved_exclusions.join("\n");
 
@@ -545,7 +606,6 @@ pub fn resolve_and_apply_reporting(
     );
 
     // Process filter files
-    let (process_direct, process_proxy, process_block) = resolve_process_rules(rules);
     // F4 (30.1 milestone review, blocker 4): same atomic writer as the two files above. The joined
     // content is bound to a `let` first so the String outlives the borrow handed to the writer.
     let process_direct_content = process_direct.join("\n");
@@ -692,14 +752,9 @@ fn unresolved_entries_notice(unresolved: &[String]) -> Option<String> {
 /// has no console attached, so that print went nowhere: the app knew a preset had stopped routing
 /// and threw the fact away, while the chip naming that preset stayed on screen looking active.
 ///
-/// **Why this does NOT abort the connect, when D-02 does.** The two look like the same question and
-/// are not. A rules file that will not parse means the app does not know WHAT the user asked for —
-/// there is no honest way to proceed, so the connect refuses. A geo entry that will not resolve
-/// means the app knows exactly what was asked and could not fulfil ONE item of it, most often
-/// because a geodata `.dat` is mid-update or was never downloaded. Refusing every connect over that
-/// would take the user's whole tunnel away for a partial and usually self-healing gap — a worse
-/// trade than telling them which entries are not in force. Different severities, different answers,
-/// and the difference is written down here rather than left for a reader to infer.
+/// A collector can return partial entries for diagnostics. The application must refuse the
+/// complete policy if this list is nonempty: omitting one protected group can silently select
+/// DIRECT, even when every other group resolved correctly.
 ///
 /// `unresolved` is appended to, never cleared, so one call site can accumulate across the direct
 /// and proxy lists.
@@ -821,13 +876,16 @@ fn resolve_entries_collecting(
 }
 
 /// Determine process filter files based on process_mode
-fn resolve_process_rules(rules: &RoutingRules) -> (Vec<String>, Vec<String>, Vec<String>) {
+type ResolvedProcessRules = (Vec<String>, Vec<String>, Vec<String>);
+
+fn resolve_process_rules(rules: &RoutingRules) -> Result<ResolvedProcessRules, String> {
+    validate_process_mode(&rules.process_mode)?;
     let mut direct = Vec::new();
     let mut proxy = Vec::new();
     let block = Vec::new(); // No UI for blocking processes yet, but supported
 
     if rules.processes.is_empty() {
-        return (direct, proxy, block);
+        return Ok((direct, proxy, block));
     }
 
     match rules.process_mode.as_str() {
@@ -839,13 +897,10 @@ fn resolve_process_rules(rules: &RoutingRules) -> (Vec<String>, Vec<String>, Vec
             // Only these processes go through VPN → they go proxy
             proxy = rules.processes.clone();
         }
-        _ => {
-            eprintln!("[routing] Unknown process_mode '{}', defaulting to exclude", rules.process_mode);
-            direct = rules.processes.clone();
-        }
+        _ => return Err("Unsupported routing process mode".to_string()),
     }
 
-    (direct, proxy, block)
+    Ok((direct, proxy, block))
 }
 
 /// Update TOML config with resolved routing rules.
@@ -868,6 +923,13 @@ fn update_toml_config(
     // Use forward slashes to avoid TOML escaping issues with backslashes on Windows
     doc["exclusions"] = value(Array::new());
     doc["exclusions_file"] = value(exclusions_file_path().to_string_lossy().replace('\\', "/"));
+    if crate::routing_policy::requires_override_support(exclusions) {
+        doc["routing_policy_version"] = value(1);
+        // Inspect a fresh TLS/QUIC connection before choosing DIRECT when DNS is external.
+        doc["exclusions_tcp_early_ack_enabled"] = value(true);
+    } else {
+        doc.remove("routing_policy_version");
+    }
 
     // SITE BLOCKING IS GONE (2026-09-03), and these two removals are LEGACY CLEANUP rather than
     // leftovers of the feature. A config written by any earlier build still carries
@@ -948,6 +1010,7 @@ pub fn update_vpn_mode(config_path: String, mode: String) -> Result<(), String> 
 
 #[cfg(test)]
 mod tests {
+    use crate::routing_policy::{build_general_exclusions, DEFAULT_PRIVATE_EXCLUSIONS};
     use super::*;
 
     fn v(items: &[&str]) -> Vec<String> {
@@ -982,6 +1045,158 @@ mod tests {
         let dir = base.join(unique);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn security_missing_routing_file_keeps_fresh_install_defaults() {
+        let dir = f4_tempdir();
+        let rules = load_routing_rules_from(&dir.join("missing.json")).unwrap();
+        assert_eq!(rules.process_mode, "exclude");
+        assert!(rules.direct.is_empty() && rules.proxy.is_empty() && rules.processes.is_empty());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_unreadable_routing_path_is_not_an_empty_policy() {
+        let dir = f4_tempdir();
+        let policy = dir.join("routing_rules.json");
+        std::fs::create_dir(&policy).unwrap();
+        let error = load_routing_rules_from(&policy).unwrap_err();
+        assert!(error.starts_with("Failed to read routing_rules.json:"), "{error}");
+        assert!(policy.is_dir(), "a failed read must leave the existing path intact");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_invalid_utf8_routing_file_is_not_an_empty_policy() {
+        let dir = f4_tempdir();
+        let policy = dir.join("routing_rules.json");
+        let original = [0xff, 0xfe, 0x80];
+        std::fs::write(&policy, original).unwrap();
+        let error = load_routing_rules_from(&policy).unwrap_err();
+        assert!(error.starts_with("Failed to read routing_rules.json:"), "{error}");
+        assert_eq!(std::fs::read(&policy).unwrap(), original);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_corrupt_routing_json_remains_an_error() {
+        let dir = f4_tempdir();
+        let policy = dir.join("routing_rules.json");
+        std::fs::write(&policy, "{not valid json").unwrap();
+        let error = load_routing_rules_from(&policy).unwrap_err();
+        assert!(error.starts_with("Failed to parse routing_rules.json:"), "{error}");
+        assert_eq!(std::fs::read_to_string(&policy).unwrap(), "{not valid json");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_supported_process_modes_preserve_existing_routing() {
+        let dir = f4_tempdir();
+        let policy = dir.join("routing_rules.json");
+        for mode in ["exclude", "only"] {
+            let json = serde_json::json!({
+                "direct": [{"id":"d1", "type":"domain", "value":"example.org", "label":null}],
+                "proxy": [{"id":"p1", "type":"cidr", "value":"203.0.113.0/24", "label":null}],
+                "process_mode": mode,
+                "processes": ["chrome.exe"],
+                "block": [],
+                "block_enabled": true
+            });
+            let original = json.to_string();
+            std::fs::write(&policy, &original).unwrap();
+            let rules = load_routing_rules_from(&policy).unwrap();
+            assert_eq!(rules.process_mode, mode);
+            assert_eq!(rules.direct[0].value, "example.org");
+            assert_eq!(rules.proxy[0].value, "203.0.113.0/24");
+            assert_eq!(rules.processes, v(&["chrome.exe"]));
+            assert_eq!(std::fs::read_to_string(&policy).unwrap(), original);
+            assert_eq!(parse_routing_rules_capped(&original).unwrap().process_mode, mode);
+
+            save_routing_rules_to(&policy, &rules).unwrap();
+            let saved: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&policy).unwrap()).unwrap();
+            assert_eq!(saved["block"], json["block"]);
+            assert_eq!(saved["block_enabled"], json["block_enabled"]);
+            assert_eq!(saved["direct"], json["direct"]);
+            assert_eq!(saved["proxy"], json["proxy"]);
+            assert_eq!(saved["processes"], json["processes"]);
+            assert_eq!(saved["process_mode"], json["process_mode"]);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_absent_process_mode_keeps_legacy_default() {
+        let dir = f4_tempdir();
+        let policy = dir.join("routing_rules.json");
+        let original = r#"{"processes":["chrome.exe"],"block":[],"block_enabled":true}"#;
+        std::fs::write(&policy, original).unwrap();
+        let rules = load_routing_rules_from(&policy).unwrap();
+        assert_eq!(rules.process_mode, "exclude");
+        assert_eq!(rules.processes, v(&["chrome.exe"]));
+        assert_eq!(parse_routing_rules_capped(original).unwrap().process_mode, "exclude");
+        let (direct, proxy, block) = resolve_process_rules(&rules).unwrap();
+        assert_eq!(direct, v(&["chrome.exe"]));
+        assert!(proxy.is_empty() && block.is_empty());
+        assert_eq!(std::fs::read_to_string(&policy).unwrap(), original);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_unsupported_process_modes_reject_load_and_both_import_doors() {
+        let dir = f4_tempdir();
+        let policy = dir.join("routing_rules.json");
+        for mode in ["", "direct", "include", "ONLY", " only", "exclude "] {
+            let json = serde_json::json!({"process_mode": mode, "processes": ["chrome.exe"]})
+                .to_string();
+            std::fs::write(&policy, &json).unwrap();
+            let error = load_routing_rules_from(&policy).unwrap_err();
+            assert!(error.contains("Unsupported routing process mode"), "{mode:?}: {error}");
+            assert_eq!(parse_routing_rules_capped(&json).unwrap_err(), "routing.import_invalid");
+            assert!(serde_json::from_str::<RoutingRules>(&json).is_err());
+            assert_eq!(std::fs::read_to_string(&policy).unwrap(), json);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_unsupported_process_mode_cannot_replace_saved_rules() {
+        let dir = f4_tempdir();
+        let policy = dir.join("routing_rules.json");
+        let original = r#"{"process_mode":"only","processes":["protected.exe"]}"#;
+        std::fs::write(&policy, original).unwrap();
+        let invalid = RoutingRules {
+            process_mode: "unknown".to_string(),
+            processes: v(&["protected.exe"]),
+            ..RoutingRules::default()
+        };
+        assert!(save_routing_rules_to(&policy, &invalid).is_err());
+        assert_eq!(std::fs::read_to_string(&policy).unwrap(), original);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn security_unsupported_process_mode_never_resolves_to_direct() {
+        for processes in [Vec::new(), v(&["protected.exe"])] {
+            let invalid = RoutingRules {
+                process_mode: "unknown".to_string(),
+                processes,
+                ..RoutingRules::default()
+            };
+            assert!(resolve_process_rules(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn security_supported_process_modes_keep_their_direction() {
+        let processes = v(&["chrome.exe", "helper.exe"]);
+        let mut rules = RoutingRules { processes: processes.clone(), ..RoutingRules::default() };
+        assert_eq!(resolve_process_rules(&rules).unwrap(), (processes.clone(), Vec::new(), Vec::new()));
+        rules.process_mode = "only".to_string();
+        assert_eq!(resolve_process_rules(&rules).unwrap(), (Vec::new(), processes, Vec::new()));
     }
 
     /// A minimal password-bearing client config `.toml`.
@@ -1087,6 +1302,177 @@ mod tests {
     /// and the four file names are FIXED. Two such tests running on different threads would
     /// overwrite each other's fixture and fail for reasons unrelated to the property under test.
     static DATA_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn readiness_rules() -> RoutingRules {
+        RoutingRules {
+            direct: vec![f4_entry("geoip", "geoip:ru")],
+            ..RoutingRules::default()
+        }
+    }
+
+    fn readiness_state() -> Arc<GeoDataState> {
+        let state = Arc::new(GeoDataState::new());
+        *state.geoip_data.lock().unwrap() = Some(vec![geodata_v2ray::GeoIP {
+            country_code: "ru".into(),
+            cidrs: vec![geodata_v2ray::CidrEntry { ip: vec![203, 0, 113, 0], prefix: 24 }],
+        }]);
+        state
+    }
+
+    fn readiness_fixture() -> std::path::PathBuf {
+        let root = crate::ssh::user_data_dir();
+        assert!(root.starts_with(std::env::temp_dir()), "tests must use the private data root");
+        assert!(root.file_name().unwrap().to_string_lossy().starts_with("tt-test-data-"));
+        let dir = root.join("geodata");
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["geoip.dat", "geosite.dat"] {
+            let path = dir.join(name);
+            if path.exists() { std::fs::remove_file(path).unwrap(); }
+        }
+        std::fs::write(exclusions_file_path(), "previous-policy").unwrap();
+        dir
+    }
+
+    #[test]
+    fn routing_readiness_loads_saved_lists_before_the_routing_tab_is_opened() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = readiness_fixture();
+        // One real protobuf GeoIP category with the documentation-only 203.0.113.0/24 subnet.
+        std::fs::write(dir.join("geoip.dat"), b"\x0a\x0e\x0a\x02ru\x12\x08\x0a\x04\xcb\x00\x71\x00\x10\x18").unwrap();
+        let state = Arc::new(GeoDataState::new());
+        let generation = std::sync::atomic::AtomicU64::new(1);
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(
+            prepare_and_apply_for_connect("", &readiness_rules(), &state, None, &generation, 1)
+        );
+        assert!(result.unwrap(), "saved lists must work without a download or a mounted UI");
+        assert!(std::fs::read_to_string(exclusions_file_path()).unwrap().contains("203.0.113.0/24"));
+        std::fs::remove_file(dir.join("geoip.dat")).unwrap();
+    }
+
+    #[test]
+    fn routing_readiness_waits_for_an_existing_download_then_applies_all_rules() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        readiness_fixture();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let state = Arc::new(GeoDataState::new());
+            let update = state.update_in_flight.lock().await;
+            let rules = readiness_rules();
+            let generation = std::sync::atomic::AtomicU64::new(1);
+            let mut preparing = Box::pin(prepare_and_apply_for_connect("", &rules, &state, None, &generation, 1));
+            assert!(tokio::time::timeout(std::time::Duration::from_millis(25), &mut preparing).await.is_err());
+            assert_eq!(std::fs::read_to_string(exclusions_file_path()).unwrap(), "previous-policy");
+            *state.geoip_data.lock().unwrap() = readiness_state().geoip_data.lock().unwrap().clone();
+            drop(update);
+            assert!(tokio::time::timeout(std::time::Duration::from_secs(2), preparing).await.unwrap().unwrap());
+            assert!(std::fs::read_to_string(exclusions_file_path()).unwrap().contains("203.0.113.0/24"));
+        });
+    }
+
+    #[test]
+    fn routing_readiness_cancel_during_a_download_never_applies_or_resumes_the_connection() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        readiness_fixture();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let state = Arc::new(GeoDataState::new());
+            let update = state.update_in_flight.lock().await;
+            let rules = readiness_rules();
+            let generation = std::sync::atomic::AtomicU64::new(1);
+            let mut preparing = Box::pin(prepare_and_apply_for_connect("", &rules, &state, None, &generation, 1));
+            assert!(tokio::time::timeout(std::time::Duration::from_millis(25), &mut preparing).await.is_err());
+            generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert!(!tokio::time::timeout(std::time::Duration::from_secs(1), preparing).await.unwrap().unwrap());
+            *state.geoip_data.lock().unwrap() = readiness_state().geoip_data.lock().unwrap().clone();
+            drop(update);
+            let _completed = tokio::time::timeout(std::time::Duration::from_secs(1), state.update_in_flight.lock()).await.unwrap();
+            assert_eq!(std::fs::read_to_string(exclusions_file_path()).unwrap(), "previous-policy");
+        });
+    }
+
+    #[test]
+    fn routing_readiness_uses_available_lists_without_waiting_for_an_optional_update() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        readiness_fixture();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let state = readiness_state();
+            let _update = state.update_in_flight.lock().await;
+            let generation = std::sync::atomic::AtomicU64::new(1);
+            assert!(tokio::time::timeout(std::time::Duration::from_secs(1),
+                prepare_and_apply_for_connect("", &readiness_rules(), &state, None, &generation, 1)
+            ).await.unwrap().unwrap());
+        });
+    }
+
+    #[test]
+    fn routing_readiness_cancel_wins_over_a_simultaneous_download_failure() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        readiness_fixture();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let state = Arc::new(GeoDataState::new());
+            let update = state.update_in_flight.lock().await;
+            let rules = readiness_rules();
+            let generation = std::sync::atomic::AtomicU64::new(1);
+            let mut preparing = Box::pin(prepare_and_apply_for_connect("", &rules, &state, None, &generation, 1));
+            assert!(tokio::time::timeout(std::time::Duration::from_millis(25), &mut preparing).await.is_err());
+            generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            drop(update);
+            // The unavailable-data result can arrive before the cancellation poll wakes up.
+            assert!(!tokio::time::timeout(std::time::Duration::from_secs(1), preparing).await.unwrap().unwrap());
+            assert_eq!(std::fs::read_to_string(exclusions_file_path()).unwrap(), "previous-policy");
+        });
+    }
+
+    #[test]
+    fn routing_readiness_unavailable_lists_preserve_the_previous_policy() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        readiness_fixture();
+        let state = Arc::new(GeoDataState::new());
+        let generation = std::sync::atomic::AtomicU64::new(1);
+        let error = tokio::runtime::Runtime::new().unwrap().block_on(
+            prepare_and_apply_for_connect("", &readiness_rules(), &state, None, &generation, 1)
+        ).unwrap_err();
+        assert_eq!(error.reason, crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON);
+        assert_eq!(std::fs::read_to_string(exclusions_file_path()).unwrap(), "previous-policy");
+    }
+
+    #[test]
+    fn routing_readiness_invalid_categories_are_not_misreported_as_a_download() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        readiness_fixture();
+        let state = readiness_state();
+        let generation = std::sync::atomic::AtomicU64::new(1);
+        let rules = RoutingRules {
+            direct: vec![f4_entry("geoip", "geoip:not-a-real-category")],
+            ..RoutingRules::default()
+        };
+        let error = tokio::runtime::Runtime::new().unwrap().block_on(
+            prepare_and_apply_for_connect("", &rules, &state, None, &generation, 1)
+        ).unwrap_err();
+        assert_eq!(error.reason, crate::lifecycle::ROUTING_RULES_APPLY_FAILED_REASON);
+        assert_eq!(std::fs::read_to_string(exclusions_file_path()).unwrap(), "previous-policy");
+    }
+
+    #[test]
+    fn routing_readiness_requires_group_lists_and_reuses_a_ready_cache() {
+        let _guard = DATA_DIR_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        readiness_fixture();
+        let group = format!("readiness_{}", Uuid::new_v4().simple());
+        let path = group_cache_path_pub(&group);
+        let rules = RoutingRules {
+            direct: vec![f4_entry("iplist_group", &format!("iplist_group:{group}"))],
+            ..RoutingRules::default()
+        };
+        let state = Arc::new(GeoDataState::new());
+        let generation = std::sync::atomic::AtomicU64::new(1);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let error = runtime.block_on(prepare_and_apply_for_connect("", &rules, &state, None, &generation, 1)).unwrap_err();
+        assert_eq!(error.reason, crate::lifecycle::ROUTING_DATA_UNAVAILABLE_REASON);
+        assert_eq!(std::fs::read_to_string(exclusions_file_path()).unwrap(), "previous-policy");
+        std::fs::write(&path, r#"["example.test"]"#).unwrap();
+        assert!(runtime.block_on(prepare_and_apply_for_connect("", &rules, &state, None, &generation, 1)).unwrap());
+        let applied = std::fs::read_to_string(exclusions_file_path()).unwrap();
+        assert!(applied.contains("example.test") && applied.contains("*.example.test"));
+        std::fs::remove_file(path).unwrap();
+    }
 
     fn f4_entry(entry_type: &str, value: &str) -> RuleEntry {
         RuleEntry {

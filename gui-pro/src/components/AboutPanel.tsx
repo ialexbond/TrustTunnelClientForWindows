@@ -55,7 +55,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   // equal tauri.conf.json's "version" — AboutPanel.test.tsx enforces it by reading the config file
   // directly. Importing the config into the bundle itself was not done because src-tauri sits
   // outside the frontend tsconfig (kept minimal in a release phase); bump both by hand together.
-  const version = updateInfo.currentVersion || "3.1.0";
+  const version = updateInfo.currentVersion || "3.2.0";
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">

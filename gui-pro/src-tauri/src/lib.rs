@@ -32,6 +32,7 @@ mod lifecycle;
 mod logging;
 pub mod notify;
 mod processes;
+mod routing_policy;
 mod routing_rules;
 mod net_egress;
 mod sidecar;

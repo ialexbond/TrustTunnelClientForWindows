@@ -112,26 +112,8 @@ pub async fn health_check(host: String, port: u16) -> serde_json::Value {
 /// Returns -1 if unreachable.
 #[tauri::command]
 pub async fn ping_endpoint(host: String, port: u16) -> i64 {
-    use std::net::ToSocketAddrs;
-    use std::time::Instant;
-
-    let addr_str = format!("{host}:{port}");
-    let addr = match addr_str.to_socket_addrs() {
-        Ok(mut addrs) => match addrs.next() {
-            Some(a) => a,
-            None => return -1,
-        },
-        Err(_) => return -1,
-    };
-
-    let start = Instant::now();
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::net::TcpStream::connect(addr),
-    )
-    .await
-    {
-        Ok(Ok(_stream)) => start.elapsed().as_millis() as i64,
+    match super::ping::probe_endpoint_latency(&host, port, 5000).await {
+        super::ping::PingResult::Ok { ms } => ms as i64,
         _ => -1,
     }
 }

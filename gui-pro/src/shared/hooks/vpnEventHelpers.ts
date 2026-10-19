@@ -47,6 +47,8 @@ export const REASON_CODE_I18N: Record<string, string> = {
   // The serde error is deliberately NOT interpolated: it is English, unbounded, and can quote the
   // file's own bytes. The token is the whole payload (D-09/D-29).
   "routing-rules-unreadable": "errors.routing_rules_unreadable",
+  "routing-rules-apply-failed": "errors.routing_rules_apply_failed",
+  "routing-data-unavailable": "errors.routing_data_unavailable",
   // 30.1 regression defect 1: the CA-2 path-confinement guard refused the connect because the
   // `.toml` is not inside the folder the app keeps its configs in. The backend never contacted
   // the server, so the generic «Не удалось выполнить подключение к серверу» this used to fall
@@ -56,9 +58,9 @@ export const REASON_CODE_I18N: Record<string, string> = {
   "config-outside-data-dir": "errors.config_outside_data_dir",
   // AUD-08 / D-04: the core's own precise reason for a failed FIRST connect, parsed by
   // `sidecar::core_exit_error_reason` from the core's `Error: <code> <text>` log line
-  // (D-29: only the fixed code crosses this boundary, never the `text`). Six of the
-  // eleven `VpnErrorCode` values (`core/include/vpn/vpn.h`) get their own sentence;
-  // every other code falls back to `sidecar-exit` above. None of these six render
+  // (D-29: only the fixed code crosses this boundary, never the `text`). Known
+  // paired `VpnErrorCode` values (`core/include/vpn/vpn.h`) get their own sentence;
+  // every other code falls back to `sidecar-exit` above. None of these failures render
   // «отключён» — a never-connected failure is always an Error, never a Disconnected.
   "core-server-unreachable": "errors.core_server_unreachable",
   // Reuses the existing auth text (`errors.auth_required`) — the same failure the user
@@ -66,6 +68,8 @@ export const REASON_CODE_I18N: Record<string, string> = {
   // match or by this later, exit-line-based parse.
   "core-auth-failed": "errors.auth_required",
   "core-certificate-failed": "errors.core_certificate_failed",
+  "core-certificate-not-yet-valid": "errors.core_certificate_not_yet_valid",
+  "core-version-mismatch": "errors.core_version_mismatch",
   "core-invalid-settings": "errors.core_invalid_settings",
   "core-address-in-use": "errors.core_address_in_use",
   "core-fatal-connectivity": "errors.core_fatal_connectivity",

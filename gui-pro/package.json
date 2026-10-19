@@ -1,7 +1,7 @@
 {
   "name": "trusttunnel-gui",
   "private": true,
-  "version": "3.1.0",
+  "version": "3.2.0",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "core:check": "node ../scripts/core-compatibility-gate.cjs",
+    "core:test": "node ../scripts/core-compatibility-gate.test.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
     "test": "vitest run",
@@ -29,7 +31,7 @@
     "checksum:test": "node ../scripts/checksum-gate.test.cjs",
     "label:check": "node ../scripts/build-label-gate.cjs --dist dist --exe src-tauri/target/release/trusttunnel.exe",
     "label:test": "node ../scripts/build-label-gate.test.cjs",
-    "prerelease": "npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run pii:test && npm run pii:check && npm run artifact:test && npm run checksum:test && npm run label:test && npm run rust:check && npm run label:check && npm run build && npm run checksum:check",
+    "prerelease": "npm run core:test && npm run core:check && npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run pii:test && npm run pii:check && npm run artifact:test && npm run checksum:test && npm run label:test && npm run rust:check && npm run label:check && npm run build && npm run checksum:check",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
@@ -49,7 +51,7 @@
     "react-i18next": "^16.6.1",
     "react-markdown": "^9.1.0",
     "recharts": "^3.8.0",
-    "smol-toml": "^1.6.1",
+    "smol-toml": "1.9.0",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {

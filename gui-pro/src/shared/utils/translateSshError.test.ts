@@ -35,6 +35,12 @@ describe("translateSshError", () => {
     );
   });
 
+  it("explains an invalid exported certificate without exposing returned server data", () => {
+    expect(translateSshError("SSH_CERT_INVALID|private server output", mockT)).toBe(
+      "sshErrors.certInvalid",
+    );
+  });
+
   // ─── Authentication ───
   it("translates SSH_AUTH_FAILED without params", () => {
     expect(translateSshError("SSH_AUTH_FAILED", mockT)).toBe("sshErrors.authFailed");

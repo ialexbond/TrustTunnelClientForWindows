@@ -158,7 +158,7 @@ public:
 static vpn_client::Event g_last_raised_vpn_event;
 
 static int cert_verify_handler(
-        const char * /*host_name*/, const sockaddr * /*host_ip*/, const CertVerifyCtx & /*ctx*/, void * /*arg*/) {
+        const char * /*host_name*/, const sockaddr * /*host_ip*/, CertVerifyCtx & /*ctx*/, void * /*arg*/) {
     return 1;
 }
 
@@ -255,8 +255,42 @@ TEST_F(TunnelTest, IPv6Unavailable) {
     tun.complete_connect_request(client_id, action);
     run_event_loop_once();
     ASSERT_EQ(redirect_upstream->connections.size(), 0);
+    ASSERT_EQ(bypass_upstream->connections.size(), 0);
     ASSERT_NE(client_listener->connections.count(client_id), 0);
     ASSERT_EQ(client_listener->connections[client_id].result, CCR_UNREACH);
+}
+
+TEST_F(TunnelTest, IPv6AvailableUsesVpnWithoutBypass) {
+    src = SocketAddress("[fd01::2]:1000");
+    dst = SocketAddress("[2001:db8::1]:443");
+    vpn.endpoint_upstream->update_ip_availability(IpVersionSet{}.set());
+    size_t client_id = vpn.listener_conn_id_generator.get();
+
+    ASSERT_NO_FATAL_FAILURE(raise_client_connection(client_id));
+    auto action = tun.finalize_connect_action({client_id, VPN_CA_DEFAULT, "app.exe", 1});
+    ASSERT_NE(action, VPN_CA_FORCE_BYPASS);
+    tun.complete_connect_request(client_id, action);
+    run_event_loop_once();
+
+    ASSERT_EQ(redirect_upstream->connections.size(), 1);
+    ASSERT_TRUE(bypass_upstream->connections.empty());
+}
+
+TEST_F(TunnelTest, ExplicitDirectIPv6DoesNotRequireEndpointIPv6) {
+    src = SocketAddress("[fd01::2]:1000");
+    dst = SocketAddress("[2001:db8::1]:443");
+    vpn.endpoint_upstream->update_ip_availability(IpVersionSet{1 << IPV4});
+    vpn.bypass_upstream->update_ip_availability(IpVersionSet{}.set());
+    size_t client_id = vpn.listener_conn_id_generator.get();
+
+    ASSERT_NO_FATAL_FAILURE(raise_client_connection(client_id));
+    auto action = tun.finalize_connect_action({client_id, VPN_CA_FORCE_BYPASS, "app.exe", 1});
+    ASSERT_EQ(action, VPN_CA_FORCE_BYPASS);
+    tun.complete_connect_request(client_id, action);
+    run_event_loop_once();
+
+    ASSERT_TRUE(redirect_upstream->connections.empty());
+    ASSERT_EQ(bypass_upstream->connections.size(), 1);
 }
 
 TEST_F(TunnelTest, LocalhostConnection) {

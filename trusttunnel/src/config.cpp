@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <common/logger.h>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <sstream>
@@ -11,7 +13,9 @@
 #include <magic_enum/magic_enum.hpp>
 #include <openssl/err.h>
 #include <openssl/pem.h>
+#include <openssl/x509v3.h>
 
+#include "common/cidr_range.h"
 #include "net/tls.h"
 #include "utils.h"
 #include "vpn/trusttunnel/config.h"
@@ -26,6 +30,40 @@ using namespace ag; // NOLINT(google-build-using-namespace)
 
 static constexpr uint32_t DEFAULT_MTU = 1350;
 static const Logger g_logger("TRUSTTUNNEL_CLIENT"); // NOLINT(readability-identifier-naming)
+
+TrustTunnelConfig::TunListener TrustTunnelConfig::TunListener::with_windows_ipv6_protection(
+        bool killswitch_enabled) const {
+    TunListener effective = *this;
+    if (!killswitch_enabled || std::ranges::find(included_routes, "0.0.0.0/0") == included_routes.end()
+            || std::ranges::any_of(included_routes, [](const std::string &route) {
+                   return route.find(':') != std::string::npos;
+               })) {
+        return effective;
+    }
+
+    // Do not use ::/0: the shared route setup intentionally narrows that spelling to 2000::/3.
+    // The two halves also capture NAT64 and future globally routable prefixes. Endpoint IPv6 availability
+    // is checked by the existing tunnel policy; an unavailable VPN destination is rejected, never bypassed.
+    effective.included_routes.emplace_back("::/1");
+    effective.included_routes.emplace_back("8000::/1");
+
+    for (const char *local : {"::1/128", "fe80::/10", "ff00::/8", "fc00::/7"}) {
+        const CidrRange local_range{local};
+        bool already_excluded = std::ranges::any_of(excluded_routes, [&local_range](const std::string &route) {
+            // CidrRange expects a numeric prefix; avoid turning a malformed user route into an exception.
+            auto parts = utils::split2_by(route, '/');
+            if (!parts[1].empty() && !utils::to_integer<size_t>(parts[1]).has_value()) {
+                return false;
+            }
+            const CidrRange excluded{route};
+            return excluded.valid() && excluded.contains(local_range);
+        });
+        if (!already_excluded) {
+            effective.excluded_routes.emplace_back(local);
+        }
+    }
+    return effective;
+}
 
 static const std::unordered_map<std::string_view, VpnUpstreamProtocol> UPSTREAM_PROTO_MAP = {
         {"auto", VPN_UP_AUTO},
@@ -56,6 +94,12 @@ static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view
         warnlog(g_logger, "Failed to create CA store");
         return nullptr;
     }
+    // Explicit leaf/intermediate anchors may terminate a partial chain. Normal
+    // validity-date checks and the transport's separate identity checks remain.
+    if (X509_STORE_set_flags(store.get(), X509_V_FLAG_PARTIAL_CHAIN) != 1) {
+        warnlog(g_logger, "Failed to configure custom certificate trust anchors");
+        return nullptr;
+    }
 
     bool any_loaded = false;
     for (;;) {
@@ -68,6 +112,12 @@ static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view
             break;
         }
 
+        // BoringSSL skips the untrusted-chain purpose loop for a trusted leaf.
+        const bool is_ca = X509_check_ca(cert.get()) != 0;
+        if (X509_check_purpose(cert.get(), X509_PURPOSE_SSL_SERVER, is_ca) != 1) {
+            warnlog(g_logger, "Configured certificate is not suitable for TLS server authentication");
+            return nullptr;
+        }
         if (X509_STORE_add_cert(store.get(), cert.get()) != 1) {
             warnlog(g_logger, "Failed to add to the CA store");
         }
@@ -125,6 +175,10 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
     if (std::optional x = config["certificate"].value<std::string>();
             !location.skip_verification && x.has_value() && !x->empty()) {
         location.ca_store = load_certificate(*x);
+        if (!location.ca_store) {
+            errlog(g_logger, "Configured endpoint certificate could not be loaded");
+            return std::nullopt;
+        }
     }
 
     if (auto upstream_protocol = config["upstream_protocol"].value<std::string_view>();
@@ -310,48 +364,42 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
         }
     }
 
-    // Load exclusions from external file (avoids TOML size limits for large domain/IP lists)
-    if (auto ef = config["exclusions_file"].value<std::string>(); ef.has_value() && !ef->empty()) {
-        if (FILE *f = std::fopen(ef->c_str(), "r"); f != nullptr) {
-            std::fseek(f, 0, SEEK_END);
-            long sz = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
-            if (sz > 0) {
-                std::string content(static_cast<size_t>(sz), '\0');
-                std::fread(content.data(), 1, static_cast<size_t>(sz), f);
-                result.exclusions += content;
-            }
-            std::fclose(f);
-            infolog(g_logger, "Loaded exclusions from file: {} ({} bytes)", *ef, sz > 0 ? sz : 0);
-        } else {
-            warnlog(g_logger, "Failed to open exclusions_file: {}", *ef);
+    // A configured but unreadable rule file is a policy failure, not an empty policy.
+    auto load_file_content = [](const toml::table &cfg, const char *key) -> std::optional<std::string> {
+        auto path = cfg[key].value<std::string>();
+        if (!path || path->empty()) {
+            return std::string{};
         }
-    }
-
-    // Load process filter files (newline-separated process names)
-    auto load_file_content = [](const toml::table &cfg, const char *key) -> std::string {
-        if (auto path = cfg[key].value<std::string>(); path.has_value() && !path->empty()) {
-            if (FILE *f = std::fopen(path->c_str(), "r"); f != nullptr) {
-                std::fseek(f, 0, SEEK_END);
-                long sz = std::ftell(f);
-                std::fseek(f, 0, SEEK_SET);
-                std::string content;
-                if (sz > 0) {
-                    content.resize(static_cast<size_t>(sz), '\0');
-                    std::fread(content.data(), 1, static_cast<size_t>(sz), f);
-                }
-                std::fclose(f);
-                infolog(g_logger, "Loaded process filter from {}: {} ({} bytes)", key, *path, sz > 0 ? sz : 0);
-                return content;
-            } else {
-                warnlog(g_logger, "Failed to open {}: {}", key, *path);
-            }
+        std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path->c_str(), "rb"), &std::fclose);
+        if (!file || std::fseek(file.get(), 0, SEEK_END) != 0) {
+            errlog(g_logger, "Failed to read configured routing file: {}", key);
+            return std::nullopt;
         }
-        return {};
+        long size = std::ftell(file.get());
+        if (size < 0 || std::fseek(file.get(), 0, SEEK_SET) != 0) {
+            errlog(g_logger, "Failed to seek configured routing file: {}", key);
+            return std::nullopt;
+        }
+        std::string content(static_cast<size_t>(size), '\0');
+        if ((size > 0 && std::fread(content.data(), 1, content.size(), file.get()) != content.size())
+                || std::ferror(file.get())) {
+            errlog(g_logger, "Incomplete configured routing file: {}", key);
+            return std::nullopt;
+        }
+        infolog(g_logger, "Loaded routing file {} ({} bytes)", key, content.size());
+        return content;
     };
-    result.process_direct = load_file_content(config, "process_direct_file");
-    result.process_proxy = load_file_content(config, "process_proxy_file");
-    result.process_block = load_file_content(config, "process_block_file");
+    auto exclusions = load_file_content(config, "exclusions_file");
+    auto direct = load_file_content(config, "process_direct_file");
+    auto proxy = load_file_content(config, "process_proxy_file");
+    auto block = load_file_content(config, "process_block_file");
+    if (!exclusions || !direct || !proxy || !block) {
+        return std::nullopt;
+    }
+    result.exclusions += *exclusions;
+    result.process_direct = std::move(*direct);
+    result.process_proxy = std::move(*proxy);
+    result.process_block = std::move(*block);
 
     if (const auto *x = config["dns_upstreams"].as_array(); x != nullptr) {
         result.legacy_dns_upstreams.reserve(x->size());

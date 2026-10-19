@@ -102,6 +102,24 @@ describe("RoutingBlockCard", () => {
     expect(screen.getByText("Напрямую")).toBeInTheDocument();
   });
 
+  it("provides a visible themed scrollbar without jumping on passive load or removal", () => {
+    const props = {
+      action: "direct" as const,
+      geodataStatus: defaultGeoStatus,
+      geodataCategories: defaultGeoCategories,
+      iplistGroups: [], onAdd, onRemove, onMove, onEnsureGroupCache: vi.fn(),
+    };
+    const { rerender } = render(<RoutingBlockCard {...props} entries={sampleEntries} />);
+    const list = screen.getByRole("region", { name: "Напрямую" });
+    expect(list).toHaveClass("scroll-visible", "routing-list-scrollbar");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 900 });
+    list.scrollTop = 75;
+    rerender(<RoutingBlockCard {...props} entries={[...sampleEntries, { id: "loaded", type: "domain", value: "loaded.example.com" }]} />);
+    expect(list.scrollTop).toBe(75);
+    rerender(<RoutingBlockCard {...props} entries={sampleEntries.slice(1)} />);
+    expect(list.scrollTop).toBe(75);
+  });
+
   it("renders proxy card with correct title", () => {
     renderCard({ action: "proxy" });
     expect(screen.getByText("Через VPN")).toBeInTheDocument();

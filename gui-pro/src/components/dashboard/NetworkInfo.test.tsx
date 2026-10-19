@@ -19,17 +19,23 @@ describe("NetworkInfo", () => {
     expect(screen.getByText("Сеть")).toBeInTheDocument();
   });
 
-  it("displays MTU value from config", () => {
+  it.each([1280, 1350, 1400])("displays the saved MTU %i unchanged", (mtu) => {
     const config = {
       endpoint: { upstream_protocol: "quic", anti_dpi: true, has_ipv6: false },
-      listener: { tun: { mtu_size: 1400 } },
+      listener: { tun: { mtu_size: mtu } },
       killswitch_enabled: true,
       post_quantum_group_enabled: false,
       dns_upstreams: [],
     } as unknown as ClientConfig;
 
     render(<NetworkInfo clientConfig={config} />);
-    expect(screen.getByText("1400")).toBeInTheDocument();
+    expect(screen.getByText(String(mtu))).toBeInTheDocument();
+  });
+
+  it("shows the 1350 default when MTU is absent", () => {
+    const config = { endpoint: {}, listener: { tun: {} } } as unknown as ClientConfig;
+    render(<NetworkInfo clientConfig={config} />);
+    expect(screen.getByText("1350")).toBeInTheDocument();
   });
 
   it("displays kill switch status ON", () => {

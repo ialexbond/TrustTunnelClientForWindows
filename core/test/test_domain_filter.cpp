@@ -1,9 +1,137 @@
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <sstream>
 
 #include "vpn/internal/domain_filter.h"
 #include "vpn/utils.h"
 
 using namespace ag;
+
+TEST(DefaultOverrideTest, DomainWinsOverBroadDomainExclusion) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "*.example.com !vpn.example.com"));
+    EXPECT_NE(filter.match_domain("vpn.example.com"), DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_domain("direct.example.com"), DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, KnownDomainWinsOverGeoipExclusion) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "192.0.2.0/24 !vpn.example.com"));
+    SockAddrTag tag{SocketAddress("192.0.2.53:443"), "browser.exe"};
+    filter.add_resolved_tag(tag, "vpn.example.com");
+    EXPECT_NE(filter.match_tag(tag).status, DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, AddressWinsOverBroaderCidr) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "192.0.2.0/24 !192.0.2.53"));
+    EXPECT_NE(filter.match_tag({SocketAddress("192.0.2.53:443"), ""}).status, DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_tag({SocketAddress("192.0.2.54:443"), ""}).status, DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, WildcardAndApexAreIndependent) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "*.example.com !*.vpn.example.com"));
+    EXPECT_NE(filter.match_domain("child.vpn.example.com"), DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_domain("vpn.example.com"), DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, UpdatingRulesRemovesPreviousOverride) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "example.com !example.com"));
+    EXPECT_NE(filter.match_domain("example.com"), DFMS_EXCLUSION);
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "example.com"));
+    EXPECT_EQ(filter.match_domain("example.com"), DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, UnknownNameDefersCountryBypassUntilInspection) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "192.0.2.0/24 !vpn.example.com"));
+    SockAddrTag tag{SocketAddress("192.0.2.53:443"), "browser.exe"};
+    EXPECT_EQ(filter.match_tag(tag).status, DFMS_SUSPECT_EXCLUSION);
+    filter.add_resolved_tag(tag, "unlisted.example.com");
+    EXPECT_EQ(filter.match_tag(tag).status, DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, DnsPolicyAndSelectiveModeUseTheDefaultOverride) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_SELECTIVE, "*.example.com !direct.example.com"));
+    EXPECT_EQ(filter.match_domain("direct.example.com"), DFMS_DEFAULT_OVERRIDE);
+    EXPECT_EQ(filter.match_domain("vpn.example.com"), DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, RepeatedNegationIsMalformedAndCannotRecurse) {
+    EXPECT_EQ(DomainFilter::validate_entry("!!example.com"), DFVS_MALFORMED);
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "example.com !!example.com"));
+    EXPECT_EQ(filter.match_domain("example.com"), DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, DnsNamesIgnoreAsciiCase) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "EXAMPLE.COM !VPN.EXAMPLE.COM !WWW.OTHER.EXAMPLE.ORG"));
+    EXPECT_EQ(filter.match_domain("Example.Com"), DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_domain("vpn.example.com"), DFMS_DEFAULT_OVERRIDE);
+    EXPECT_EQ(filter.match_domain("other.example.org"), DFMS_DEFAULT_OVERRIDE);
+}
+
+TEST(DefaultOverrideTest, RustCompilerFixtureRoutesBothExceptionsAndOrdinaryTraffic) {
+    auto path = std::filesystem::path(__FILE__).parent_path() / "fixtures" / "routing_default_overrides.txt";
+    std::ifstream file(path);
+    ASSERT_TRUE(file.is_open());
+    std::stringstream content;
+    content << file.rdbuf();
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, content.str()));
+    SockAddrTag vpn{SocketAddress("192.0.2.53:443"), "browser.exe"};
+    SockAddrTag direct{SocketAddress("192.0.2.54:443"), "browser.exe"};
+    filter.add_resolved_tag(vpn, "child.vpn.example.com");
+    filter.add_resolved_tag(direct, "ordinary.example.com");
+    EXPECT_EQ(filter.match_tag(vpn).status, DFMS_DEFAULT_OVERRIDE);
+    EXPECT_EQ(filter.match_tag(direct).status, DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_tag({SocketAddress("198.51.100.1:443"), "browser.exe"}).status, DFMS_DEFAULT);
+    EXPECT_EQ(filter.match_domain("direct.example.com"), DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, ExplicitDirectBeatsVpnGroupAndNarrowerUserDomainWins) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL,
+            "*.example.com !*.example.com +direct.example.com ^*.private.example.com +public.private.example.com"));
+    EXPECT_EQ(filter.match_domain("direct.example.com"), DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_domain("child.private.example.com"), DFMS_DEFAULT_OVERRIDE);
+    EXPECT_EQ(filter.match_domain("public.private.example.com"), DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, ExplicitDomainBeatsGroupIpInBothDirections) {
+    DomainFilter filter;
+    SockAddrTag tag{SocketAddress("192.0.2.53:443"), "browser.exe"};
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "!192.0.2.0/24 +direct.example.com"));
+    filter.add_resolved_tag(tag, "direct.example.com");
+    EXPECT_EQ(filter.match_tag(tag).status, DFMS_EXCLUSION);
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "+192.0.2.0/24 ^vpn.example.com"));
+    filter.add_resolved_tag(tag, "vpn.example.com");
+    EXPECT_EQ(filter.match_tag(tag).status, DFMS_DEFAULT_OVERRIDE);
+}
+
+TEST(DefaultOverrideTest, ExplicitDirectAddressBeatsVpnGroupsWithoutAName) {
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "+192.0.2.53 !*.example.com"));
+    EXPECT_EQ(filter.match_tag({SocketAddress("192.0.2.53:443"), "browser.exe"}).status, DFMS_EXCLUSION);
+}
+
+TEST(DefaultOverrideTest, GeositeTldFixtureCoversTheEntireAsciiAndIdnZones) {
+    auto path = std::filesystem::path(__FILE__).parent_path() / "fixtures" / "geosite_tld_suffixes.txt";
+    std::ifstream file(path);
+    ASSERT_TRUE(file.is_open());
+    std::stringstream content;
+    content << file.rdbuf();
+    DomainFilter filter;
+    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, content.str()));
+    EXPECT_EQ(filter.match_domain("example.ru"), DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_domain("xn--e1afmkfd.xn--p1ai"), DFMS_EXCLUSION);
+    EXPECT_EQ(filter.match_domain("example.com"), DFMS_DEFAULT);
+}
 
 // Settings update should purge previous entries
 TEST(MatchTest, UpdateSettings) {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -64,6 +65,36 @@ describe("ProcessFilterSection", () => {
   it("renders without crashing", () => {
     renderSection();
     expect(screen.getByText("Фильтрация по процессам")).toBeInTheDocument();
+  });
+
+  it("reveals a confirmed batch of programs and preserves position on removal", async () => {
+    function Harness() {
+      const [names, setNames] = useState(defaultProcesses);
+      return <ProcessFilterSection
+        processMode="exclude" processes={names}
+        processList={[{ name: "first-new.exe" }, { name: "second-new.exe" }]}
+        processListLoading={false} onModeChange={onModeChange}
+        onAdd={(name) => setNames((prev) => [...prev, name])}
+        onRemove={(name) => setNames((prev) => prev.filter((item) => item !== name))}
+        onLoadProcesses={onLoadProcesses}
+      />;
+    }
+    render(<Harness />);
+    const list = screen.getByRole("region", { name: "Фильтрация по процессам" });
+    expect(list).toHaveClass("scroll-visible", "routing-list-scrollbar", "max-h-[240px]");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 1200 });
+    list.scrollTop = 45;
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Добавить процесс"));
+    await user.click(await screen.findByRole("checkbox", { name: "first-new.exe" }));
+    await user.click(screen.getByRole("checkbox", { name: "second-new.exe" }));
+    await user.click(screen.getByText(/Добавить выбранные/));
+    expect(list.scrollTop).toBe(1200);
+    expect(list).toHaveTextContent("first-new.exe");
+    expect(list).toHaveTextContent("second-new.exe");
+    list.scrollTop = 80;
+    await user.click(within(list).getAllByRole("button", { name: "Удалить процесс" })[0]);
+    expect(list.scrollTop).toBe(80);
   });
 
   it("shows description", () => {
@@ -274,7 +305,7 @@ describe("ProcessFilterSection", () => {
 
   it("shows only mode description when processMode is only", () => {
     renderSection({ processMode: "only" });
-    expect(screen.getByText(/Только выбранные процессы будут использовать VPN/)).toBeInTheDocument();
+    expect(screen.getByText(/Выбранные программы всегда используют VPN\. Остальные следуют правилам сайтов и IP-адресов\./)).toBeInTheDocument();
   });
 
   it("removes second process when its remove button is clicked", () => {

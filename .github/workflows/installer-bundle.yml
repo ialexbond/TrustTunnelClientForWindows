@@ -149,7 +149,14 @@ jobs:
         # Downloads the NSIS toolchain into %LOCALAPPDATA%\tauri on first use. `bundle.windows.
         # signCommand` invokes scripts/sign-windows-artifact.cjs, which is a stated no-op with no
         # certificate configured — that is the shipped behaviour and this job does not change it.
-        run: npx tauri build --bundles nsis
+        shell: pwsh
+        # Only this non-distributed rendering fixture overrides the production core gates.
+        # Real builds must verify the matching core before building and bundling.
+        run: |
+          $fixtureConfig = Join-Path $env:RUNNER_TEMP 'trusttunnel-installer-fixture.json'
+          @{ build = @{ beforeBuildCommand = 'npm run build'; beforeBundleCommand = '' } } |
+            ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $fixtureConfig -Encoding utf8
+          npx tauri build --bundles nsis --config $fixtureConfig
 
       - name: Measure the emitted script (nsis-text-gate --post-build)
         working-directory: gui-pro

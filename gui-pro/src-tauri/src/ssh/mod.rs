@@ -873,10 +873,10 @@ post_quantum_group_enabled = true
 {endpoint_section}
 
 [listener.tun]
-mtu_size = 1280
+mtu_size = 1350
 change_system_dns = true
-included_routes = ["0.0.0.0/0"]
-excluded_routes = []
+included_routes = ["0.0.0.0/0", "::/1", "8000::/1"] # pii-gate-allow: Required IPv6 half-space route, not a server address.
+excluded_routes = ["::1/128", "fe80::/10", "ff00::/8", "fc00::/7"]
 "#
     );
     config.replace("anti_dpi = false", "anti_dpi = true")
@@ -1398,6 +1398,47 @@ pub(crate) async fn exec_command_cancellable(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_client_config_uses_upstream_mtu_default() {
+        let config = build_client_config(
+            "hostname = \"vpn.example.com\"\naddresses = [\"192.0.2.1:443\"]\nanti_dpi = false",
+            "Setup Wizard",
+        );
+        let parsed: toml::Value = toml::from_str(&config).expect("generated config must parse");
+
+        assert_eq!(parsed["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
+        assert_eq!(parsed["endpoint"]["hostname"].as_str(), Some("vpn.example.com"));
+        assert_eq!(parsed["endpoint"]["anti_dpi"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn build_client_config_captures_ipv6_and_keeps_local_control_outside() {
+        let config = build_client_config(
+            "hostname = \"vpn.example.com\"\naddresses = [\"192.0.2.1:443\"]",
+            "Setup Wizard",
+        );
+        let parsed: toml::Value = toml::from_str(&config).expect("generated config must parse");
+        let tun = &parsed["listener"]["tun"];
+
+        assert_eq!(
+            tun["included_routes"].as_array().unwrap(),
+            &vec![
+                toml::Value::String("0.0.0.0/0".into()),
+                toml::Value::String("::/1".into()),
+                toml::Value::String("8000::/1".into()), // pii-gate-allow: Required IPv6 half-space route, not a server address.
+            ]
+        );
+        assert_eq!(
+            tun["excluded_routes"].as_array().unwrap(),
+            &vec![
+                toml::Value::String("::1/128".into()),
+                toml::Value::String("fe80::/10".into()),
+                toml::Value::String("ff00::/8".into()),
+                toml::Value::String("fc00::/7".into()),
+            ]
+        );
+    }
 
     // ── D-05 (phase 32): the data root is NAMED, not derived from the executable ──
 

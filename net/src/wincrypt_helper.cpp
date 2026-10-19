@@ -83,7 +83,7 @@ static void wcrypt_prepare_params(CERT_CHAIN_PARA &chain_para, CERT_STRONG_SIGN_
     chain_para.pStrongSignPara = &strong_sign_params;
 }
 
-static WinCryptValidateError wcrypt_check_policy(PCCERT_CHAIN_CONTEXT chain_context) {
+static WinCryptValidateError wcrypt_check_policy(PCCERT_CHAIN_CONTEXT chain_context, bool ignore_time = false) {
     SSL_EXTRA_CERT_CHAIN_POLICY_PARA extra_policy_para;
     memset(&extra_policy_para, 0, sizeof(extra_policy_para));
     extra_policy_para.cbSize = sizeof(extra_policy_para);
@@ -94,7 +94,7 @@ static WinCryptValidateError wcrypt_check_policy(PCCERT_CHAIN_CONTEXT chain_cont
     CERT_CHAIN_POLICY_PARA policy_para;
     memset(&policy_para, 0, sizeof(policy_para));
     policy_para.cbSize = sizeof(policy_para);
-    policy_para.dwFlags = 0;
+    policy_para.dwFlags = ignore_time ? CERT_CHAIN_POLICY_IGNORE_NOT_TIME_VALID_FLAG : 0;
     policy_para.pvExtraPolicyPara = &extra_policy_para;
 
     CERT_CHAIN_POLICY_STATUS policy_status;
@@ -112,7 +112,26 @@ static WinCryptValidateError wcrypt_check_policy(PCCERT_CHAIN_CONTEXT chain_cont
     return WCRYPT_E_OK;
 }
 
-WinCryptValidateError wcrypt_validate_cert(X509 *leaf, STACK_OF(X509) * chain) {
+static bool wcrypt_chain_is_only_not_yet_valid(PCCERT_CHAIN_CONTEXT chain_context) {
+    if (chain_context->TrustStatus.dwErrorStatus != CERT_TRUST_IS_NOT_TIME_VALID) {
+        return false;
+    }
+    bool future = false;
+    for (DWORD i = 0; i < chain_context->cChain; ++i) {
+        const CERT_SIMPLE_CHAIN *simple_chain = chain_context->rgpChain[i];
+        for (DWORD j = 0; j < simple_chain->cElement; ++j) {
+            const CERT_CHAIN_ELEMENT *element = simple_chain->rgpElement[j];
+            LONG timing = CertVerifyTimeValidity(nullptr, element->pCertContext->pCertInfo);
+            if (timing > 0) {
+                return false;
+            }
+            future |= timing < 0;
+        }
+    }
+    return future && wcrypt_check_policy(chain_context, true) == WCRYPT_E_OK;
+}
+
+WinCryptValidateError wcrypt_validate_cert(X509 *leaf, STACK_OF(X509) * chain, HCERTCHAINENGINE chain_engine) {
     HCERTSTORE store = nullptr;
     const CERT_CONTEXT *primary_cert = nullptr;
     PCCERT_CHAIN_CONTEXT chain_context = nullptr;
@@ -140,7 +159,7 @@ WinCryptValidateError wcrypt_validate_cert(X509 *leaf, STACK_OF(X509) * chain) {
     DWORD chain_flags = CERT_CHAIN_REVOCATION_CHECK_CHAIN | CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
 
     if (!CertGetCertificateChain(
-                nullptr, primary_cert, nullptr, store, &chain_para, chain_flags, nullptr, &chain_context)) {
+                chain_engine, primary_cert, nullptr, store, &chain_para, chain_flags, nullptr, &chain_context)) {
         return WCRYPT_E_CERT_GET_CERTIFICATE_CHAIN;
     }
 
@@ -150,6 +169,9 @@ WinCryptValidateError wcrypt_validate_cert(X509 *leaf, STACK_OF(X509) * chain) {
             ~(CERT_TRUST_REVOCATION_STATUS_UNKNOWN | CERT_TRUST_IS_OFFLINE_REVOCATION);
 
     if (chain_context->TrustStatus.dwErrorStatus != 0) {
+        if (wcrypt_chain_is_only_not_yet_valid(chain_context)) {
+            return WCRYPT_E_CERT_NOT_YET_VALID;
+        }
         return WCRYPT_E_TRUST_STATUS;
     }
 

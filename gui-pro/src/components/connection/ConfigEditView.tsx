@@ -201,7 +201,7 @@ export function ConfigEditView({
   // Derived per-config field values (read straight off the hook's `config`, the parsed
   // .toml). The updateField path mutates the same nested shape the settings sections use.
   const protocol = config?.endpoint?.upstream_protocol || "http2";
-  const mtu = String(config?.listener?.tun?.mtu_size ?? 1280);
+  const mtu = String(config?.listener?.tun?.mtu_size ?? 1350);
   const killSwitch = Boolean(config?.killswitch_enabled);
   const antiDpi = Boolean(config?.endpoint?.anti_dpi);
   const postQuantum = Boolean(config?.post_quantum_group_enabled);

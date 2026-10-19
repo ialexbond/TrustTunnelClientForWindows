@@ -55,3 +55,5 @@ LangString installRefreshingIconCache ${LANG_ENGLISH} "Refreshing icon cache..."
 LangString uninstallDataKept ${LANG_ENGLISH} "Keeping user data"
 LangString uninstallCleaningRegistry ${LANG_ENGLISH} "Cleaning registry entries..."
 LangString uninstallRemovingUpdateFiles ${LANG_ENGLISH} "Removing temporary update files..."
+
+LangString networkGuardCleanupWarning ${LANG_ENGLISH} "Could not remove some obsolete network rules. This operation will continue."

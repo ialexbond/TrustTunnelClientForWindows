@@ -55,3 +55,5 @@ LangString installRefreshingIconCache ${LANG_RUSSIAN} "Обновление кэ
 LangString uninstallDataKept ${LANG_RUSSIAN} "Данные пользователя сохраняются"
 LangString uninstallCleaningRegistry ${LANG_RUSSIAN} "Очистка записей в реестре..."
 LangString uninstallRemovingUpdateFiles ${LANG_RUSSIAN} "Удаление временных файлов обновления..."
+
+LangString networkGuardCleanupWarning ${LANG_RUSSIAN} "Не удалось удалить часть старых сетевых правил. Операция будет продолжена."

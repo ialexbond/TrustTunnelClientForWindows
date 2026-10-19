@@ -186,6 +186,33 @@ input[type="number"] {
   width: 0;
 }
 
+/* Routing lists keep a stable gutter and use the shared, softer scrollbar colors. */
+.routing-list-scrollbar {
+  scrollbar-gutter: stable;
+}
+
+/* Standard Chromium scrollbars apply their own strong hover treatment. Use the
+   scoped WebKit thumb so its resting color stays unchanged and hover stays quiet. */
+@supports selector(::-webkit-scrollbar) {
+  .routing-list-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  .routing-list-scrollbar::-webkit-scrollbar {
+    width: 10px;
+  }
+  .routing-list-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--color-border-hover);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 5px;
+  }
+  .routing-list-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-border-hover) 90%, var(--color-border-active));
+    background-clip: padding-box;
+  }
+}
+
 /* Non-scrolling container */
 .scroll-gutter-match {
   overflow-y: auto;

@@ -1253,7 +1253,28 @@ Var TT_LEGACY_SURVIVOR_SEEN
 !macroend
 
 
+; Cleanup of obsolete product-owned rules is optional maintenance. It must
+; never prevent installation, replacement, or removal of the VPN client.
+; New cores interpret this exact composite as cleanup. Older cores safely
+; handle --version and exit without starting a default VPN configuration.
+!macro TT_CLEANUP_OLD_NETWORK_RULES
+  Push $R0
+  IfFileExists "$INSTDIR\trusttunnel_client.exe" 0 tt_network_cleanup_done
+  nsExec::Exec /TIMEOUT=8000 '"$INSTDIR\trusttunnel_client.exe" --version --network-guard-release'
+  Pop $R0
+  StrCmp $R0 "0" tt_network_cleanup_done
+    DetailPrint "$(networkGuardCleanupWarning)"
+  tt_network_cleanup_done:
+  Pop $R0
+!macroend
+
+
 !macro NSIS_HOOK_POSTINSTALL
+
+  ; New files already exist at their final path. Do not require a successful
+  ; GUI launch to remove protection left by the earlier persistent candidate.
+  ; A cleanup failure is logged and setup continues without a blocking dialog.
+  !insertmacro TT_CLEANUP_OLD_NETWORK_RULES
 
   ; ── THE MARKER DESCRIBES THIS INSTALL, OR IT DOES NOT EXIST ──────────────────
   ;
@@ -1469,8 +1490,10 @@ Var TT_LEGACY_SURVIVOR_SEEN
     FileOpen $R1 "${TT_SIDECAR_PID_FILE}" r
     FileRead $R1 $R0
     FileClose $R1
-    nsExec::Exec 'taskkill /F /PID $R0'
+    nsExec::Exec /TIMEOUT=5000 'taskkill /F /PID $R0'
   Sleep 500
+
+  !insertmacro TT_CLEANUP_OLD_NETWORK_RULES
 
 !macroend
 

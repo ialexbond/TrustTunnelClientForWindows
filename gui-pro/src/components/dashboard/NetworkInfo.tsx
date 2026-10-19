@@ -25,7 +25,7 @@ export function NetworkInfo({ clientConfig }: NetworkInfoProps) {
     );
   }
 
-  const mtu = clientConfig.listener?.tun?.mtu_size || 1280;
+  const mtu = clientConfig.listener?.tun?.mtu_size || 1350;
   const killswitch = clientConfig.killswitch_enabled;
   const antiDpi = clientConfig.endpoint?.anti_dpi;
   const ipv6 = clientConfig.endpoint?.has_ipv6;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import RoutingPanel from "./RoutingPanel";
@@ -74,6 +74,54 @@ describe("RoutingPanel", () => {
   it("shows no-config message when configPath is empty", () => {
     render(<RoutingPanel {...defaultProps} configPath="" />);
     expect(screen.getByText("Конфигурация не выбрана")).toBeInTheDocument();
+  });
+
+  it("reveals a newly typed rule only inside its target list and keeps input focus", async () => {
+    const { container } = render(<RoutingPanel {...defaultProps} />);
+    await screen.findByText("example.com");
+    const direct = screen.getByRole("region", { name: "Напрямую" });
+    const proxy = screen.getByRole("region", { name: "Через VPN" });
+    const page = container.querySelector<HTMLElement>(".scroll-overlay")!;
+    Object.defineProperty(direct, "scrollHeight", { configurable: true, value: 900 });
+    direct.scrollTop = 40;
+    proxy.scrollTop = 65;
+    page.scrollTop = 300;
+    const input = within(direct.parentElement!).getByPlaceholderText(i18n.t("routing.addRulePlaceholder"));
+    fireEvent.change(input, { target: { value: "added.example.com" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByText("added.example.com")).toBeInTheDocument();
+    expect(direct.scrollTop).toBe(900);
+    expect(proxy.scrollTop).toBe(65);
+    expect(page.scrollTop).toBe(300);
+    expect(input).toHaveFocus();
+
+    direct.scrollTop = 55;
+    fireEvent.change(input, { target: { value: "added.example.com" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(direct.scrollTop).toBe(55);
+    expect(screen.getByText(i18n.t("routing.duplicateEntry"))).toBeInTheDocument();
+  });
+
+  it("reveals a preset-added group while preserving the other list's position", async () => {
+    render(<RoutingPanel {...defaultProps} />);
+    await screen.findByText("example.com");
+    const direct = screen.getByRole("region", { name: "Напрямую" });
+    const proxy = screen.getByRole("region", { name: "Через VPN" });
+    Object.defineProperty(direct, "scrollHeight", { configurable: true, value: 800 });
+    direct.scrollTop = 25;
+    proxy.scrollTop = 60;
+    fireEvent.click(screen.getByRole("button", { name: "Добавить пресет «Россия» — Напрямую" }));
+    expect(direct.scrollTop).toBe(800);
+    expect(proxy.scrollTop).toBe(60);
+  });
+
+  it("opens only the collapsed target when the user adds a preset", async () => {
+    render(<RoutingPanel {...defaultProps} />);
+    await screen.findByText("example.com");
+    fireEvent.click(screen.getByRole("button", { name: /^Напрямую\s*2$/ }));
+    expect(screen.queryByRole("region", { name: "Напрямую" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Добавить пресет «Россия» — Напрямую" }));
+    expect(screen.getByRole("region", { name: "Напрямую" })).toHaveTextContent("ru_whitelist");
   });
 
   it("renders configured_in_settings text when no config path", () => {
