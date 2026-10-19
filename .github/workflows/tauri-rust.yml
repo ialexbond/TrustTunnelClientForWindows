@@ -152,4 +152,39 @@ jobs:
         run: cargo clippy --no-deps --all-targets -- -D warnings
 
       - name: Cargo test --lib
-        run: cargo test --lib --quiet
+        shell: pwsh
+        # The GUI's Common Controls v6 manifest is linked to its binary target,
+        # not to Cargo's library-test executable. Without it TaskDialogIndirect
+        # can fail to load before the test harness starts. Only test binaries
+        # receive this activation context; the production manifest is unchanged.
+        run: |
+          $buildLog = Join-Path $env:RUNNER_TEMP 'pro-library-test-artifacts.jsonl'
+          cargo test --lib --no-run --message-format=json > $buildLog
+          if ($LASTEXITCODE -ne 0) { throw 'Library-test compilation failed.' }
+          $executables = @(Get-Content -LiteralPath $buildLog | ForEach-Object {
+            $artifact = $_ | ConvertFrom-Json -AsHashtable
+            if ($artifact.reason -eq 'compiler-artifact' -and $artifact.profile.test -and
+                $artifact.executable -and ($artifact.target.kind -contains 'lib')) {
+              $artifact.executable
+            }
+          })
+          if ($executables.Count -eq 0) { throw 'No library-test executable was produced.' }
+          $manifestPath = Join-Path $env:RUNNER_TEMP 'pro-library-tests.manifest'
+          [xml]$productManifest = Get-Content -LiteralPath 'trusttunnel.exe.manifest' -Raw
+          $dependency = $productManifest.SelectSingleNode(
+            "//*[local-name()='dependency'][.//*[local-name()='assemblyIdentity' and @name='Microsoft.Windows.Common-Controls']]"
+          )
+          if (-not $dependency) { throw 'The GUI manifest has no Common Controls dependency.' }
+          # Reuse the dependency without the production administrator requirements.
+          [xml]$testManifest = '<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0" />'
+          $null = $testManifest.DocumentElement.AppendChild($testManifest.ImportNode($dependency, $true))
+          $testManifest.Save($manifestPath)
+          $mt = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\mt.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $mt) { throw 'Windows SDK manifest tool was not found.' }
+          foreach ($executable in $executables) {
+            & $mt.FullName -nologo -manifest $manifestPath "-outputresource:$executable;#1"
+            if ($LASTEXITCODE -ne 0) { throw 'Test activation-context setup failed.' }
+            & $executable --quiet
+            if ($LASTEXITCODE -ne 0) { throw 'Library tests failed.' }
+          }

@@ -381,14 +381,12 @@ fn native_probe_binary() -> Option<std::path::PathBuf> {
     })
 }
 
-#[async_trait::async_trait]
 trait ProbeExecutor: Send + Sync {
-    async fn run(&self, args: &[&str]) -> Option<std::process::Output>;
+    fn run(&self, args: &[&str]) -> impl std::future::Future<Output = Option<std::process::Output>> + Send;
 }
 
 struct NativeProbeExecutor(std::path::PathBuf);
 
-#[async_trait::async_trait]
 impl ProbeExecutor for NativeProbeExecutor {
     async fn run(&self, args: &[&str]) -> Option<std::process::Output> {
         let mut command = tokio::process::Command::new(&self.0);
@@ -402,7 +400,7 @@ impl ProbeExecutor for NativeProbeExecutor {
 /// Numeric RTT comes only from a socket pinned to physical egress in the SAME
 /// core executable permitted by the active Kill Switch. No GUI TCP fallback:
 /// TUN early acknowledgement can finish that connect before a remote SYN exists.
-async fn native_tcp_measurement(executor: &dyn ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> PingResult {
+async fn native_tcp_measurement(executor: &impl ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> PingResult {
     let started = std::time::Instant::now();
     if port == 0 {
         return PingResult::NoData;
@@ -456,7 +454,7 @@ async fn probe_tcp_sampled(host: &str, port: u16, timeout_ms: u64) -> (PingResul
     probe_tcp_sampled_with_executor(&NativeProbeExecutor(binary), host, port, timeout_ms).await
 }
 
-async fn probe_tcp_sampled_with_executor(executor: &dyn ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> (PingResult, ProbeSample) {
+async fn probe_tcp_sampled_with_executor(executor: &impl ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> (PingResult, ProbeSample) {
     if timeout_ms == 0 {
         return (PingResult::NoData, ProbeSample {outcome: ProbeOutcome::Unavailable, elapsed_ms: 0});
     }
@@ -543,7 +541,7 @@ async fn probe_tcp_steady_state_sampled(
     probe_tcp_steady_state_with_executor(&NativeProbeExecutor(binary), host, port, timeout_ms).await
 }
 
-async fn probe_tcp_steady_state_with_executor(executor: &dyn ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> (PingResult, Vec<ProbeSample>) {
+async fn probe_tcp_steady_state_with_executor(executor: &impl ProbeExecutor, host: &str, port: u16, timeout_ms: u64) -> (PingResult, Vec<ProbeSample>) {
     let started = std::time::Instant::now();
     // Warm-up: warms OS DNS + the TCP path so the cold-first inflation does not ride into the
     // reported number. On a REACHABLE endpoint its numeric result is deliberately discarded (never
@@ -730,7 +728,6 @@ mod probe_test_support {
         std::process::Output { status, stdout, stderr: Vec::new() }
     }
 
-    #[async_trait::async_trait]
     impl ProbeExecutor for FakeExecutor {
         async fn run(&self, args: &[&str]) -> Option<std::process::Output> {
             self.calls.lock().unwrap().push(args.iter().map(|arg| arg.to_string()).collect());
