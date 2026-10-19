@@ -135,8 +135,8 @@ test("release and bundle hooks check the exact Tauri sidecar, and prerelease exe
   assert.equal(path.basename(DEFAULT_CORE), "trusttunnel_client-x86_64-pc-windows-msvc.exe");
   assert.equal(conf.build.beforeBuildCommand, "npm run core:check && npm run build");
   assert.equal(conf.build.beforeBundleCommand, "npm run core:check");
-  assert.equal(pkg.scripts["core:check"], "node ../scripts/core-compatibility-gate.cjs");
-  assert.equal(pkg.scripts["core:test"], "node ../scripts/core-compatibility-gate.test.cjs");
+  assert.equal(pkg.scripts["core:check"], "node ../scripts/windows-build-inputs.cjs && node ../scripts/core-compatibility-gate.cjs");
+  assert.equal(pkg.scripts["core:test"], "node ../scripts/windows-build-inputs.test.cjs && node ../scripts/core-compatibility-gate.test.cjs");
   assert.ok(pkg.scripts.prerelease.startsWith("npm run core:test && npm run core:check &&"));
 });
 

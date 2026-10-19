@@ -3,7 +3,7 @@ import { Compass, ExternalLink, Github } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 
 /** The repository the first footer item opens. Not a link target in the DOM sense — see below. */
-const REPOSITORY_URL = "https://github.com/ialexbond/TrustTunnelClient";
+const REPOSITORY_URL = "https://github.com/ialexbond/TrustTunnelClientForWindows";
 
 /**
  * The event the welcome-tour item raises.

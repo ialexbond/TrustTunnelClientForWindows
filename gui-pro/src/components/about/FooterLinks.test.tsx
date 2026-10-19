@@ -9,7 +9,7 @@ import i18n from "../../shared/i18n";
 import { FooterLinks } from "./FooterLinks";
 import { renderWithProviders as render } from "../../test/test-utils";
 
-const REPOSITORY_URL = "https://github.com/ialexbond/TrustTunnelClient";
+const REPOSITORY_URL = "https://github.com/ialexbond/TrustTunnelClientForWindows";
 const WELCOME_TOUR_EVENT = "tt-show-welcome-tour";
 
 describe("FooterLinks", () => {

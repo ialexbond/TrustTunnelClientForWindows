@@ -17,13 +17,12 @@ It contains work by two parties, both released under the Apache License 2.0:
 
         Copyright 2020 AdGuard Software Ltd
 
-    Sources live on `release/tt-win-3.1.0`, its release tag, and the synchronized
-    `master` checkout.
-    This fork carries local changes to that code; they are confined to the
-    `trusttunnel/` directory.
+    Current sources live on `master`; historical release tags retain their
+    corresponding versions. Fork changes include the native `core/`, `net/`
+    and `trusttunnel/` modules and their supporting build definitions.
 
-  * The Windows desktop application — the `gui-pro/` and `gui-light/`
-    directories, their Rust backends, and the supporting scripts. Written for
+  * The Windows desktop application — the `gui-pro/` directory, its Rust
+    backend, and the supporting scripts. Written for
     this fork; there is no counterpart upstream.
 
         Copyright 2026 ialexbond
@@ -41,10 +40,6 @@ These are NOT covered by the Apache License above and carry their own terms:
   * lwIP — Copyright (c) 2001, 2002 Swedish Institute of Computer Science,
     BSD 3-clause. Licence text: third-party/lwip/lwip/COPYING (release branch).
 
-  * Microsoft Visual C++ runtime redistributables (`vcruntime140.dll`,
-    `vcruntime140_1.dll`) — Microsoft Corporation, under Microsoft's
-    redistribution terms.
-
   * Rust crates and npm packages, resolved at build time and enumerated in
-    `gui-pro/src-tauri/Cargo.lock` and `gui-pro/package-lock.json` (and the
-    `gui-light/` equivalents), predominantly MIT, BSD and ISC.
+    `gui-pro/src-tauri/Cargo.lock` and `gui-pro/package-lock.json`,
+    predominantly MIT, BSD and ISC.
