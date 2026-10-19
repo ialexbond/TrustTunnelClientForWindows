@@ -328,11 +328,8 @@ mod tests {
 
     #[test]
     fn generate_then_parse_roundtrip() {
-        // R-6 mitigation: cross-crate compat ssh-key generated → russh parseable.
-        // Critical: SSH connect helper в `ssh/mod.rs` использует russh::keys
-        // для key-based auth, поэтому PEM сгенерированный ssh-key 0.6 должен
-        // быть совместим с парсером russh 0.60.3 (русх-keys слит в russh::keys).
-        // Canary: проверяет что bump на 0.60.3 сохранил ssh-key-0.6 alignment.
+        // Existing keys generated with stable ssh-key 0.6 must remain usable
+        // by the upgraded russh parser through their OpenSSH PEM encoding.
         let result = generate_ssh_keypair("roundtrip-host").expect("generation must succeed");
         let parsed = russh::keys::decode_secret_key(&result.private_pem, None);
         assert!(
