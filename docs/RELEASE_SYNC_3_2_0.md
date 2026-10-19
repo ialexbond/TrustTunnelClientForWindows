@@ -336,6 +336,8 @@ The installer was rebuilt with those runtime changes and its extracted payloads 
 The SSH transport moves from `russh 0.60.3` to `0.64.1`. Its Windows agent dependency moves
 from `pageant 0.2.1` to `0.2.3`. The application version stays `3.2.0`, and the existing
 release receives a rebuilt installer and matching checksum after verification.
+The previously locked `chacha20 0.10.0` was withdrawn upstream. Its compatible `0.10.2`
+replacement fixes an SSE2 processor compatibility defect and permits fresh dependency resolution.
 
 The migration keeps stable `ssh-key 0.6.7` generation and existing OpenSSH PEM keys.
 The upgraded transport uses its own key types across that serialized boundary. Stored
