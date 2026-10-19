@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "core_version": "1.1.11",
+  "upstream_repository": "https://github.com/TrustTunnel/TrustTunnelClient",
+  "upstream_commit": "c0990e174fc75b2e52acd15882c62e69a3022581",
+  "fork_source_commit": "ed0caecb0aa78bc878a16e364324016f90c1c2d6",
+  "source_manifest": "windows-core-sources.json",
+  "archive": {
+    "url": "https://github.com/ialexbond/TrustTunnelClientForWindows/releases/download/v3.2.0-pro/TrustTunnel.Client.Pro_3.2.0_build-inputs_windows-x64.zip",
+    "sha256": "d88cd95b6dc59f143244d1392aa057f2964ab2c1546f4245eaba47934e573284"
+  },
+  "files": [
+    {
+      "name": "trusttunnel_client-x86_64-pc-windows-msvc.exe",
+      "path": "gui-pro/src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe",
+      "sha256": "ed44123abae84992f431755a4e0dff302892d96dcdd306e329b036b45c543699"
+    },
+    {
+      "name": "wintun.dll",
+      "path": "gui-pro/src-tauri/wintun.dll",
+      "sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce"
+    }
+  ]
+}

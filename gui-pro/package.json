@@ -10,8 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
-    "core:check": "node ../scripts/core-compatibility-gate.cjs",
-    "core:test": "node ../scripts/core-compatibility-gate.test.cjs",
+    "core:check": "node ../scripts/windows-build-inputs.cjs && node ../scripts/core-compatibility-gate.cjs",
+    "core:test": "node ../scripts/windows-build-inputs.test.cjs && node ../scripts/core-compatibility-gate.test.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
     "test": "vitest run",
@@ -31,9 +31,7 @@
     "checksum:test": "node ../scripts/checksum-gate.test.cjs",
     "label:check": "node ../scripts/build-label-gate.cjs --dist dist --exe src-tauri/target/release/trusttunnel.exe",
     "label:test": "node ../scripts/build-label-gate.test.cjs",
-    "prerelease": "npm run core:test && npm run core:check && npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run pii:test && npm run pii:check && npm run artifact:test && npm run checksum:test && npm run label:test && npm run rust:check && npm run label:check && npm run build && npm run checksum:check",
-    "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "prerelease": "npm run core:test && npm run core:check && npm run typecheck && npm run lint && npm run test && npm run i18n:check && npm run nsis:check && npm run sign:test && npm run pii:test && npm run pii:check && npm run artifact:test && npm run checksum:test && npm run label:test && npm run rust:check && npm run label:check && npm run build && npm run checksum:check"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",
@@ -56,9 +54,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@storybook/addon-docs": "^10.3.5",
-    "@storybook/addon-themes": "^10.3.5",
-    "@storybook/react-vite": "^10.3.5",
     "@tauri-apps/cli": "2.10.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -72,11 +67,8 @@
     "eslint": "^10.1.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
-    "eslint-plugin-storybook": "^10.3.5",
     "jsdom": "^29.0.1",
     "postcss": "^8.4.49",
-    "remark-gfm": "^4.0.1",
-    "storybook": "^10.3.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.1",

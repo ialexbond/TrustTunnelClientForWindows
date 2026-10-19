@@ -109,8 +109,6 @@ email | gui-pro/src/components/wizard/EndpointStep.test.tsx | valid@test.com | 1
 email | gui-pro/src/components/wizard/persist.test.ts | a@b.com | 2
 email | gui-pro/src/components/wizard/useWizardState.test.ts | a@b.com | 3
 email | gui-pro/src/shared/utils/userValidators.ts | user@domain.com | 1
-hostname | gui-light/src/shared/i18n/locales/en.json | domain.com | 1
-hostname | gui-light/src/shared/i18n/locales/ru.json | domain.com | 1
 hostname | gui-pro/src-tauri/src/commands/config.rs | h.win | 17
 hostname | gui-pro/src-tauri/src/commands/manifest.rs | foo.com | 2
 hostname | gui-pro/src-tauri/src/commands/manifest.rs | getstarted.example.ru | 1
@@ -185,7 +183,6 @@ hostname | gui-pro/src/shared/ui/Colors.stories.tsx | s.bg | 1
 hostname | gui-pro/src/shared/utils/dirtyTracker.test.ts | sni.com | 1
 hostname | gui-pro/src/shared/utils/validators.test.ts | ends-with-dot.com | 1
 hostname | gui-pro/src/test/fixtures/config.ts | a.com | 1
-ipv4 | gui-light/src-tauri/trusttunnel.exe.manifest | 6.0.0.0 | 1
 ipv4 | gui-pro/.storybook/tauri-mocks/api-core.ts | 1.2.3.4 | 1
 ipv4 | gui-pro/.storybook/tauri-mocks/api-core.ts | 5.6.7.8 | 1
 ipv4 | gui-pro/src-tauri/src/commands/deeplink_local.rs | 1.2.3.4 | 3
