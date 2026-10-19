@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { StrictMode } from "react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { SnackBar } from "./SnackBar";
 
 describe("SnackBar", () => {
@@ -12,6 +13,46 @@ describe("SnackBar", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each(["enter", "replace", "dismiss"] as const)(
+    "ignores pending %s animation after the window closes",
+    phase => {
+      const { unmount } = render(
+        <SnackBar
+          messages={phase === "replace" ? ["First", "Second"] : [
+            { text: "Pending", type: "error" },
+          ]}
+          onShown={onShown}
+        />,
+      );
+      if (phase === "dismiss") {
+        act(() => { vi.advanceTimersByTime(50); });
+        fireEvent.click(screen.getByRole("button", { name: "Close notification" }));
+      }
+      unmount();
+
+      // Model a disposed webview: React's update scheduler can no longer read window.
+      const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window")!;
+      Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
+      try {
+        expect(() => vi.runAllTimers()).not.toThrow();
+      } finally {
+        Object.defineProperty(globalThis, "window", windowDescriptor);
+      }
+      expect(onShown).toHaveBeenCalledTimes(phase === "replace" ? 2 : 1);
+    },
+  );
+
+  it("keeps notifications working after StrictMode replays mount effects", () => {
+    render(
+      <StrictMode>
+        <SnackBar messages={["Saved!"]} onShown={onShown} />
+      </StrictMode>,
+    );
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(screen.getByRole("status")).toHaveTextContent("Saved!");
+    expect(screen.getByRole("status")).toHaveStyle({ opacity: 1 });
   });
 
   it("renders nothing when messages array is empty", () => {
