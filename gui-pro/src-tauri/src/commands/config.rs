@@ -85,7 +85,7 @@ impl ClientConfig {
 /// so a symlinked decoy under an allowed root cannot redirect the write into a system dir.
 /// This intentionally does NOT replace the picker; it shrinks the blast radius of the
 /// registered command (defense-in-depth, mirroring the read side).
-fn validate_save_destination(destination: &str) -> Result<(), String> {
+fn validate_save_destination(destination: &str) -> Result<std::path::PathBuf, String> {
     let dest = std::path::Path::new(destination);
 
     // Resolve the destination to an absolute, symlink-free canonical path. The file does not
@@ -140,10 +140,53 @@ fn validate_save_destination(destination: &str) -> Result<(), String> {
     push_root(std::env::temp_dir());
 
     if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
-        Ok(())
+        Ok(canonical)
     } else {
         Err("Access denied: destination is outside the allowed save locations".into())
     }
+}
+
+/// Open the final destination without following a file link or truncating its target.
+/// Parent-directory replacement races require a separate handle-relative design.
+fn open_export_destination(path: &std::path::Path) -> Result<std::fs::File, String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    // Reject a pre-existing leaf link, including a dangling one. The Windows handle
+    // check below also covers a link substituted after this metadata check.
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("Access denied: destination is a file link".into());
+        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!("Invalid destination path: {e}"));
+        }
+        _ => {}
+    }
+    let file = options.open(path).map_err(|e| format!("WRITE_FAILED|{e}"))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT,
+        };
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(format!("WRITE_FAILED|{}", std::io::Error::last_os_error()));
+        }
+        if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.nNumberOfLinks > 1 {
+            return Err("Access denied: destination is a file link".into());
+        }
+    }
+    if !file.metadata().map_err(|e| format!("WRITE_FAILED|{e}"))?.is_file() {
+        return Err("Invalid destination path: expected a regular file".into());
+    }
+    Ok(file)
 }
 
 /// Write a string to a user-chosen destination path (for "Download logs" functionality).
@@ -160,10 +203,12 @@ pub async fn write_string_to_path(
     destination: String,
 ) -> Result<(), String> {
     // CR-01: constrain the destination to allow-listed roots + reject reparse points.
-    validate_save_destination(&destination)?;
-    tokio::fs::write(&destination, content.as_bytes())
-        .await
-        .map_err(|e| format!("WRITE_FAILED|{e}"))
+    use tokio::io::AsyncWriteExt;
+    let canonical = validate_save_destination(&destination)?;
+    let mut file = tokio::fs::File::from_std(open_export_destination(&canonical)?);
+    file.set_len(0).await.map_err(|e| format!("WRITE_FAILED|{e}"))?;
+    file.write_all(content.as_bytes()).await.map_err(|e| format!("WRITE_FAILED|{e}"))?;
+    file.flush().await.map_err(|e| format!("WRITE_FAILED|{e}"))
 }
 
 /// Copy a file to a user-chosen destination (for "Save As" functionality).
@@ -207,8 +252,17 @@ pub fn copy_file(source: String, destination: String) -> Result<(), String> {
     // `source` string — otherwise validate and copy could resolve the same string to two
     // different targets (the F16/TOCTOU fix already applied to `validate_app_path_canonical`).
     let canonical_source = validate_copy_source(&source)?;
-    std::fs::copy(&canonical_source, &destination)
+    let target = std::path::Path::new(&destination);
+    let canonical_parent = std::fs::canonicalize(target.parent().ok_or("Invalid destination path")?)
         .map_err(|e| format!("COPY_FAILED|{e}"))?;
+    let canonical_target = canonical_parent.join(target.file_name().ok_or("Invalid destination path")?);
+    if std::fs::canonicalize(&canonical_target).ok().as_ref() == Some(&canonical_source) {
+        return Err("COPY_FAILED|Source and destination are the same file".into());
+    }
+    let mut source = std::fs::File::open(&canonical_source).map_err(|e| format!("COPY_FAILED|{e}"))?;
+    let mut destination = open_export_destination(&canonical_target)?;
+    destination.set_len(0).map_err(|e| format!("COPY_FAILED|{e}"))?;
+    std::io::copy(&mut source, &mut destination).map_err(|e| format!("COPY_FAILED|{e}"))?;
     Ok(())
 }
 
@@ -1018,6 +1072,29 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
 
 #[cfg(test)]
 mod tests {
+    struct ExportTestDir(std::path::PathBuf);
+
+    impl ExportTestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("tt-export-security-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &std::path::Path { &self.0 }
+    }
+
+    impl Drop for ExportTestDir {
+        fn drop(&mut self) {
+            // Fixtures contain only immediate files and links. Never recurse through them.
+            if let Ok(entries) = std::fs::read_dir(&self.0) {
+                for entry in entries.flatten() {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
     use super::*;
 
     // ── delete_staged_temp_file: CR-01 end to end through the COMMAND ─────────────────
@@ -1340,6 +1417,69 @@ some_future_key = "value"
         let read_back = std::fs::read_to_string(&path).unwrap();
         assert_eq!(read_back, "new content");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn security_export_write_rejects_hardlink_without_truncating_target() {
+        let dir = ExportTestDir::new();
+        let original = dir.path().join("original.txt");
+        let destination = dir.path().join("linked.txt");
+        std::fs::write(&original, "preserve original").unwrap();
+        std::fs::hard_link(&original, &destination).unwrap();
+        let error = write_string_to_path("replacement".into(), destination.to_string_lossy().into())
+            .await.unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "preserve original");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn security_export_copy_rejects_hardlink_without_truncating_target() {
+        let dir = ExportTestDir::new();
+        let source = dir.path().join("source.toml");
+        let original = dir.path().join("original.toml");
+        let destination = dir.path().join("linked.toml");
+        std::fs::write(&source, "new export").unwrap();
+        std::fs::write(&original, "preserve original").unwrap();
+        std::fs::hard_link(&original, &destination).unwrap();
+        let error = copy_file(source.to_string_lossy().into(), destination.to_string_lossy().into())
+            .unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "preserve original");
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), "new export");
+    }
+
+    #[test]
+    fn security_export_copy_to_itself_keeps_the_profile_intact() {
+        let dir = ExportTestDir::new();
+        let path = dir.path().join("profile.toml");
+        std::fs::write(&path, "preserve profile").unwrap();
+        let error = copy_file(path.to_string_lossy().into(), path.to_string_lossy().into()).unwrap_err();
+        assert!(error.contains("same file"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "preserve profile");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "Requires Windows symlink rights; run explicitly in filesystem security checks"]
+    async fn security_export_leaf_symlink_never_changes_the_target() {
+        let dir = ExportTestDir::new();
+        let source = dir.path().join("source.toml");
+        let target = dir.path().join("protected.toml");
+        let link = dir.path().join("decoy.toml");
+        std::fs::write(&source, "exported profile").unwrap();
+        std::fs::write(&target, "preserve target").unwrap();
+        std::os::windows::fs::symlink_file(&target, &link).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        let error = write_string_to_path("replacement".into(), link.to_string_lossy().into())
+            .await.unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "preserve target");
+        let error = copy_file(source.to_string_lossy().into(), link.to_string_lossy().into()).unwrap_err();
+        assert!(error.contains("destination is a file link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "preserve target");
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), "exported profile");
     }
 
     // ── FLOW-01 / D-04: `copy_file` end to end, on the shape the UI really uses ──────

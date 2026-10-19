@@ -148,7 +148,11 @@ function StatusPanel({
   // sub-text for a `reconnecting` retry is now JUST the «Попытка N/N» counter (rendered
   // separately below); the headline + banner carry the "what happened" message.
   const statusDetail =
-    status === "recovering" ? t("status.recovering_detail") : null;
+    status === "recovering"
+      ? t("status.recovering_detail")
+      : status === "connecting"
+        ? t("status.connecting_detail")
+        : null;
 
   return (
     <div

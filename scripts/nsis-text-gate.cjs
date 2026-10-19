@@ -1220,14 +1220,10 @@ function analyseErasure(genText, hookText, genFile, hookFile) {
 }
 
 /**
- * THE SECOND PATH THAT MUST DELETE NOTHING. Choosing «Переустановить компоненты» on the
- * maintenance page must not start the uninstaller — if it did, the uninstall section above would
- * run, and everything (4a) proves would be the only thing standing between a maintenance click
- * and the user's data. The chain asserted here is: the first radio's CAPTION on a same-version
- * install is the components caption, that radio's handle is the one whose state is read into the
- * variable the leave function branches on, the arm for that choice jumps to `reinst_done`, and
- * `reinst_done` sits BELOW the block that invokes the uninstaller — so the jump skips it. Then,
- * separately, the Install section with its hooks expanded invokes no uninstaller of its own.
+ * Setup always replaces the payload. The maintenance creator skips its page;
+ * its leave callback has no work. Neither may inspect or invoke an old uninstaller,
+ * even when the installed version, command-line mode or prior selection differs.
+ * The standalone uninstaller and every user-data deletion guard stay independent.
  */
 function analyseReinstallPath(genLines, genFile, hookLines, hookFile) {
   const problems = [];
@@ -1235,102 +1231,40 @@ function analyseReinstallPath(genLines, genFile, hookLines, hookFile) {
   const page = compositeRegion(genLines, genFile, hookLines, hookFile, /^Function\s+PageReinstall\b/, []);
   if (leave.missingRegion || page.missingRegion) {
     problems.push(
-      `${genFile} has no \`Function PageLeaveReinstall\`/\`Function PageReinstall\` — the ` +
-        `maintenance page this assertion is about is gone, so the reinstall path cannot be judged.`
+      `${genFile} has no complete PageReinstall/PageLeaveReinstall pair; the unconditional ` +
+        `replacement-only maintenance path cannot be verified.`
     );
     return problems;
   }
-
-  const idxOf = (entries, re) => entries.findIndex((e) => re.test(codeOf(e.text)));
-  const unAt = idxOf(leave.entries, /^reinst_uninstall:$/);
-  const doneAt = idxOf(leave.entries, /^reinst_done:$/);
-  if (unAt < 0 || doneAt < 0) {
+  const statements = (region) => region.entries.map((e) => codeOf(e.text))
+    .filter((code) => code && code !== "FunctionEnd");
+  const pageBody = statements(page);
+  const leaveBody = statements(leave);
+  if (pageBody.length !== 1 || pageBody[0] !== "Abort") {
     problems.push(
-      `PageLeaveReinstall carries no reinst_uninstall:/reinst_done: pair (uninstall ` +
-        `${unAt < 0 ? "absent" : "present"}, done ${doneAt < 0 ? "absent" : "present"}), so a ` +
-        `jump past the uninstaller cannot be shown to be a jump past anything.`
-    );
-    return problems;
-  }
-  if (doneAt < unAt) {
-    problems.push(
-      `PageLeaveReinstall places reinst_done: ABOVE reinst_uninstall:, so jumping to it no ` +
-        `longer skips the uninstaller invocation — it falls into it.`
+      `${genFile} maintenance creator must contain only Abort to skip its custom page. ` +
+        `Any other work could restore an uninstall-first choice or depend on a broken old client.`
     );
   }
-  leave.entries.forEach((e, i) => {
-    const code = codeOf(e.text);
-    if (!code) return;
-    if (!NSIS_EXECUTIONS.has(code.split(/\s+/)[0].toLowerCase())) return;
-    if (i > unAt && i < doneAt) return;
+  if (leaveBody.length !== 1 || leaveBody[0] !== "Return") {
     problems.push(
-      `${e.file}:${e.line} — \`${code}\` runs a program in PageLeaveReinstall OUTSIDE the ` +
-        `reinst_uninstall: block. Every invocation must live in the arm the components choice ` +
-        `jumps over, or that jump stops meaning «invokes nothing».`
-    );
-  });
-
-  let updateArm = false;
-  let componentsArm = false;
-  let componentsUninstalls = false;
-  problems.push(
-    ...walkConditions(leave.entries, (e, code, stack) => {
-      const under = (re) => stack.some((f) => f.allAnd && f.conds.some((c) => re.test(c.trim())));
-      if (/^Goto\s+reinst_done$/.test(code) && under(/^\$UpdateMode\s*=\s*1$/)) updateArm = true;
-      const sameVersionFirstChoice = under(/^\$R0\s*=\s*0$/) && under(/^\$R1\s*=\s*1$/);
-      if (sameVersionFirstChoice && /^Goto\s+reinst_done$/.test(code)) componentsArm = true;
-      if (sameVersionFirstChoice && /^Goto\s+reinst_uninstall$/.test(code)) componentsUninstalls = true;
-    })
-  );
-  if (!updateArm) {
-    problems.push(
-      `PageLeaveReinstall has no arm that, when $UpdateMode = 1, goes straight to reinst_done. ` +
-        `An update would then be routed through the uninstaller by the page itself.`
+      `${genFile} maintenance leave callback must contain only Return. It must never inspect ` +
+        `or run an installed uninstaller, in any version or command-line mode.`
     );
   }
-  if (!componentsArm || componentsUninstalls) {
-    problems.push(
-      `PageLeaveReinstall's same-version first-choice arm ` +
-        `(${componentsArm ? "reaches reinst_done" : "reaches NO reinst_done"}` +
-        `${componentsUninstalls ? " but ALSO reaches reinst_uninstall" : ""}) does not skip the ` +
-        `uninstaller. That arm is «Переустановить компоненты»: it must replace files and invoke ` +
-        `nothing, or a reinstall silently becomes an uninstall-then-install over the user's data.`
-    );
+  const maintenancePages = genLines.map(codeOf)
+    .filter((code) => /^Page\s+custom\s+PageReinstall\b/.test(code));
+  if (maintenancePages.length !== 1
+      || maintenancePages[0] !== "Page custom PageReinstall PageLeaveReinstall") {
+    problems.push(`${genFile} does not bind exactly one maintenance page to the verified skip/return callbacks.`);
   }
-
-  // The caption tie: without it, "$R1 = 1" is a number nobody has connected to what the person
-  // actually clicked.
-  const state = leave.entries.map((e) => codeOf(e.text)).find(Boolean);
-  if (!/^\$\{NSD_GetState\}\s+\$R2\s+\$R1$/.test(state || "")) {
-    problems.push(
-      `PageLeaveReinstall does not begin by reading the FIRST radio's state into the variable ` +
-        `its arms branch on (found «${state || "nothing"}»), so the arm above cannot be tied to ` +
-        `the button the person clicked.`
-    );
-  }
-  let captionTied = false;
-  walkConditions(page.entries, (e, code, stack) => {
-    if (!stack.some((f) => f.allAnd && f.conds.some((c) => /^\$R0\s*=\s*0$/.test(c.trim())))) return;
-    if (/^StrCpy\s+\$R2\s+"\$\(addOrReinstall\)"$/.test(code)) captionTied = true;
-  });
-  const firstRadio = page.entries.map((e) => codeOf(e.text)).find((c) => /^\$\{NSD_CreateRadioButton\}/.test(c));
-  if (!captionTied || !/\$R2\s*$/.test(firstRadio || "")) {
-    problems.push(
-      `PageReinstall no longer gives the FIRST radio button the components caption on a ` +
-        `same-version install (caption ${captionTied ? "found" : "NOT found"}, first radio ` +
-        `«${firstRadio || "absent"}»). The reinstall assertion above reads a radio INDEX; this ` +
-        `is what ties that index to «Переустановить компоненты» rather than to whatever the ` +
-        `template happens to put first.`
-    );
-  }
-
-  // The Install section itself must invoke no uninstaller — the components choice lands here.
+  // Every setup mode reaches this replacement section without invoking an old uninstaller.
   const install = compositeRegion(genLines, genFile, hookLines, hookFile, /^Section\s+Install\b/, [
     "NSIS_HOOK_PREINSTALL",
     "NSIS_HOOK_POSTINSTALL",
   ]);
   if (install.missingRegion) {
-    problems.push(`${genFile} has no \`Section Install\` — the arm the components choice takes is gone.`);
+    problems.push(`${genFile} has no \`Section Install\` — the payload replacement path is gone.`);
     return problems;
   }
   if (install.missingMacro) {
@@ -1349,7 +1283,7 @@ function analyseReinstallPath(genLines, genFile, hookLines, hookFile) {
     if (invokes || reads) {
       problems.push(
         `${e.file}:${e.line} — \`${code}\` ${invokes ? "invokes an uninstaller" : "reads the UninstallString"} ` +
-          `inside the Install section. The components choice runs this section: it must replace ` +
+          `inside the Install section. Every setup mode runs this section: it must replace ` +
           `files and invoke nothing.`
       );
     }
@@ -1363,7 +1297,7 @@ function analyseReinstallPath(genLines, genFile, hookLines, hookFile) {
 // of accident. This phase produced seven checks that could not fail; each was green from the day
 // it was written. So rule 13's analyser is run here, on EVERY invocation and with no build in
 // sight, against a miniature emitted script and hook that carry the shape of the real ones, plus
-// six MUTANTS of that pair. Each mutant is produced by a textual substitution whose landing is
+// adversarial MUTANTS of that pair. Each mutant is produced by a textual substitution whose landing is
 // verified (a substitution that silently matched nothing would make the mutant identical to the
 // clean fixture, and «the clean fixture passed» would then be reported as «the mutant was
 // rejected»), and each must be rejected FOR ITS OWN REASON, matched against its own pattern.
@@ -1374,36 +1308,13 @@ const FIXTURE_GEN = `; a miniature of the emitted script, carrying only what rul
 Var UpdateMode
 Var DeleteAppDataCheckboxState
 
+Page custom PageReinstall PageLeaveReinstall
 Function PageReinstall
-  \${If} $R0 = 0
-    StrCpy $R2 "$(addOrReinstall)"
-    StrCpy $R3 "$(uninstallApp)"
-  \${ElseIf} $R0 = 1
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
-  \${EndIf}
-  \${NSD_CreateRadioButton} 30u 50u -30u 8u $R2
-  \${NSD_CreateRadioButton} 30u 70u -30u 8u $R3
+  Abort
 FunctionEnd
-
 Function PageLeaveReinstall
-  \${NSD_GetState} $R2 $R1
-  \${If} $UpdateMode = 1
-    Goto reinst_done
-  \${EndIf}
-  \${If} $R0 = 0
-    \${If} $R1 = 1
-      Goto reinst_done
-    \${Else}
-      Goto reinst_uninstall
-    \${EndIf}
-  \${EndIf}
-  reinst_uninstall:
-    ReadRegStr $R1 SHCTX "\${UNINSTKEY}" "UninstallString"
-    ExecWait '$R1' $0
-  reinst_done:
+  Return
 FunctionEnd
-
 Section Install
   SetOutPath $INSTDIR
   !ifmacrodef NSIS_HOOK_PREINSTALL
@@ -1485,9 +1396,29 @@ const FIXTURE_HOOK = `!define TT_INSTALL_DIR "$INSTDIR"
       expect: /can reach the user's own files .* conditions in force there are: NO CONDITION AT ALL/s,
     },
     {
-      what: "the components choice routed into the uninstaller",
-      gen: [`    \${If} $R1 = 1\n      Goto reinst_done`, `    \${If} $R1 = 1\n      Goto reinst_uninstall`],
-      expect: /same-version first-choice arm/,
+      what: "maintenance invokes a failing installed uninstaller",
+      gen: [`Function PageLeaveReinstall\n  Return`, `Function PageLeaveReinstall\n  ExecWait 'old-uninstall.exe' $0\n  Return`],
+      expect: /maintenance leave callback must contain only Return/,
+    },
+    {
+      what: "the skipped maintenance creator reads the old uninstaller",
+      gen: [`Function PageReinstall\n  Abort`, `Function PageReinstall\n  ReadRegStr $R1 SHCTX "\${UNINSTKEY}" "UninstallString"\n  Abort`],
+      expect: /maintenance creator must contain only Abort/,
+    },
+    {
+      what: "maintenance bypasses only update mode and uninstalls otherwise",
+      gen: [`Function PageLeaveReinstall\n  Return`, `Function PageLeaveReinstall\n  \${If} $UpdateMode = 1\n    Return\n  \${EndIf}\n  ExecWait 'old-uninstall.exe' $0\n  Return`],
+      expect: /maintenance leave callback must contain only Return/,
+    },
+    {
+      what: "the page is wired to an unverified maintenance callback",
+      gen: [`Page custom PageReinstall PageLeaveReinstall`, `Page custom PageReinstall UnsafeLeaveReinstall`],
+      expect: /does not bind exactly one maintenance page/,
+    },
+    {
+      what: "the replacement section looks up the old uninstaller",
+      gen: [`Section Install\n  SetOutPath $INSTDIR`, `Section Install\n  ReadRegStr $R1 SHCTX "\${UNINSTKEY}" "UninstallString"\n  SetOutPath $INSTDIR`],
+      expect: /reads the UninstallString.*inside the Install section/s,
     },
     {
       what: "a removal under a root this gate does not classify",
@@ -1518,7 +1449,7 @@ const FIXTURE_HOOK = `!define TT_INSTALL_DIR "$INSTDIR"
   }
   rule(
     12,
-    "the erasure analyser rejects a moved hook, a broken guard, an undeclared variable, an unguarded removal, a reinstall that uninstalls, and a path it cannot place",
+    "the analyser rejects broken data-erasure guards and every restoration of an old-uninstaller dependency",
     problems,
     `1 clean fixture accepted, ${mutants.length} mutants each rejected for its own reason, with ` +
       `every mutation confirmed to have landed. This runs on every invocation and needs no build.`

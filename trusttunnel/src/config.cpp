@@ -13,6 +13,7 @@
 #include <magic_enum/magic_enum.hpp>
 #include <openssl/err.h>
 #include <openssl/pem.h>
+#include <openssl/x509v3.h>
 
 #include "common/cidr_range.h"
 #include "net/tls.h"
@@ -93,6 +94,12 @@ static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view
         warnlog(g_logger, "Failed to create CA store");
         return nullptr;
     }
+    // Explicit leaf/intermediate anchors may terminate a partial chain. Normal
+    // validity-date checks and the transport's separate identity checks remain.
+    if (X509_STORE_set_flags(store.get(), X509_V_FLAG_PARTIAL_CHAIN) != 1) {
+        warnlog(g_logger, "Failed to configure custom certificate trust anchors");
+        return nullptr;
+    }
 
     bool any_loaded = false;
     for (;;) {
@@ -105,6 +112,12 @@ static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view
             break;
         }
 
+        // BoringSSL skips the untrusted-chain purpose loop for a trusted leaf.
+        const bool is_ca = X509_check_ca(cert.get()) != 0;
+        if (X509_check_purpose(cert.get(), X509_PURPOSE_SSL_SERVER, is_ca) != 1) {
+            warnlog(g_logger, "Configured certificate is not suitable for TLS server authentication");
+            return nullptr;
+        }
         if (X509_STORE_add_cert(store.get(), cert.get()) != 1) {
             warnlog(g_logger, "Failed to add to the CA store");
         }
@@ -162,6 +175,10 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
     if (std::optional x = config["certificate"].value<std::string>();
             !location.skip_verification && x.has_value() && !x->empty()) {
         location.ca_store = load_certificate(*x);
+        if (!location.ca_store) {
+            errlog(g_logger, "Configured endpoint certificate could not be loaded");
+            return std::nullopt;
+        }
     }
 
     if (auto upstream_protocol = config["upstream_protocol"].value<std::string_view>();

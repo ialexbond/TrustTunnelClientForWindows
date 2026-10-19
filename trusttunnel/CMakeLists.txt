@@ -24,6 +24,7 @@ endif (MSVC)
 
 set(SOURCE_FILES
         src/endpoint_probe.cpp
+        src/process_socket_owner.cpp
         src/config.cpp
         src/client.cpp
         src/utils.cpp
@@ -316,3 +317,4 @@ set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
 add_unit_test(test_persistent_ring_buffer "${TEST_DIR}" "" TRUE TRUE)
 add_unit_test(test_config_routing "${TEST_DIR}" "" TRUE TRUE)
 add_unit_test(test_endpoint_probe "${TEST_DIR}" "" TRUE TRUE)
+add_unit_test(test_process_socket_owner "${TEST_DIR}" "" TRUE TRUE)

@@ -5,7 +5,6 @@
 #include <wintun.h>
 
 #include "net/os_tunnel.h"
-#include "net/windows_network_guard.h"
 #include "vpn/utils.h"
 
 #include "common/wfp_firewall.h"
@@ -49,7 +48,6 @@ private:
     std::unique_ptr<std::thread> m_recv_thread_handle{};
 
     WfpFirewall m_firewall{L"AdGuard VPN"};
-    WindowsNetworkGuardTunnel m_network_guard;
 };
 
 } // namespace ag

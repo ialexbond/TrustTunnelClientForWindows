@@ -1,349 +1,392 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <optional>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <type_traits>
 
-#include "common/socket_address.h"
 #include "net/windows_network_guard.h"
 
 namespace ag {
 namespace {
 
-// Offline interpreter of the exact declarative plan consumed by the WFP adapter.
-// No test in this file opens a WFP engine, arms protection or changes host networking.
-struct Flow {
-    std::string remote;
-    std::string local = "192.0.2.20";
-    uint64_t interface_luid = 7;
-    bool core = false;
-    bool inbound = false;
-    uint8_t protocol = 6;
-    uint16_t local_port = 43210;
-    uint16_t remote_port = 443;
+LegacyGuardObject owned(LegacyGuardObjectKind kind, uint32_t version, uint64_t id = 1, bool blocking = true) {
+    const std::string marker = "TrustTunnelClientPro.NetworkGuard." + std::to_string(version);
+    return {.kind = kind,
+            .version = version,
+            .provider_key_matches = true,
+            .sublayer_key_matches = true,
+            .object_key_matches = true,
+            .owner_data = marker + '\0',
+            .filter_id = id,
+            .blocking = blocking};
+}
+
+// No test opens WFP or modifies host networking. This fake exercises the same
+// ownership/deletion coordinator used by the actual cleanup-only adapter.
+struct FakeCleanup {
+    std::vector<LegacyGuardObject> objects;
+    std::vector<LegacyGuardObjectKind> deletion_order;
+    std::vector<uint64_t> deleted_filter_ids;
+    std::set<uint64_t> failed_filter_ids;
+    bool metadata_failure = false;
+    bool enumeration_failure = false;
+    bool verification_failure = false;
+    size_t inspections = 0;
+    LegacyGuardCleanupAdapter adapter{
+            [this] {
+                ++inspections;
+                return LegacyGuardSnapshot{!enumeration_failure && !(verification_failure && inspections > 1), objects};
+            },
+            [this](const auto &object) {
+                deletion_order.push_back(object.kind);
+                if (object.kind == LegacyGuardObjectKind::FILTER) {
+                    deleted_filter_ids.push_back(object.filter_id);
+                }
+                if ((object.kind == LegacyGuardObjectKind::FILTER && failed_filter_ids.contains(object.filter_id))
+                        || (object.kind != LegacyGuardObjectKind::FILTER && metadata_failure)) {
+                    return false;
+                }
+                std::erase_if(objects, [&](const auto &current) {
+                    return current.version == object.version && current.kind == object.kind
+                            && (object.kind != LegacyGuardObjectKind::FILTER || current.filter_id == object.filter_id);
+                });
+                return true;
+            }};
 };
 
-bool matches(const NetworkGuardRule &rule, const Flow &flow) {
-    SocketAddress remote(flow.remote, 0);
-    SocketAddress local(flow.local, 0);
-    return remote.is_ipv6() == rule.ipv6 && flow.inbound == rule.inbound
-            && (rule.kind != NetworkGuardRuleKind::CORE || flow.core)
-            && (rule.remote_range.empty() || CidrRange(rule.remote_range).contains(remote.addr()))
-            && (rule.local_address.empty() || CidrRange(rule.local_address).contains(local.addr()))
-            && (!rule.interface_luid || rule.interface_luid == flow.interface_luid)
-            && (!rule.protocol || rule.protocol == flow.protocol)
-            && (!rule.local_port || rule.local_port == flow.local_port)
-            && (!rule.remote_port || rule.remote_port == flow.remote_port);
+TEST(WindowsNetworkGuardTest, AbsentNamespacesAreAnIdempotentCleanupSuccess) {
+    FakeCleanup fake;
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_TRUE(result.success);
+    EXPECT_FALSE(result.armed);
+    EXPECT_TRUE(fake.deletion_order.empty());
+    EXPECT_EQ("{\"armed\":false,\"version\":2}", result.to_json());
+    EXPECT_TRUE(network_guard_cleanup(fake.adapter, true).success);
 }
 
-bool allowed(const std::vector<NetworkGuardRule> &rules, const Flow &flow) {
-    bool result = true;
-    uint8_t weight = 0;
-    for (const auto &rule : rules) {
-        if (matches(rule, flow) && network_guard_rule_weight(rule) > weight) {
-            weight = network_guard_rule_weight(rule);
-            result = !network_guard_rule_blocks(rule);
+TEST(WindowsNetworkGuardTest, StatusNeverCallsTheDeletionAdapter) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1)};
+    auto result = network_guard_cleanup(fake.adapter, false);
+    EXPECT_TRUE(result.success);
+    EXPECT_TRUE(result.armed);
+    EXPECT_TRUE(fake.deletion_order.empty());
+    EXPECT_EQ(1, fake.inspections);
+}
+
+TEST(WindowsNetworkGuardTest, PartialOrOrphanedNamespaceDoesNotNeedCompletePolicyOrMetadata) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1, 17), owned(LegacyGuardObjectKind::FILTER, 2, 91)};
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_TRUE(result.success);
+    EXPECT_FALSE(result.armed);
+    EXPECT_TRUE(fake.objects.empty());
+}
+
+TEST(WindowsNetworkGuardTest, InvalidPolicyAndReplacedExecutableDoNotPreventOwnedCleanup) {
+    FakeCleanup fake;
+    auto filter = owned(LegacyGuardObjectKind::FILTER, 1);
+    filter.owner_data += "{invalid or obsolete policy, old executable path, different conditions";
+    fake.objects = {filter};
+    // There is intentionally no comparison to the current executable AppID,
+    // policy, rule count, disabled flag or filter conditions in the coordinator.
+    EXPECT_TRUE(network_guard_cleanup(fake.adapter, true).success);
+    EXPECT_TRUE(fake.objects.empty());
+}
+
+TEST(WindowsNetworkGuardTest, BothVersionsDeleteFiltersBeforeMetadata) {
+    FakeCleanup fake;
+    for (uint32_t version : {1, 2}) {
+        fake.objects.push_back(owned(LegacyGuardObjectKind::PROVIDER, version));
+        fake.objects.push_back(owned(LegacyGuardObjectKind::SUBLAYER, version));
+        fake.objects.push_back(owned(LegacyGuardObjectKind::FILTER, version, version));
+    }
+    EXPECT_TRUE(network_guard_cleanup(fake.adapter, true).success);
+    EXPECT_EQ(
+            (std::vector{LegacyGuardObjectKind::FILTER, LegacyGuardObjectKind::FILTER, LegacyGuardObjectKind::SUBLAYER,
+                    LegacyGuardObjectKind::SUBLAYER, LegacyGuardObjectKind::PROVIDER, LegacyGuardObjectKind::PROVIDER}),
+            fake.deletion_order);
+}
+
+TEST(WindowsNetworkGuardTest, MixedPermitBlockFailureRetainsEveryPermitRegardlessOfEnumerationOrder) {
+    for (bool permit_first : {false, true}) {
+        FakeCleanup fake;
+        auto permit = owned(LegacyGuardObjectKind::FILTER, 1, 10, false);
+        auto block = owned(LegacyGuardObjectKind::FILTER, 1, 20, true);
+        fake.objects = permit_first ? std::vector{permit, block} : std::vector{block, permit};
+        fake.objects.push_back(owned(LegacyGuardObjectKind::SUBLAYER, 1));
+        fake.objects.push_back(owned(LegacyGuardObjectKind::PROVIDER, 1));
+        fake.failed_filter_ids.insert(20);
+        auto result = network_guard_cleanup(fake.adapter, true);
+        EXPECT_FALSE(result.success);
+        EXPECT_TRUE(result.armed);
+        EXPECT_EQ((std::vector<uint64_t>{20}), fake.deleted_filter_ids);
+        EXPECT_EQ(4, fake.objects.size());
+        EXPECT_EQ(1, fake.deletion_order.size());
+    }
+}
+
+TEST(WindowsNetworkGuardTest, PartialBlockFailureCannotRemoveCorePermitsOrMetadataInEitherNamespace) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1, 10, false), owned(LegacyGuardObjectKind::FILTER, 1, 20),
+            owned(LegacyGuardObjectKind::FILTER, 2, 30), owned(LegacyGuardObjectKind::FILTER, 2, 40, false),
+            owned(LegacyGuardObjectKind::SUBLAYER, 1), owned(LegacyGuardObjectKind::PROVIDER, 2)};
+    fake.failed_filter_ids.insert(30);
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.armed);
+    EXPECT_EQ((std::vector<uint64_t>{20, 30}), fake.deleted_filter_ids);
+    ASSERT_EQ(5, fake.objects.size());
+    EXPECT_EQ(2, std::count_if(fake.objects.begin(), fake.objects.end(), [](const auto &object) {
+        return object.kind == LegacyGuardObjectKind::FILTER && !object.blocking;
+    }));
+}
+
+TEST(WindowsNetworkGuardTest, FailedBlockVerificationRetainsAllPermitsAndMetadata) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1, 10, false), owned(LegacyGuardObjectKind::FILTER, 1, 20),
+            owned(LegacyGuardObjectKind::SUBLAYER, 1), owned(LegacyGuardObjectKind::PROVIDER, 1)};
+    fake.verification_failure = true;
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.armed);
+    EXPECT_EQ((std::vector<uint64_t>{20}), fake.deleted_filter_ids);
+    EXPECT_EQ(3, fake.objects.size());
+}
+
+TEST(WindowsNetworkGuardTest, IncompleteInitialEnumerationRetainsPermitsEvenAfterKnownBlocksAreRemoved) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1, 10, false), owned(LegacyGuardObjectKind::FILTER, 1, 20),
+            owned(LegacyGuardObjectKind::SUBLAYER, 1)};
+    fake.enumeration_failure = true;
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.armed);
+    EXPECT_EQ((std::vector<uint64_t>{20}), fake.deleted_filter_ids);
+    EXPECT_EQ(2, fake.objects.size());
+}
+
+TEST(WindowsNetworkGuardTest, BlockAppearingAtVerificationRetainsPermitsAndMetadata) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1, 10, false), owned(LegacyGuardObjectKind::FILTER, 1, 20),
+            owned(LegacyGuardObjectKind::SUBLAYER, 1)};
+    auto real_inspect = fake.adapter.inspect;
+    fake.adapter.inspect = [&] {
+        if (fake.inspections == 1) {
+            fake.objects.push_back(owned(LegacyGuardObjectKind::FILTER, 2, 30));
         }
-    }
-    return result;
+        return real_inspect();
+    };
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.armed);
+    EXPECT_EQ((std::vector<uint64_t>{20}), fake.deleted_filter_ids);
+    EXPECT_EQ(3, fake.objects.size());
 }
 
-TEST(WindowsNetworkGuardTest, FullDefaultCapturesBothFamiliesInBothDirections) {
-    auto plan = network_guard_base_plan();
-    ASSERT_FALSE(plan.empty());
-    EXPECT_EQ(4, std::count_if(plan.begin(), plan.end(), [](const auto &rule) {
-        return rule.kind == NetworkGuardRuleKind::BLOCK;
-    }));
-    for (bool inbound : {false, true}) {
-        EXPECT_FALSE(allowed(plan, {.remote = "198.51.100.1", .inbound = inbound}));
-        EXPECT_FALSE(allowed(plan, {.remote = "2001:db8::1", .local = "2001:db8::20", .inbound = inbound}));
-        EXPECT_FALSE(allowed(plan, {.remote = "64:ff9b::c000:201", .local = "2001:db8::20", .inbound = inbound}));
-        EXPECT_FALSE(allowed(plan, {.remote = "4000::1", .local = "2001:db8::20", .inbound = inbound}));
-    }
-}
-
-TEST(WindowsNetworkGuardTest, OnlyCoreIdentityCanIntentionallyRelayDirectPublicTraffic) {
-    auto plan = network_guard_base_plan();
-    EXPECT_TRUE(allowed(plan, {.remote = "198.51.100.1", .core = true}));
-    EXPECT_TRUE(allowed(plan, {.remote = "2001:db8::1", .local = "2001:db8::20", .core = true}));
-    EXPECT_FALSE(allowed(plan, {.remote = "198.51.100.1"}));
-    // Endpoint IPs are never automatically added as all-application exceptions.
-    EXPECT_FALSE(allowed(plan, {.remote = "198.51.100.1", .protocol = 17, .remote_port = 443}));
-}
-
-TEST(WindowsNetworkGuardTest, ExactTunnelAddressAndInterfaceAreBothRequired) {
-    auto base = network_guard_base_plan();
-    // get_address_for_index passes host-length CIDRs to both address assignment
-    // and the guard; CidrRange normalizes subnet inputs before either call.
-    auto tunnel = network_guard_tunnel_plan(99, CidrRange("10.20.30.40/32"), CidrRange("fd00::40/128"));
-    ASSERT_EQ(4, tunnel.size());
-    base.insert(base.end(), tunnel.begin(), tunnel.end());
-    for (bool inbound : {false, true}) {
-        EXPECT_TRUE(allowed(
-                base, {.remote = "198.51.100.1", .local = "10.20.30.40", .interface_luid = 99, .inbound = inbound}));
-        EXPECT_FALSE(allowed(
-                base, {.remote = "198.51.100.1", .local = "10.20.30.40", .interface_luid = 7, .inbound = inbound}));
-        EXPECT_FALSE(allowed(
-                base, {.remote = "198.51.100.1", .local = "10.20.30.41", .interface_luid = 99, .inbound = inbound}));
-        EXPECT_TRUE(allowed(
-                base, {.remote = "2001:db8::1", .local = "fd00::40", .interface_luid = 99, .inbound = inbound}));
-        EXPECT_FALSE(allowed(
-                base, {.remote = "2001:db8::1", .local = "fd00::41", .interface_luid = 99, .inbound = inbound}));
-    }
-}
-
-TEST(WindowsNetworkGuardTest, InvalidTunnelCannotCreateAnUnboundPermit) {
-    EXPECT_TRUE(network_guard_tunnel_plan(0, CidrRange("10.20.30.40"), CidrRange("fd00::40")).empty());
-    EXPECT_TRUE(network_guard_tunnel_plan(99, CidrRange(""), CidrRange("fd00::40")).empty());
-    EXPECT_EQ(2, network_guard_tunnel_plan(99, CidrRange("10.20.30.40"), CidrRange("")).size());
-}
-
-TEST(WindowsNetworkGuardTest, CustomScopeAndExplicitUserExclusionsArePreserved) {
-    NetworkGuardPolicy policy{{"198.51.100.0/24", "2001:db8::/32"}, {"198.51.100.10/32", "2001:db8::10/128"}};
-    auto plan = network_guard_base_plan(policy);
-    EXPECT_FALSE(allowed(plan, {.remote = "198.51.100.11"}));
-    EXPECT_TRUE(allowed(plan, {.remote = "198.51.100.10"}));
-    EXPECT_TRUE(allowed(plan, {.remote = "203.0.113.1"}));
-    EXPECT_FALSE(allowed(plan, {.remote = "2001:db8::11", .local = "2001:db8::20"}));
-    EXPECT_TRUE(allowed(plan, {.remote = "2001:db8::10", .local = "2001:db8::20"}));
-    EXPECT_TRUE(allowed(plan, {.remote = "4000::1", .local = "2001:db8::20"}));
-}
-
-TEST(WindowsNetworkGuardTest, LocalAccessDoesNotCreatePublicDnsOrServiceExceptions) {
-    auto plan = network_guard_base_plan();
-    for (const char *remote : {"127.0.0.1", "192.168.1.1", "10.1.2.3", "172.17.1.1", "169.254.1.2", "224.0.0.251"}) {
-        EXPECT_TRUE(allowed(plan, {.remote = remote}));
-    }
-    for (uint16_t port : {53, 67, 68, 443, 853}) {
-        EXPECT_FALSE(allowed(plan, {.remote = "198.51.100.1", .protocol = 17, .remote_port = port}));
-    }
-    EXPECT_TRUE(allowed(plan, {.remote = "255.255.255.255", .protocol = 17, .local_port = 68, .remote_port = 67}));
-    EXPECT_FALSE(allowed(plan, {.remote = "255.255.255.255", .protocol = 6, .local_port = 68, .remote_port = 67}));
-    EXPECT_FALSE(allowed(plan, {.remote = "255.255.255.255", .protocol = 17, .local_port = 43210, .remote_port = 67}));
-    EXPECT_FALSE(allowed(plan, {.remote = "224.1.2.3"}));
-}
-
-TEST(WindowsNetworkGuardTest, CoreCrashRetainsGuiSessionBaseButGuiExitRemovesAllBlockingRules) {
-    auto base = network_guard_base_plan();
-    auto dynamic = network_guard_tunnel_plan(99, CidrRange("10.20.30.40"), CidrRange("fd00::40"));
-    EXPECT_TRUE(std::none_of(base.begin(), base.end(), [](const auto &rule) {
-        return rule.persistent;
-    }));
-    EXPECT_TRUE(std::none_of(dynamic.begin(), dynamic.end(), [](const auto &rule) {
-        return rule.persistent;
-    }));
-    auto live = base;
-    live.insert(live.end(), dynamic.begin(), dynamic.end());
-    Flow flow{.remote = "198.51.100.1", .local = "10.20.30.40", .interface_luid = 99};
-    EXPECT_TRUE(allowed(live, flow));
-    // Core death closes its TUN engine; the separate GUI-owned helper still owns its base.
-    dynamic.clear();
-    EXPECT_FALSE(allowed(base, flow));
-    EXPECT_FALSE(allowed(base, {.remote = "2001:db8::1", .local = "2001:db8::20"}));
-    EXPECT_TRUE(allowed(base, {.remote = "198.51.100.1", .core = true}));
-    // Helper EOF/GUI job termination removes its entire dynamic base. Windows
-    // restart cannot restore it: neither the base nor TUN plan has persistent rules.
-    base.clear();
-    EXPECT_TRUE(allowed(base, flow));
-    EXPECT_TRUE(allowed(base, {.remote = "2001:db8::1", .local = "2001:db8::20"}));
-}
-
-TEST(WindowsNetworkGuardTest, CrashCannotFallBackToLanDnsButRetainsOrdinaryLanAccess) {
-    NetworkGuardPolicy policy{{"0.0.0.0/0", "::/1", "8000::/1"},
-            {"10.0.0.0/8", "192.168.0.0/16", "fc00::/7", "::1/128", "fe80::/10", "ff00::/8"}};
-    auto base = network_guard_base_plan(policy);
-    for (uint8_t protocol : {uint8_t(6), uint8_t(17)}) {
-        for (uint16_t port : {uint16_t(53), uint16_t(853)}) {
-            EXPECT_FALSE(allowed(base, {.remote = "192.168.1.1", .protocol = protocol, .remote_port = port}));
-            EXPECT_FALSE(allowed(
-                    base, {.remote = "fd00::1", .local = "fd00::20", .protocol = protocol, .remote_port = port}));
-            EXPECT_TRUE(
-                    allowed(base, {.remote = "192.168.1.1", .core = true, .protocol = protocol, .remote_port = port}));
+TEST(WindowsNetworkGuardTest, SuccessfulBlockRemovalIsVerifiedBeforeAnyPermitIsRemoved) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1, 10, false), owned(LegacyGuardObjectKind::FILTER, 2, 30),
+            owned(LegacyGuardObjectKind::FILTER, 1, 20), owned(LegacyGuardObjectKind::FILTER, 2, 40, false)};
+    bool removed_permit_before_verification = false;
+    auto real_remove = fake.adapter.remove;
+    fake.adapter.remove = [&](const auto &object) {
+        if (object.kind == LegacyGuardObjectKind::FILTER && !object.blocking && fake.inspections < 2) {
+            removed_permit_before_verification = true;
         }
-    }
-    EXPECT_TRUE(allowed(base, {.remote = "192.168.1.1", .remote_port = 443}));
-    auto tunnel = network_guard_tunnel_plan(99, CidrRange("10.20.30.40"), CidrRange("fd00::40"));
-    base.insert(base.end(), tunnel.begin(), tunnel.end());
-    EXPECT_TRUE(
-            allowed(base, {.remote = "192.168.1.1", .local = "10.20.30.40", .interface_luid = 99, .remote_port = 53}));
-    auto custom = network_guard_base_plan({{"198.51.100.0/24"}, {}});
-    EXPECT_TRUE(allowed(custom, {.remote = "192.168.1.1", .protocol = 17, .remote_port = 53}));
-    auto intentional = network_guard_base_plan({{"0.0.0.0/0"}, {"198.51.100.53/32"}});
-    EXPECT_TRUE(allowed(intentional, {.remote = "198.51.100.53", .protocol = 17, .remote_port = 53}));
+        return real_remove(object);
+    };
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_TRUE(result.success);
+    EXPECT_FALSE(result.armed);
+    EXPECT_FALSE(removed_permit_before_verification);
+    EXPECT_EQ((std::vector<uint64_t>{30, 20, 10, 40}), fake.deleted_filter_ids);
 }
 
-TEST(WindowsNetworkGuardTest, TransactionRollsBackEveryApplyFailure) {
-    const auto old = network_guard_base_plan();
-    const auto next = network_guard_base_plan({{"203.0.113.0/24"}, {}});
-    for (size_t fail = 0; fail < next.size(); ++fail) {
-        auto committed = old;
-        std::vector<NetworkGuardRule> staged;
-        bool aborted = false;
-        EXPECT_FALSE(run_network_guard_transaction({
-                .begin =
-                        [] {
-                            return true;
-                        },
-                .apply =
-                        [&] {
-                            for (size_t i = 0; i < next.size(); ++i) {
-                                if (i == fail) {
-                                    return false;
-                                }
-                                staged.push_back(next[i]);
-                            }
-                            return true;
-                        },
-                .commit =
-                        [&] {
-                            committed = staged;
-                            return true;
-                        },
-                .abort =
-                        [&] {
-                            staged.clear();
-                            aborted = true;
-                        },
-        }));
-        EXPECT_TRUE(aborted);
-        EXPECT_EQ(old.size(), committed.size());
-        EXPECT_FALSE(allowed(committed, {.remote = "198.51.100.1"}));
+TEST(WindowsNetworkGuardTest, ForeignNamespaceOrOwnerNeverGetsDeleted) {
+    for (int mismatch = 0; mismatch < 7; ++mismatch) {
+        FakeCleanup fake;
+        auto foreign = owned(LegacyGuardObjectKind::FILTER, 1);
+        switch (mismatch) {
+        case 0:
+            foreign.version = 3;
+            break;
+        case 1:
+            foreign.provider_key_matches = false;
+            break;
+        case 2:
+            foreign.sublayer_key_matches = false;
+            break;
+        case 3:
+            foreign.object_key_matches = false;
+            break;
+        case 4:
+            foreign.owner_data = "AnotherProduct";
+            break;
+        case 5:
+            foreign.owner_data = "TrustTunnelClientPro.NetworkGuard.1";
+            break;
+        case 6:
+            foreign.owner_data = "TrustTunnelClientPro.NetworkGuard.2" + std::string(1, '\0');
+            break;
+        }
+        fake.objects = {foreign};
+        auto result = network_guard_cleanup(fake.adapter, true);
+        EXPECT_TRUE(result.success) << mismatch;
+        EXPECT_FALSE(result.armed) << mismatch;
+        EXPECT_TRUE(fake.deletion_order.empty()) << mismatch;
+        EXPECT_EQ(1, fake.objects.size()) << mismatch;
     }
 }
 
-TEST(WindowsNetworkGuardTest, CommitFailureAndBeginFailurePreservePriorProtection) {
-    bool applied = false;
-    bool aborted = false;
-    EXPECT_FALSE(run_network_guard_transaction({
-            .begin =
-                    [] {
-                        return false;
-                    },
-            .apply =
-                    [&] {
-                        applied = true;
-                        return true;
-                    },
-            .commit =
-                    [] {
-                        return true;
-                    },
-            .abort =
-                    [&] {
-                        aborted = true;
-                    },
-    }));
-    EXPECT_FALSE(applied);
-    EXPECT_FALSE(aborted);
-    EXPECT_FALSE(run_network_guard_transaction({
-            .begin =
-                    [] {
-                        return true;
-                    },
-            .apply =
-                    [&] {
-                        applied = true;
-                        return true;
-                    },
-            .commit =
-                    [] {
-                        return false;
-                    },
-            .abort =
-                    [&] {
-                        aborted = true;
-                    },
-    }));
-    EXPECT_TRUE(applied);
-    EXPECT_TRUE(aborted);
+TEST(WindowsNetworkGuardTest, ForeignReferencesMayRetainMetadataWithoutRestoringRemovedBlocks) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1), owned(LegacyGuardObjectKind::PROVIDER, 1),
+            owned(LegacyGuardObjectKind::SUBLAYER, 1)};
+    fake.metadata_failure = true;
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_FALSE(result.armed);
+    EXPECT_STREQ("network-guard-cleanup-incomplete", result.error);
+    EXPECT_EQ(2, fake.objects.size());
 }
 
-TEST(WindowsNetworkGuardTest, SuccessfulTransactionCommitsExactlyOnce) {
-    int commits = 0;
-    int aborts = 0;
-    EXPECT_TRUE(run_network_guard_transaction({
-            .begin =
-                    [] {
-                        return true;
-                    },
-            .apply =
-                    [] {
-                        return true;
-                    },
-            .commit =
-                    [&] {
-                        ++commits;
-                        return true;
-                    },
-            .abort =
-                    [&] {
-                        ++aborts;
-                    },
-    }));
-    EXPECT_EQ(1, commits);
-    EXPECT_EQ(0, aborts);
+TEST(WindowsNetworkGuardTest, OneFailedDeletionDoesNotRollBackOrSkipOtherOwnedFilters) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1, 1), owned(LegacyGuardObjectKind::FILTER, 1, 2),
+            owned(LegacyGuardObjectKind::FILTER, 2, 3)};
+    fake.failed_filter_ids.insert(1);
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.armed);
+    ASSERT_EQ(1, fake.objects.size());
+    EXPECT_EQ(1, fake.objects.front().filter_id);
+    fake.failed_filter_ids.clear();
+    EXPECT_TRUE(network_guard_cleanup(fake.adapter, true).success);
 }
 
-TEST(WindowsNetworkGuardTest, InvalidRoutesCannotBecomeWiderPermissions) {
-    EXPECT_TRUE(network_guard_valid_policy({}));
-    for (const char *route : {"example.com/24", "198.51.100.1/33", "2001:db8::1/129", "0.0.0.0/nope", "::/-1"}) {
-        NetworkGuardPolicy policy{{route}, {}};
-        EXPECT_FALSE(network_guard_valid_policy(policy));
-        EXPECT_TRUE(network_guard_base_plan(policy).empty());
+TEST(WindowsNetworkGuardTest, EnumerationFailureStillRemovesPositivelyIdentifiedPartialResults) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1)};
+    fake.enumeration_failure = true;
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.armed);
+    EXPECT_TRUE(fake.objects.empty());
+}
+
+TEST(WindowsNetworkGuardTest, FailedVerificationNeverReportsUnqualifiedSuccess) {
+    FakeCleanup fake;
+    fake.objects = {owned(LegacyGuardObjectKind::FILTER, 1)};
+    fake.verification_failure = true;
+    auto result = network_guard_cleanup(fake.adapter, true);
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.armed);
+}
+
+TEST(WindowsNetworkGuardTest, MetadataRequiresAnExactMarkerButFiltersAllowStoredPolicyTail) {
+    for (auto kind :
+            {LegacyGuardObjectKind::FILTER, LegacyGuardObjectKind::SUBLAYER, LegacyGuardObjectKind::PROVIDER}) {
+        auto object = owned(kind, 2);
+        EXPECT_TRUE(network_guard_legacy_object_owned(object));
+        object.owner_data += "trailing policy bytes";
+        EXPECT_EQ(kind == LegacyGuardObjectKind::FILTER, network_guard_legacy_object_owned(object));
     }
-    EXPECT_FALSE(network_guard_valid_policy({{}, {}}));
-    EXPECT_FALSE(network_guard_valid_policy({{"0.0.0.0/0"}, {"198.51.100.1/xyz"}}));
 }
 
-TEST(WindowsNetworkGuardTest, BootstrapAcceptsOnlyOneHostAndNeverAUrlOrCommand) {
-    for (const char *host : {"vpn.example.com", "xn--e1afmkfd.xn--p1ai", "198.51.100.1", "2001:db8::1"}) {
-        EXPECT_TRUE(network_guard_valid_hostname(host));
-    }
-    for (const char *host :
-            {"", "https://example.com", "example.com:443", "example.com/path", "a b", "-a.com", "a-.com", "a..com"}) {
-        EXPECT_FALSE(network_guard_valid_hostname(host));
-    }
-    EXPECT_FALSE(network_guard_valid_hostname(std::string(254, 'a')));
+TEST(WindowsNetworkGuardTest, FastCleanupCancelsWatchdogWithoutEarlyTimeoutOrWaitingForDeadline) {
+    std::atomic_int timeouts = 0;
+    const auto caller = std::this_thread::get_id();
+    const auto start = std::chrono::steady_clock::now();
+    auto result = network_guard_cleanup_with_deadline(
+            std::chrono::seconds(2),
+            [&] {
+                EXPECT_EQ(caller, std::this_thread::get_id());
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                EXPECT_EQ(0, timeouts.load());
+                return NetworkGuardResult{true, false, nullptr};
+            },
+            [&] {
+                ++timeouts;
+            });
+    EXPECT_TRUE(result.success);
+    EXPECT_EQ(0, timeouts.load());
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
 }
 
-TEST(WindowsNetworkGuardTest, UnknownStateIsReportedProtectedWithFixedError) {
-    EXPECT_EQ("{\"armed\":true,\"error\":\"network-guard-unavailable\",\"version\":2}", NetworkGuardResult{}.to_json());
-    EXPECT_EQ("{\"armed\":false,\"version\":2}", (NetworkGuardResult{true, false, nullptr}.to_json()));
-    EXPECT_EQ("{\"addresses\":[],\"error\":\"network-guard-invalid-host\",\"version\":2}",
-            (NetworkGuardResolveResult{{}, "network-guard-invalid-host"}.to_json()));
+TEST(WindowsNetworkGuardTest, HungFakeCleanupTriggersExactlyOneDeadlineOnAnotherThread) {
+    std::mutex mutex;
+    std::condition_variable released;
+    std::atomic_int timeouts = 0;
+    const auto caller = std::this_thread::get_id();
+    std::thread::id timeout_thread;
+    const auto start = std::chrono::steady_clock::now();
+    auto result = network_guard_cleanup_with_deadline(
+            std::chrono::milliseconds(30),
+            [&] {
+                std::unique_lock lock(mutex);
+                const bool fired = released.wait_for(lock, std::chrono::seconds(2), [&] {
+                    return timeouts.load() > 0;
+                });
+                EXPECT_TRUE(fired);
+                return NetworkGuardResult{false, true, "fake-action-timeout"};
+            },
+            [&] {
+                {
+                    std::lock_guard lock(mutex);
+                    timeout_thread = std::this_thread::get_id();
+                    ++timeouts;
+                }
+                released.notify_one();
+            });
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(1, timeouts.load());
+    EXPECT_NE(caller, timeout_thread);
+    EXPECT_GE(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(20));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
 }
 
-TEST(WindowsNetworkGuardTest, GuardedTransportRequiresBothPinsOnAPhysicalInterface) {
-    EXPECT_TRUE(network_guard_socket_protection_result(true, 7, true, true, true));
-    EXPECT_FALSE(network_guard_socket_protection_result(true, 0, true, true, true));
-    EXPECT_FALSE(network_guard_socket_protection_result(true, 7, false, true, true));
-    EXPECT_FALSE(network_guard_socket_protection_result(true, 7, true, false, true));
-    EXPECT_FALSE(network_guard_socket_protection_result(true, 7, true, true, false));
-    EXPECT_FALSE(network_guard_socket_protection_result(true, 7, true, false, false));
-    EXPECT_TRUE(network_guard_socket_protection_result(false, 7, false, true, false));
-    EXPECT_TRUE(network_guard_socket_protection_result(false, 7, false, false, true));
-    EXPECT_FALSE(network_guard_socket_protection_result(false, 7, false, false, false));
+TEST(WindowsNetworkGuardTest, FailingOrThrowingCleanupCancelsDeadlineAndJoinsOnlyWatchdog) {
+    std::atomic_int timeouts = 0;
+    auto result = network_guard_cleanup_with_deadline(
+            std::chrono::seconds(2),
+            [] {
+                return NetworkGuardResult{false, true, "fake-cleanup-failed"};
+            },
+            [&] {
+                ++timeouts;
+            });
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(0, timeouts.load());
+    EXPECT_THROW(network_guard_cleanup_with_deadline(
+                         std::chrono::seconds(2),
+                         []() -> NetworkGuardResult {
+                             throw std::runtime_error("fake failure");
+                         },
+                         [&] {
+                             ++timeouts;
+                         }),
+            std::runtime_error);
+    EXPECT_EQ(0, timeouts.load());
 }
 
-TEST(WindowsNetworkGuardTest, SessionProtocolHasBoundedUnambiguousCommands) {
-    EXPECT_EQ(NetworkGuardCommandKind::STATUS, network_guard_parse_command("S").kind);
-    EXPECT_EQ(NetworkGuardCommandKind::RELEASE, network_guard_parse_command("R").kind);
-    auto arm = network_guard_parse_command("A C:\\Profiles With Spaces\\profile.toml");
-    EXPECT_EQ(NetworkGuardCommandKind::ARM, arm.kind);
-    EXPECT_EQ("C:\\Profiles With Spaces\\profile.toml", arm.config_path);
-    for (const char *line : {"", "A", "A ", "S ", "R anything", "arm path", "A file\nR", "A file\rR"}) {
-        EXPECT_EQ(NetworkGuardCommandKind::INVALID, network_guard_parse_command(line).kind);
-    }
-    EXPECT_EQ(NetworkGuardCommandKind::INVALID, network_guard_parse_command("A " + std::string(32769, 'x')).kind);
-    EXPECT_EQ(NetworkGuardCommandKind::INVALID, network_guard_parse_command(std::string("A file\0R", 8)).kind);
-}
+template <typename T>
+concept HasArm = requires { &T::arm; };
+template <typename T>
+concept HasCreate = requires { &T::create; };
 
-TEST(WindowsNetworkGuardTest, CoreCannotStartWithoutTheExactGuiJobHandshake) {
-    EXPECT_TRUE(network_guard_valid_gui_ready("TRUSTTUNNEL_GUI_READY_V2"));
-    for (const char *line :
-            {"", "TRUSTTUNNEL_GUI_READY_V1", "TRUSTTUNNEL_GUI_READY_V2 ", "ready", "TRUSTTUNNEL_GUI_READY_V2\n"}) {
-        EXPECT_FALSE(network_guard_valid_gui_ready(line));
-    }
-    EXPECT_FALSE(network_guard_valid_gui_ready(std::string(65, 'x')));
+TEST(WindowsNetworkGuardTest, CleanupAPIHasNoArmingOrCreationOperation) {
+    static_assert(!HasArm<WindowsNetworkGuard>);
+    static_assert(!HasCreate<WindowsNetworkGuard>);
+    static_assert(!HasArm<LegacyGuardCleanupAdapter>);
+    static_assert(!HasCreate<LegacyGuardCleanupAdapter>);
+    EXPECT_FALSE(HasArm<WindowsNetworkGuard>);
 }
 
 } // namespace

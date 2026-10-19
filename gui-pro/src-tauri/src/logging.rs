@@ -80,7 +80,34 @@ pub fn sanitize(text: &str) -> String {
         redacted.push('\n');
     }
     // Mask bare IPv4 addresses in freetext (e.g. "Connected to 1.2.3.4:443").
-    mask_ipv4_addresses(&redacted)
+    mask_ipv4_addresses(&redact_connection_links(&redacted))
+}
+
+/// Connection URLs encode credentials rather than spelling out `password =`.
+/// Redact their whole payload even when embedded in prose or an error snippet.
+fn redact_connection_links(text: &str) -> String {
+    let lower = text.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let next = ["tt://", "trusttunnel://"]
+            .iter()
+            .filter_map(|scheme| lower[cursor..].find(scheme).map(|pos| (cursor + pos, scheme.len())))
+            .min_by_key(|(pos, _)| *pos);
+        let Some((start, scheme_len)) = next else {
+            out.push_str(&text[cursor..]);
+            break;
+        };
+        out.push_str(&text[cursor..start + scheme_len]);
+        out.push_str("***");
+        let payload_start = start + scheme_len;
+        cursor = text[payload_start..]
+            .char_indices()
+            .find(|(_, ch)| ch.is_whitespace() || matches!(ch, '\'' | '"' | '<' | '>'))
+            .map(|(offset, _)| payload_start + offset)
+            .unwrap_or(text.len());
+    }
+    out
 }
 
 /// Redact a single line if it looks like `<indent><sensitive_key><sep><value>`.
@@ -476,6 +503,22 @@ mod tests {
         assert_eq!(sanitize(""), "");
         let safe = "this is a safe log line with no secrets";
         assert_eq!(sanitize(safe), safe);
+    }
+
+    #[test]
+    fn sanitize_redacts_encoded_connection_credentials_in_all_link_schemes() {
+        let fake_secret = "ZmFrZS11c2VyOmZha2UtcGFzc3dvcmQ=";
+        for scheme in ["tt://", "trusttunnel://", "TT://", "TrustTunnel://"] {
+            let input = format!("Export returned \"{scheme}{fake_secret}\"; keep this diagnostic");
+            let output = sanitize(&input);
+            assert!(!output.contains(fake_secret));
+            assert!(output.contains(&format!("{scheme}***")));
+            assert!(output.contains("keep this diagnostic"));
+        }
+        let multiple = format!("tt://{fake_secret}\ntrusttunnel://{fake_secret}");
+        let output = sanitize(&multiple);
+        assert!(!output.contains(fake_secret));
+        assert_eq!(output.matches("***").count(), 2);
     }
 
     #[test]

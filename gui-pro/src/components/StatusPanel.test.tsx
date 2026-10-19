@@ -48,6 +48,8 @@ describe("StatusPanel", () => {
     render(<StatusPanel {...defaultProps} status="connecting" />);
     // Status label appears in badge only; button shows "Cancel"
     expect(screen.getByText("Подключение")).toBeInTheDocument();
+    expect(screen.getByText("Подготавливаем подключение и списки сайтов…")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     const btn = screen.getByRole("button", { name: /Отмена/ });
     expect(btn).toBeEnabled();
   });

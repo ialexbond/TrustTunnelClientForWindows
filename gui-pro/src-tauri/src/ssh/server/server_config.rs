@@ -431,7 +431,6 @@ pub async fn fetch_server_config(
             // content of this failure, so the Russian copy renders them (dropping them
             // would leave the user with "not found" and nothing to do about it).
             // `name` is whitelist-validated above; the available list is server-controlled
-            // and echoed the same way `SSH_EXPORT_FAILED|{code}|{users}` already echoes it
             // (the frontend rejoins everything past the second `|`, so a username
             // containing a separator cannot truncate the list — see translateSshError).
             emit_step(
@@ -472,17 +471,14 @@ pub async fn fetch_server_config(
         dir = ENDPOINT_DIR, svc = ENDPOINT_SERVICE
     );
 
-    let (export_output, export_code) = exec_command(&handle, app, &export_cmd).await?;
+    let (export_output, export_code) = exec_command_quiet(&handle, &export_cmd).await?;
 
-    if export_code != 0 || export_output.trim().is_empty() {
-        emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
-        let msg = if !available_users.is_empty() {
-            format!("SSH_EXPORT_FAILED|{}|{}", export_code, available_users.join(", "))
-        } else {
-            format!("SSH_EXPORT_FAILED|{}", export_code)
-        };
-        emit_step(app, "export", "error", &msg);
-        return Err(msg);
+    if let Err(message) = validate_config_export_result(&export_output, export_code) {
+        // Endpoint output may contain passwords even on failure. It must never
+        // become diagnostic prose, whether prefixed, truncated or redacted.
+        emit_log(app, "error", "Client configuration export failed");
+        emit_step(app, "export", "error", &message);
+        return Err(message);
     }
 
     // Extract only the TOML part
@@ -512,81 +508,12 @@ pub async fn fetch_server_config(
     // pre-rename endpoint build.
     client_toml = normalize_legacy_field_names(&client_toml);
 
-    // FIX-NN: overlay stored TLV params from users-advanced.toml. Without
-    // this, the downloaded .toml always reflects the CLI-default endpoint
-    // shape (anti_dpi=true forced by build_client_config, no SNI, etc.)
-    // rather than what the user actually saved via Add/Edit. If the user
-    // never saved advanced params the overlay is a no-op.
+    // The endpoint CLI reads its configured certificate on the SSH server and
+    // exports it in this TOML. Its output already arrived over the confirmed SSH
+    // connection; never replace that trust anchor with an unauthenticated probe.
     let advanced = super::users_advanced::get_user_advanced(app, &handle, name.clone())
-        .await
-        .unwrap_or(None);
-    if let Some(adv) = advanced {
-        match inject_advanced_into_endpoint(&client_toml, &adv) {
-            Ok(updated) => client_toml = updated,
-            Err(e) => emit_log(app, "warn", &format!("users-advanced overlay failed: {e}")),
-        }
-    }
-
-    // ── gap 5b-2: auto-apply the self-signed cert policy on the FETCH path ────
-    //
-    // ROOT CAUSE (16-UAT round 3): the config the owner gets after install is
-    // produced by THIS fetch path (header "Fetched from server <ip>"), which
-    // DoneStep re-invokes when adding the config (same command as the Users-tab
-    // "save config"). Before this, the fetch path applied skip_verification /
-    // cert-pin / custom_sni ONLY from the user's MANUALLY-saved advanced options
-    // (users-advanced.toml). The owner set none → a self-hosted (self-signed)
-    // config shipped WITHOUT them → OS-store validation rejected the self-signed
-    // cert → stuck on «Переключение». 16-06 fixed only `deploy_export_config`
-    // (a DIFFERENT function). We must ALSO auto-apply here, keyed on the actual
-    // cert trust (is_system_verifiable), not manual toggles — mirroring
-    // deploy_export_config (deploy.rs:1386-1440).
-    //
-    // Derive the probe target from the built [endpoint]:
-    //   - sni        = the endpoint hostname (e.g. trusttunnel.local); NEVER a
-    //                  bare IP (fetch_endpoint_cert rejects IP SNI).
-    //   - probe_host = the host part of addresses[0] (the real dial IP),
-    //                  fallback to params.host.
-    //   - probe_port = the port from addresses[0], default 443.
-    // The probe is NON-FATAL: on error we degrade to skip_verification-only
-    // (the minimum working state), never fail the fetch. LE (is_system_verifiable
-    // == true) is left untouched (OS store), matching today's behavior.
-    {
-        let (sni, probe_host, probe_port) =
-            parse_probe_target_from_endpoint(&client_toml, &params.host);
-        let probe = match crate::ssh::server::fetch_endpoint_cert(&probe_host, probe_port, &sni).await {
-            Ok(info) => {
-                let pinned_pem = if info.is_system_verifiable {
-                    None
-                } else {
-                    match der_b64_to_pem(&info.leaf_der_b64) {
-                        Ok(pem) => Some(pem),
-                        Err(e) => {
-                            emit_log(app, "warn", &format!(
-                                "Cert probe returned an unusable certificate; \
-                                 degrading to skip_verification only: {e}"
-                            ));
-                            None
-                        }
-                    }
-                };
-                Some(FetchProbeOutcome {
-                    is_system_verifiable: info.is_system_verifiable,
-                    pinned_pem,
-                    pin_verifiable: info.pin_verifiable,
-                })
-            }
-            Err(e) => {
-                emit_log(app, "warn", &format!(
-                    "Cert probe failed; degrading to skip_verification only: {e}"
-                ));
-                None
-            }
-        };
-        match apply_fetched_self_signed_policy(&client_toml, probe) {
-            Ok(updated) => client_toml = updated,
-            Err(e) => emit_log(app, "warn", &format!("self-signed policy apply failed: {e}")),
-        }
-    }
+        .await?;
+    client_toml = apply_authenticated_export_policy(&client_toml, advanced.as_ref())?;
 
     emit_step(app, "export", "ok", "Config received");
 
@@ -640,9 +567,8 @@ pub async fn get_server_config(
 ) -> Result<String, String> {
     let sudo = detect_sudo(handle, app).await;
 
-    let (output, code) = exec_command(
+    let (output, code) = exec_command_quiet(
         handle,
-        app,
         &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG),
     )
     .await?;
@@ -652,6 +578,25 @@ pub async fn get_server_config(
     }
 
     Ok(output)
+}
+
+/// Failure diagnostics are restricted to a fixed code and numeric exit status.
+/// SSH command output is credential-bearing, including unsuccessful CLI output.
+/// Keep the check pure so failed-output disclosure is tested without SSH.
+pub(crate) fn validate_config_export_result(output: &str, exit_code: i32) -> Result<(), String> {
+    if exit_code != 0 || output.trim().is_empty() {
+        return Err(format!("SSH_EXPORT_FAILED|{exit_code}"));
+    }
+    Ok(())
+}
+
+fn extract_exported_deeplink(output: &str, exit_code: i32) -> Result<String, String> {
+    validate_config_export_result(output, exit_code)?;
+    output.lines()
+        .map(str::trim)
+        .rfind(|line| line.starts_with("trusttunnel://") || line.starts_with("tt://"))
+        .map(str::to_string)
+        .ok_or_else(|| format!("SSH_EXPORT_FAILED|{exit_code}"))
 }
 
 /// Export a client configuration as a deeplink URL from the remote server.
@@ -702,21 +647,12 @@ pub async fn export_config_deeplink(
         dir = ENDPOINT_DIR, svc = ENDPOINT_SERVICE
     );
 
-    let (export_output, export_code) = exec_command(handle, app, &export_cmd).await?;
+    // A deeplink contains the client password encoded in its payload. Do not
+    // echo it into deploy events or diagnostic history.
+    let (export_output, export_code) = exec_command_quiet(handle, &export_cmd).await?;
 
-    if export_code != 0 || export_output.trim().is_empty() {
-        return Err(format!(
-            "SSH_DEEPLINK_EXPORT_FAILED|{export_code}|{client_name}"
-        ));
-    }
+    extract_exported_deeplink(&export_output, export_code)
 
-    // Extract the deeplink URL (skip any warning/log lines)
-    let deeplink = export_output
-        .lines()
-        .rfind(|l| l.starts_with("trusttunnel://") || l.starts_with("tt://"))
-        .unwrap_or(export_output.trim());
-
-    Ok(deeplink.trim().to_string())
 }
 
 /// Toggle a boolean feature in vpn.toml (ping_enable, speedtest_enable, ipv6_available)
@@ -915,35 +851,11 @@ pub async fn export_config_deeplink_advanced(
         "cd {dir} && {sudo}./{svc} vpn.toml hosts.toml {cli_args} --format deeplink 2>&1"
     );
 
-    let (output, code) = exec_command(handle, app, &export_cmd).await?;
-    if code != 0 {
-        // FIX-GG: the bare `SSH_EXPORT_FAILED|1` error was useless — users
-        // saw "exit code 1" with no hint what the CLI actually printed.
-        // Now surface up to 240 chars of output (snippet is sanitized
-        // downstream by logging::sanitize before hitting activity.log).
-        let snippet: String = output.trim().chars().take(240).collect();
-        return Err(format!("SSH_EXPORT_FAILED|{code}|{snippet}"));
-    }
-    // Accept either upstream scheme; normalize to `tt://` because tlv_encoder
-    // expects that prefix exactly.
-    let mut base_deeplink = output
-        .lines()
-        .rfind(|l| l.starts_with("tt://") || l.starts_with("trusttunnel://"))
-        .map(|l| l.trim().to_string())
-        .unwrap_or_default();
+    let (output, code) = exec_command_quiet(handle, &export_cmd).await?;
+    let mut base_deeplink = extract_exported_deeplink(&output, code)?;
+    // The shared parser accepts both upstream schemes; the TLV encoder expects tt://.
     if let Some(rest) = base_deeplink.strip_prefix("trusttunnel://") {
         base_deeplink = format!("tt://{rest}");
-    }
-    if base_deeplink.is_empty() || !base_deeplink.starts_with("tt://") {
-        // FIX-L: the generic "empty or malformed deeplink" message left users
-        // with nothing actionable when the endpoint CLI misbehaved. Surface
-        // the exit code plus a bounded output snippet (sensitive values are
-        // sanitised downstream by logging::sanitize before hitting activity.log).
-        let snippet: String = output.trim().chars().take(240).collect();
-        return Err(format!(
-            "empty or malformed deeplink returned by endpoint CLI. exit_code={code} output={:?}",
-            snippet
-        ));
     }
 
     // CR-01: decode the base64 DER cert here so the tlv_encoder sees raw bytes.
@@ -1042,16 +954,11 @@ pub fn inject_advanced_into_endpoint(
         endpoint.insert("dns_upstreams", toml_edit::value(arr));
     }
 
-    // The three INSTALL-relevant fields (skip_verification / certificate /
-    // custom_sni) are written through the shared `apply_install_cert_policy`
-    // helper so the fetch path (here) and the install path (deploy_export_config)
-    // stay a single source of truth (gap 5b). The four-state
-    // certificate discrimination — Some(self-signed leaf) ⇒ pin,
-    // Some(leaf+intermediate chain) ⇒ strip (FIX-OO-9/10: pinning an
-    // intermediate breaks OpenSSL chain-walking; a CA-issued chain is trusted
-    // by the OS store), None ⇒ strip — now lives inside the helper. We convert
-    // the DER-b64 to PEM here (preserving the bad-b64 → Err contract) and hand
-    // the PEM to the helper, which counts BEGIN-blocks to pick pin-vs-strip.
+    // Preserve explicit manual-pin behavior. A missing manual pin leaves the
+    // authenticated SSH-exported certificate in place, including its chain;
+    // the public-CA export path already supplies an empty certificate.
+    let authenticated_certificate = endpoint.get("certificate").cloned();
+    let has_manual_pin = advanced.pin_cert_der_b64.as_deref().is_some_and(|s| !s.is_empty());
     let pinned_pem = match advanced.pin_cert_der_b64.as_deref() {
         Some(s) if !s.is_empty() => Some(der_b64_to_pem(s)?),
         _ => None,
@@ -1068,23 +975,25 @@ pub fn inject_advanced_into_endpoint(
             .unwrap_or("")
             .to_string(),
     };
-    apply_install_cert_policy(&doc.to_string(), &policy)
+    let updated = apply_install_cert_policy(&doc.to_string(), &policy)?;
+    if has_manual_pin {
+        return Ok(updated);
+    }
+    // No manual pin means use the endpoint's authenticated export, not an
+    // instruction to erase a self-signed trust anchor or its issuer chain.
+    let mut updated: toml_edit::DocumentMut = updated
+        .parse()
+        .map_err(|_| "SSH_CERT_INVALID".to_string())?;
+    if let Some(certificate) = authenticated_certificate {
+        updated["endpoint"]["certificate"] = certificate;
+    }
+    Ok(updated.to_string())
 }
 
-/// The three install-relevant `[endpoint]` cert-policy fields, shared by the
-/// Users-tab fetch path (`inject_advanced_into_endpoint`) and the install path
-/// (`deploy_export_config`). Introduced for gap 5b so a fresh self-hosted
-/// install ships the exact config the owner previously had to hand-edit.
-///
-/// This is the single source of truth for how `skip_verification`,
-/// `certificate` and `custom_sni` are written into a client TOML's `[endpoint]`
-/// table; both call sites feed it here so the leaf-vs-chain discrimination and
-/// the additive-write contract (FIX-OO: never emit an explicit `false`) cannot
-/// drift apart between the two flows.
+/// Explicit advanced certificate settings. Automatic exports preserve the
+/// authenticated endpoint output through `apply_authenticated_export_policy`.
 pub(crate) struct InstallCertPolicy {
-    /// `true` ⇒ write `skip_verification = true`. `false` ⇒ leave the key
-    /// ABSENT (never write an explicit `false` — FIX-OO additive contract:
-    /// an explicit `false` flips the sidecar from lenient to strict mode).
+    /// An explicit opt-in writes true; otherwise remove the key (false by default).
     pub skip_verification: bool,
     /// `None` ⇒ strip `[endpoint].certificate`. `Some(pem)` ⇒ pin it when the
     /// PEM is a single BEGIN-block (self-signed leaf); strip it when the PEM is
@@ -1123,19 +1032,9 @@ pub(crate) fn apply_install_cert_policy(
         .and_then(|v| v.as_table_mut())
         .ok_or("client.toml missing [endpoint] table")?;
 
-    // skip_verification. This used to be an additive contract — write `true`, never write
-    // or clear a `false` — which was safe only because `false` used to mean "Let's Encrypt",
-    // a path whose config never carried the key in the first place.
-    //
-    // SEC-01 makes it load-bearing. A config that ALREADY says `skip_verification = true`
-    // (every self-signed install this app has ever produced) must come out of here without
-    // it once the probe has proven the endpoint verifiable — otherwise the stale `true`
-    // survives, the core keeps skipping every check, and the fix delivers exactly nothing
-    // while looking correct at every other layer.
-    //
-    // Removing rather than writing `false` is deliberate: the core reads this key as
-    // `value_or(false)` (`trusttunnel/src/config.cpp`), so absence IS false, and a config
-    // without the key cannot be misread by an older build either.
+    // Apply the explicit advanced choice. The automatic export path removes
+    // server defaults before this overlay; only an intentional persisted opt-in
+    // may disable verification. Absence means false in the native parser.
     if policy.skip_verification {
         endpoint.insert("skip_verification", toml_edit::value(true));
     } else {
@@ -1166,254 +1065,246 @@ pub(crate) fn apply_install_cert_policy(
     Ok(doc.to_string())
 }
 
-/// Parse the fetch-path cert-probe target `(sni, probe_host, probe_port)` from a
-/// built client TOML's `[endpoint]` table (gap 5b-2). Pure — unit-testable
-/// without SSH.
+/// Apply safe defaults only to a newly exported configuration. The endpoint CLI
+/// reads `main_hosts[0].cert_chain_path` and returns its PEM over authenticated SSH;
+/// a public-CA certificate may be omitted by that CLI for system-store validation.
+/// Existing local profiles are never read or rewritten by this pure helper.
 ///
-///   - `sni`        = the endpoint `hostname` (e.g. `trusttunnel.local`). This is
-///     the TLS-SNI name the probe sends; it must be a name, never a bare IP
-///     (`fetch_endpoint_cert` rejects an IP SNI). When the hostname is empty we
-///     fall back to `params_host` (the operator-typed SSH host) so the probe still
-///     has a name to send.
-///   - `probe_host` = the host part of `addresses[0]` (the real dial IP,
-///     e.g. `203.0.113.141`) — the TCP destination, which CAN be an IP. Falls
-///     back to `params_host` when there is no address.
-///   - `probe_port` = the port from `addresses[0]`, default 443.
-pub(crate) fn parse_probe_target_from_endpoint(
+/// Certificate parsing is structural only. The native core remains responsible for
+/// chain, validity-date and hostname verification, including its existing CN support.
+/// A stricter Rustls hostname gate here would reject legacy certificates the native
+/// verifier can authenticate. No network connection or Windows root-store query is
+/// performed here.
+pub(crate) fn apply_authenticated_export_policy(
     client_toml: &str,
-    params_host: &str,
-) -> (String, String, u16) {
-    let doc = client_toml.parse::<toml_edit::DocumentMut>().ok();
-    let endpoint = doc
-        .as_ref()
-        .and_then(|d| d.get("endpoint"))
-        .and_then(|v| v.as_table());
-
-    let hostname = endpoint
-        .and_then(|e| e.get("hostname"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-
-    let first_addr = endpoint
-        .and_then(|e| e.get("addresses"))
-        .and_then(|v| v.as_array())
-        .and_then(|a| a.get(0))
-        .and_then(|v| v.as_str());
-
-    // SNI = the endpoint hostname (a name, never an IP), fallback to params_host.
-    let sni = hostname.unwrap_or(params_host).to_string();
-
-    // probe_host = the IP from addresses[0] (the real dial target), fallback to
-    // params_host. probe_port = the port from addresses[0], default 443. Reuse
-    // the ping module's shared address parsers so this cannot drift.
-    let probe_host = first_addr
-        .and_then(crate::commands::ping::host_from_addr)
-        .unwrap_or_else(|| params_host.to_string());
-    let probe_port = first_addr
-        .and_then(crate::commands::ping::port_from_addr)
-        .unwrap_or(443);
-
-    (sni, probe_host, probe_port)
-}
-
-/// The outcome of a fetch-path TLS cert probe, reduced to the two facts the
-/// self-signed policy decision needs (gap 5b-2). Keeps the pure decision core
-/// (`self_signed_policy_from_probe`) testable without the async probe / SSH.
-///
-///   - `None`                 ⇒ the probe FAILED (network / handshake error).
-///     Degrade to `skip_verification = true` with no pin — the minimum working
-///     state — never abort the fetch.
-///   - `Some((true,  _))`     ⇒ the endpoint cert IS system-verifiable
-///     (Let's-Encrypt / public CA). Do NOTHING extra — OS-store validation,
-///     identical to today's LE behavior.
-///   - `Some((false, pem))`   ⇒ the endpoint cert is NOT system-verifiable
-///     (self-signed / private CA). Apply the self-signed policy:
-///     `skip_verification = true` + pin the leaf PEM (`Some`) + custom_sni.
-pub(crate) struct FetchProbeOutcome {
-    pub is_system_verifiable: bool,
-    pub pinned_pem: Option<String>,
-    /// SEC-01: the probe proved the pinned leaf verifies this endpoint under its SNI.
-    /// Only then may `skip_verification` be cleared — see `install_cert_policy_for`.
-    pub pin_verifiable: bool,
-}
-
-/// Auto-apply the self-signed cert policy on the Users-tab / DoneStep FETCH path
-/// (gap 5b-2), keyed on the ACTUAL cert trust (not manual per-user toggles).
-///
-/// This is the pure decision+merge core of `fetch_server_config`'s new auto step,
-/// factored out so it is unit-testable without SSH or the async cert probe. It
-/// runs AFTER the user-advanced overlay (`inject_advanced_into_endpoint`), so it
-/// only fills the AUTO defaults a self-hosted install needs to connect
-/// out-of-the-box; a user who explicitly set `custom_sni` keeps theirs.
-///
-/// Root cause it closes (16-UAT round 3): the config the owner gets after install
-/// is produced by THIS fetch path (header "Fetched from server <ip>"), which
-/// DoneStep re-invokes when adding the config. Before this, that path applied
-/// skip_verification / cert-pin / custom_sni ONLY from the user's manually-saved
-/// advanced options — the owner set none, so a self-hosted config shipped without
-/// them and would not connect. Now the fetch path mirrors `deploy_export_config`:
-/// probe the endpoint leaf and, when it is not system-verifiable, apply the
-/// self-signed policy automatically.
-///
-/// # Arguments
-/// - `client_toml`: the built + normalized + user-overlaid client TOML.
-/// - `probe`: the reduced probe outcome (`None` ⇒ probe failed ⇒ degrade).
-///
-/// # SNI selection
-/// The SNI is the endpoint's own `hostname` (e.g. `trusttunnel.local`), NEVER a
-/// bare IP (the probe rejects an IP SNI). When the doc already carries a non-empty
-/// `custom_sni` (user set it, via the overlay) we KEEP it; otherwise we use the
-/// hostname. A doc with an empty hostname AND no custom_sni gets no custom_sni.
-///
-/// Let's-Encrypt (`is_system_verifiable == true`) is left untouched (OS store).
-pub(crate) fn apply_fetched_self_signed_policy(
-    client_toml: &str,
-    probe: Option<FetchProbeOutcome>,
+    advanced: Option<&UserAdvanced>,
 ) -> Result<String, String> {
-    // Read the endpoint hostname + any existing custom_sni from the built doc so
-    // we can choose the SNI without a second parse in the async caller.
-    let doc: toml_edit::DocumentMut = client_toml
+    use rustls_pki_types::{pem::PemObject, CertificateDer};
+
+    let mut doc: toml_edit::DocumentMut = client_toml
         .parse()
-        .map_err(|e: toml_edit::TomlError| format!("Parse client.toml: {e}"))?;
+        .map_err(|_| "SSH_CERT_INVALID".to_string())?;
     let endpoint = doc
-        .get("endpoint")
-        .and_then(|v| v.as_table())
-        .ok_or("client.toml missing [endpoint] table")?;
-    let hostname = endpoint
-        .get("hostname")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("");
-    let existing_sni = endpoint
-        .get("custom_sni")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+        .get_mut("endpoint")
+        .and_then(|v| v.as_table_mut())
+        .ok_or_else(|| "SSH_CERT_INVALID".to_string())?;
 
-    // LE / public-CA endpoint: OS-store validation, nothing to add (matches
-    // today's LE behavior). A probe that came back system-verifiable is the
-    // "do nothing" branch.
-    if let Some(FetchProbeOutcome { is_system_verifiable: true, .. }) = probe {
-        return Ok(client_toml.to_string());
+    let manual_certificate_policy = advanced.is_some_and(|a| {
+        a.skip_verification || a.pin_cert_der_b64.as_deref().is_some_and(|p| !p.is_empty())
+    });
+    if !manual_certificate_policy {
+        let pem = match endpoint.get("certificate") {
+            Some(value) => value.as_str().ok_or_else(|| "SSH_CERT_INVALID".to_string())?,
+            None => "",
+        };
+        if !pem.trim().is_empty() {
+            // Match the DER limit used for manual certificate pins, with enough
+            // space for PEM armor. Reject malformed/oversized data before save.
+            const MAX_PEM_BYTES: usize = 64 * 1024;
+            if pem.len() > MAX_PEM_BYTES || pem.contains("PRIVATE KEY") {
+                return Err("SSH_CERT_INVALID".to_string());
+            }
+            let certs = CertificateDer::pem_slice_iter(pem.as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "SSH_CERT_INVALID".to_string())?;
+            if certs.is_empty()
+                || certs.iter().map(|cert| cert.len()).sum::<usize>()
+                    > super::cert_probe::MAX_CERT_DER_BYTES
+            {
+                return Err("SSH_CERT_INVALID".to_string());
+            }
+            let mut parsed = tokio_rustls::rustls::RootCertStore::empty();
+            for cert in certs {
+                parsed.add(cert).map_err(|_| "SSH_CERT_INVALID".to_string())?;
+            }
+            // Keep the authenticated chain verbatim. In contrast to a live TLS
+            // probe, its origin is authenticated by the confirmed SSH host key.
+        } else {
+            // The native parser distinguishes an absent certificate from a
+            // nonempty invalid PEM. Normalize whitespace-only system-trust exports.
+            endpoint.remove("certificate");
+        }
     }
-
-    // Self-signed (probe said not-system-verifiable) OR the probe failed
-    // (degrade to skip_verification-only). In both cases we apply the self-signed
-    // policy — the difference is only whether we have a leaf PEM to pin.
-    let pin_verifiable = probe.as_ref().map(|p| p.pin_verifiable).unwrap_or(false);
-    let pinned_pem = probe.and_then(|p| p.pinned_pem);
-
-    // custom_sni: keep the user's explicit value if present; else use the
-    // endpoint hostname (never a bare IP — the hostname IS the SNI name).
-    let chosen_sni = existing_sni.unwrap_or(hostname);
-    let policy = install_cert_policy_for("selfsigned", chosen_sni, pinned_pem, pin_verifiable);
-    apply_install_cert_policy(client_toml, &policy)
+    // A server export is not an explicit user decision to skip verification.
+    // Remove any such default; only a persisted advanced opt-in may restore it.
+    endpoint.remove("skip_verification");
+    let secure = doc.to_string();
+    match advanced {
+        Some(options) => inject_advanced_into_endpoint(&secure, options),
+        None => Ok(secure),
+    }
 }
 
 #[cfg(test)]
-mod sec01_writer_tests {
+mod authenticated_export_tests {
     use super::*;
 
-    /// Truth: a config that already carries `skip_verification = true` loses it when the
-    /// policy says the endpoint is verifiable. This is the step between "decided correctly"
-    /// and "the core actually behaves differently", and it is where the fix would have
-    /// silently evaporated — every policy test still passes with the stale key left in place.
-    #[test]
-    fn a_stale_skip_verification_is_cleared_when_the_pin_is_proven() {
-        let before = "[endpoint]\nhostname = \"trusttunnel.local\"\nskip_verification = true\n";
-        let policy = install_cert_policy_for(
-            "selfsigned",
-            "trusttunnel.local",
-            Some("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n".to_string()),
-            true,
-        );
-        let after = apply_install_cert_policy(before, &policy).expect("policy must apply");
+    // Synthetic self-signed EC certificate, CN=vpn.example.test and no SAN.
+    // Only public test material is stored; the discarded private key is never used.
+    const LEGACY_CN_PEM: &str = "-----BEGIN CERTIFICATE-----\n\
+MIIBJDCBy6ADAgECAgEBMAoGCCqGSM49BAMCMBsxGTAXBgNVBAMMEHZwbi5leGFt\n\
+cGxlLnRlc3QwIBcNMjAwMTAxMDAwMDAwWhgPMjA1MDAxMDEwMDAwMDBaMBsxGTAX\n\
+BgNVBAMMEHZwbi5leGFtcGxlLnRlc3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNC\n\
+AARVqnK6f/FdIrzbyW7OB8xq4wPd5jNziWeHZf1Pg4Y4AbUWlK223Rc5rbPCnhkr\n\
+ZvFsZ7E8wCOGynB6ANK9LFXZMAoGCCqGSM49BAMCA0gAMEUCIQCRiyJXdsZaO02Q\n\
+aXBAL2Dq6IC1VlR091I5CdjvGYOTXAIgC1VH4MfJ13IblIZJvyLHh3oYssalqk/w\n\
+pUnnfYe6cBQ=\n\
+-----END CERTIFICATE-----\n";
 
-        assert!(
-            !after.contains("skip_verification"),
-            "the stale skip_verification survived — the core would keep verifying nothing:\n{after}"
+    fn exported(pem: &str) -> String {
+        let mut doc: toml_edit::DocumentMut = "vpn_mode = \"general\"\n\
+            killswitch_enabled = true\n\
+            [endpoint]\n\
+            hostname = \"vpn.example.test\"\n\
+            username = \"fake-user\"\n\
+            password = \"fake-password\"\n\
+            client_random = \"aabb\"\n\
+            addresses = [\"203.0.113.7:443\"]\n\
+            [listener.tun]\n\
+            mtu_size = 1350\n".parse().unwrap();
+        doc["endpoint"]["certificate"] = toml_edit::value(pem);
+        doc.to_string()
+    }
+
+    fn options() -> UserAdvanced {
+        UserAdvanced {
+            username: "fake-user".into(),
+            display_name: None,
+            custom_sni: None,
+            upstream_protocol: None,
+            skip_verification: false,
+            pin_cert_der_b64: None,
+            dns_upstreams: Vec::new(),
+            anti_dpi: true,
+        }
+    }
+
+    #[test]
+    fn failed_exports_never_return_passwords_pem_or_encoded_links_in_diagnostics() {
+        let fake_password = "EXPORT_FAILURE_CANARY_PASSWORD";
+        for output in [
+            format!("password = \"{fake_password}\""),
+            format!("failed for {fake_password}:\n{LEGACY_CN_PEM}"),
+            format!("tt://{fake_password}\ntrusttunnel://{fake_password}"),
+        ] {
+            assert_eq!(validate_config_export_result(&output, 1).unwrap_err(), "SSH_EXPORT_FAILED|1");
+            assert_eq!(extract_exported_deeplink(&output, 1).unwrap_err(), "SSH_EXPORT_FAILED|1");
+        }
+        // A zero exit status must not turn arbitrary CLI output into a link.
+        assert_eq!(
+            extract_exported_deeplink(&format!("password = {fake_password}"), 0).unwrap_err(),
+            "SSH_EXPORT_FAILED|0",
         );
-        assert!(
-            after.contains("certificate"),
-            "the pin must be written; it is the trust anchor once verification is on:\n{after}"
+        assert_eq!(validate_config_export_result("   ", 0).unwrap_err(), "SSH_EXPORT_FAILED|0");
+    }
+
+    #[test]
+    fn successful_export_parsing_returns_only_an_actual_connection_link() {
+        let output = "warning\npassword = fake-password\n  trusttunnel://fake-encoded-link\n";
+        assert_eq!(extract_exported_deeplink(output, 0).unwrap(), "trusttunnel://fake-encoded-link");
+        assert!(validate_config_export_result("hostname = \"vpn.example.test\"", 0).is_ok());
+    }
+
+    #[test]
+    fn authenticated_export_preserves_legacy_cn_certificate_without_disabling_verification() {
+        let output = apply_authenticated_export_policy(&exported(LEGACY_CN_PEM), None).unwrap();
+        let doc: toml_edit::DocumentMut = output.parse().unwrap();
+        assert_eq!(doc["endpoint"]["certificate"].as_str(), Some(LEGACY_CN_PEM));
+        assert!(doc["endpoint"].get("skip_verification").is_none());
+        assert_eq!(doc["endpoint"]["password"].as_str(), Some("fake-password"));
+        assert_eq!(doc["endpoint"]["client_random"].as_str(), Some("aabb"));
+        assert_eq!(doc["listener"]["tun"]["mtu_size"].as_integer(), Some(1350));
+        assert_eq!(doc["killswitch_enabled"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn authenticated_export_keeps_chain_when_advanced_has_no_manual_pin() {
+        let chain = format!("{LEGACY_CN_PEM}{LEGACY_CN_PEM}");
+        let output = apply_authenticated_export_policy(&exported(&chain), Some(&options())).unwrap();
+        let doc: toml_edit::DocumentMut = output.parse().unwrap();
+        assert_eq!(doc["endpoint"]["certificate"].as_str(), Some(chain.as_str()));
+        assert!(doc["endpoint"].get("skip_verification").is_none());
+    }
+
+    #[test]
+    fn authenticated_export_system_store_path_never_degrades_to_skipping_verification() {
+        for pem in ["", "   "] {
+            let output = apply_authenticated_export_policy(&exported(pem), None).unwrap();
+            assert!(!output.contains("skip_verification"));
+            let parsed: toml_edit::DocumentMut = output.parse().unwrap();
+            assert!(parsed["endpoint"].get("certificate").is_none());
+        }
+        let output = apply_authenticated_export_policy(
+            "[endpoint]\nhostname = \"vpn.example.test\"\nskip_verification = true\n",
+            None,
+        ).unwrap();
+        assert!(!output.contains("skip_verification"));
+        assert!(!output.contains("certificate"));
+    }
+
+    #[test]
+    fn authenticated_export_clears_automatic_skip_but_keeps_explicit_manual_opt_in() {
+        let input = exported(LEGACY_CN_PEM).replace(
+            "[endpoint]\n", "[endpoint]\nskip_verification = true\n",
+        );
+        assert!(!apply_authenticated_export_policy(&input, None).unwrap().contains("skip_verification"));
+        let mut explicit = options();
+        explicit.skip_verification = true;
+        assert!(apply_authenticated_export_policy(&input, Some(&explicit)).unwrap()
+            .contains("skip_verification = true"));
+    }
+
+    #[test]
+    fn authenticated_export_keeps_explicit_sni_without_erasing_authenticated_certificate() {
+        let mut explicit = options();
+        explicit.custom_sni = Some("cover.example.test".into());
+        explicit.upstream_protocol = Some("h3".into());
+        let output = apply_authenticated_export_policy(&exported(LEGACY_CN_PEM), Some(&explicit)).unwrap();
+        let doc: toml_edit::DocumentMut = output.parse().unwrap();
+        assert_eq!(doc["endpoint"]["custom_sni"].as_str(), Some("cover.example.test"));
+        assert_eq!(doc["endpoint"]["upstream_protocol"].as_str(), Some("http3"));
+        assert_eq!(doc["endpoint"]["certificate"].as_str(), Some(LEGACY_CN_PEM));
+        assert!(doc["endpoint"].get("skip_verification").is_none());
+    }
+
+    #[test]
+    fn authenticated_export_keeps_explicit_manual_pin() {
+        let mut explicit = options();
+        explicit.pin_cert_der_b64 = Some("MAMBAgM=".into());
+        let output = apply_authenticated_export_policy(&exported(LEGACY_CN_PEM), Some(&explicit)).unwrap();
+        let doc: toml_edit::DocumentMut = output.parse().unwrap();
+        assert_eq!(doc["endpoint"]["certificate"].as_str(), Some(der_b64_to_pem("MAMBAgM=").unwrap().as_str()));
+        assert!(doc["endpoint"].get("skip_verification").is_none());
+    }
+
+    #[test]
+    fn authenticated_export_rejects_bad_certificates_without_returning_secret_data() {
+        for pem in [
+            "not a certificate: fake-password",
+            "-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n",
+            "-----BEGIN CERTIFICATE-----\nMAMBAgM=\n-----END CERTIFICATE-----\n",
+            "-----BEGIN PRIVATE KEY-----\nfake-password\n-----END PRIVATE KEY-----\n",
+        ] {
+            assert_eq!(
+                apply_authenticated_export_policy(&exported(pem), None).unwrap_err(),
+                "SSH_CERT_INVALID",
+            );
+        }
+        let oversized = "x".repeat(64 * 1024 + 1);
+        assert_eq!(
+            apply_authenticated_export_policy(&exported(&oversized), None).unwrap_err(),
+            "SSH_CERT_INVALID",
         );
     }
 
-    /// Truth: the unproven path is untouched. An endpoint we could not prove keeps the key,
-    /// so nothing that works today stops working.
     #[test]
-    fn an_unproven_endpoint_keeps_skipping_verification() {
-        let before = "[endpoint]\nhostname = \"trusttunnel.local\"\n";
-        let policy = install_cert_policy_for("selfsigned", "trusttunnel.local", None, false);
-        let after = apply_install_cert_policy(before, &policy).expect("policy must apply");
-
-        assert!(
-            after.contains("skip_verification = true"),
-            "an unprovable endpoint must keep today's behaviour verbatim:\n{after}"
-        );
-    }
-}
-
-/// Derive the install-time cert policy from the cert type (gap 5b).
-///
-/// This is the PURE decision core of `deploy_export_config`'s cert-type branch,
-/// factored out so both branches (+ the empty-domain → "trusttunnel.local"
-/// rule) are unit-testable without SSH or the async cert probe:
-///   - `letsencrypt` ⇒ OS-store path: no skip_verification, no pin,
-///     `custom_sni = sni_or_domain` (the domain the user entered). Keeps as
-///     close to today's effective output as possible (FIX-OO caution).
-///   - anything else (`selfsigned` / `provided`) ⇒ pin the probed leaf when present,
-///     `custom_sni = sni_or_domain` (domain, or "trusttunnel.local" when there is no
-///     real domain). Whether verification is left ON depends on `pin_verifiable`:
-///
-/// SEC-01. Writing `skip_verification = true` next to a pinned certificate was not a
-/// belt-and-braces pairing, it was a hole: the core reads the pin ONLY when
-/// `skip_verification` is false (`trusttunnel/src/config.cpp`), and the flag short-circuits
-/// the whole verification callback before the host-name comparison
-/// (`core/src/vpn_manager.cpp`). So the pin was dead and NOTHING was checked — no chain, no
-/// name — while the UI showed an ordinary green «Подключено». Anyone able to sit between the
-/// client and the endpoint could present any certificate at all and be accepted silently.
-///
-/// The fix cannot simply clear the flag: certificates this app issued before the SAN fix
-/// carry only a CN, which no modern verifier consults, so verification would fail and every
-/// such server would go off the air. `pin_verifiable` is therefore a PROOF obtained by
-/// handshaking against the endpoint with the leaf as the sole trust anchor
-/// (`cert_probe::fetch_endpoint_cert`). Verification is enabled only where it demonstrably
-/// works; everywhere else the old behaviour is preserved exactly.
-///
-/// `pinned_pem` is the caller's already-probed leaf PEM (`None` on probe
-/// failure ⇒ degrade to skip_verification-only, the minimum working state).
-/// The Let's-Encrypt branch ignores `pinned_pem` (it never pins).
-pub(crate) fn install_cert_policy_for(
-    cert_type: &str,
-    sni_or_domain: &str,
-    pinned_pem: Option<String>,
-    pin_verifiable: bool,
-) -> InstallCertPolicy {
-    if cert_type == "letsencrypt" {
-        InstallCertPolicy {
-            skip_verification: false,
-            pinned_pem: None,
-            custom_sni: sni_or_domain.to_string(),
-        }
-    } else if pin_verifiable && pinned_pem.is_some() {
-        // SEC-01: the probe proved this endpoint verifies against its own leaf under this
-        // SNI, so the pin becomes a real trust anchor instead of dead text.
-        InstallCertPolicy {
-            skip_verification: false,
-            pinned_pem,
-            custom_sni: sni_or_domain.to_string(),
-        }
-    } else {
-        // Unproven: either the probe failed, or the certificate cannot be verified (issued
-        // before the SAN fix, or supplied by the user). Keep today's behaviour verbatim —
-        // an unverified tunnel is bad, a tunnel that cannot connect at all is worse, and
-        // flipping this blind would take every such server off the air at once.
-        InstallCertPolicy {
-            skip_verification: true,
-            pinned_pem,
-            custom_sni: sni_or_domain.to_string(),
+    fn authenticated_export_rejects_invalid_toml_and_certificate_type() {
+        for input in [
+            "[endpoint]\npassword = \"fake-password",
+            "[endpoint]\ncertificate = false\n",
+            "[listener.tun]\nmtu_size = 1350\n",
+        ] {
+            assert_eq!(apply_authenticated_export_policy(input, None).unwrap_err(), "SSH_CERT_INVALID");
         }
     }
 }
@@ -1675,7 +1566,7 @@ pub async fn get_config_bundle(
          echo '---RULES_TOML---' && {sudo}cat {dir}/rules.toml 2>/dev/null && \
          echo '---SERVICE---' && systemctl is-active trusttunnel"
     );
-    let (output, _) = exec_command(handle, app, &cmd).await?;
+    let (output, _) = exec_command_quiet(handle, &cmd).await?;
     let (vpn_toml, hosts_toml, credentials_toml, rules_toml, service_status) =
         parse_config_bundle_output(&output);
     let typed = parse_vpn_config_known(&vpn_toml);
@@ -1914,18 +1805,12 @@ mod tests {
     }
 
     #[test]
-    fn inject_strips_cli_certificate_when_user_did_not_pin() {
-        // FIX-OO-9 regression guard. When the endpoint CLI writes the full
-        // chain into `certificate = """..."""` (it does this when its
-        // server-side `is_system_verifiable` check fails for whatever
-        // reason), the client ends up with a multi-cert PEM that OpenSSL
-        // can't walk without ISRG Root X1 as a trust anchor. If the user
-        // explicitly chose NOT to pin (advanced entry exists but
-        // pin_cert_der_b64 is None), strip the field so the sidecar falls
-        // back to the OS trust store.
+    fn inject_preserves_cli_certificate_when_user_did_not_pin() {
+        // Opening advanced settings without supplying a manual pin must not
+        // erase the certificate obtained through the confirmed SSH connection.
         let with_cli_cert = "[endpoint]\nhostname = \"h\"\ncertificate = \"\"\"-----BEGIN CERTIFICATE-----\\nabc\\n-----END CERTIFICATE-----\\n\"\"\"\nanti_dpi = true\n";
         let out = inject_advanced_into_endpoint(with_cli_cert, &default_advanced()).unwrap();
-        assert!(!out.contains("certificate"), "certificate must be stripped; got: {out}");
+        assert!(out.contains("certificate"), "authenticated certificate was erased: {out}");
     }
 
     #[test]
@@ -2327,152 +2212,6 @@ active
         let raw = "listen_address = \"0.0.0.0:443\"\n";
         let result = update_listen_address_in_toml(raw, "0.0.0.0:443; rm -rf /");
         assert!(result.is_err(), "shell metachars must reject before parser runs");
-    }
-
-    // ── gap 5b-2: fetch-path auto self-signed policy (the round-3 blocker) ────
-    //
-    // These prove the FETCH path (fetch_server_config / DoneStep re-export /
-    // Users-tab save) now ships a self-hosted config ready-to-connect —
-    // skip_verification=true + pinned leaf + custom_sni — WITHOUT any manual
-    // per-user advanced toggles, keyed on the ACTUAL cert trust. LE (system-
-    // verifiable) stays untouched. The pure decision core is tested here without
-    // SSH or the async probe.
-
-    /// A built client TOML shaped like build_client_config output for a bare-IP,
-    /// fake-SNI self-hosted server: hostname = the .local SNI, addresses[0] = the
-    /// real dial IP:port. This is exactly the self-hosted shape.
-    fn fetched_toml(hostname: &str, address: &str) -> String {
-        format!(
-            "# TrustTunnel Client Configuration\n\
-             # Fetched from server 203.0.113.141\n\n\
-             loglevel = \"info\"\n\n\
-             [endpoint]\n\
-             hostname = \"{hostname}\"\n\
-             addresses = [\"{address}\"]\n\
-             username = \"alice\"\n\
-             password = \"secret\"\n\
-             anti_dpi = true\n\n\
-             [listener.tun]\n\
-             mtu_size = 1280\n"
-        )
-    }
-
-    #[test]
-    fn fetch_self_signed_probe_pins_and_sets_sni() {
-        // A self-signed endpoint (is_system_verifiable=false) with a probed leaf:
-        // the resulting TOML has skip_verification=true + a single BEGIN block +
-        // custom_sni = the hostname (trusttunnel.local). This is the
-        // known-good target shape produced automatically on the fetch path.
-        let probe = Some(FetchProbeOutcome {
-            is_system_verifiable: false,
-            pinned_pem: Some(der_b64_to_pem("MAMBAgM=").unwrap()),
-            pin_verifiable: false,
-        });
-        let out = apply_fetched_self_signed_policy(
-            &fetched_toml("trusttunnel.local", "203.0.113.141:443"),
-            probe,
-        )
-        .unwrap();
-
-        assert!(out.contains("skip_verification = true"));
-        assert_eq!(out.matches("-----BEGIN CERTIFICATE-----").count(), 1);
-        assert!(out.contains("certificate = \"\"\""), "leaf pinned as triple-quoted; got: {out}");
-        assert!(out.contains("custom_sni = \"trusttunnel.local\""));
-        // Re-parses as valid TOML with all three fields set.
-        let doc: toml_edit::DocumentMut = out.parse().expect("must re-parse");
-        assert_eq!(doc["endpoint"]["skip_verification"].as_bool(), Some(true));
-        assert_eq!(doc["endpoint"]["custom_sni"].as_str(), Some("trusttunnel.local"));
-        assert!(doc["endpoint"]["certificate"].as_str().unwrap().contains("BEGIN CERTIFICATE"));
-        // C++-core-owned tunnel table untouched.
-        assert!(out.contains("[listener.tun]"));
-    }
-
-    #[test]
-    fn fetch_letsencrypt_leaves_config_untouched() {
-        // A system-verifiable (Let's Encrypt / public-CA) endpoint gets NOTHING
-        // extra — no skip_verification, no pin, no custom_sni change. OS-store
-        // validation, matching today's LE behavior.
-        let before = fetched_toml("vpn.example.com", "203.0.113.7:443");
-        let probe = Some(FetchProbeOutcome {
-            is_system_verifiable: true,
-            pinned_pem: None,
-            pin_verifiable: false,
-        });
-        let out = apply_fetched_self_signed_policy(&before, probe).unwrap();
-        assert_eq!(out, before, "LE config must be returned byte-for-byte unchanged");
-        assert!(!out.contains("skip_verification"));
-        assert!(!out.contains("custom_sni"));
-        assert!(!out.contains("certificate"));
-    }
-
-    #[test]
-    fn fetch_probe_failure_degrades_to_skip_verification_only() {
-        // Probe failed (None) ⇒ degrade to the minimum working state:
-        // skip_verification=true, custom_sni set, but NO pinned cert.
-        let out = apply_fetched_self_signed_policy(
-            &fetched_toml("trusttunnel.local", "203.0.113.141:443"),
-            None,
-        )
-        .unwrap();
-        assert!(out.contains("skip_verification = true"));
-        assert!(out.contains("custom_sni = \"trusttunnel.local\""));
-        assert!(!out.contains("certificate"), "no pin on probe failure; got: {out}");
-    }
-
-    #[test]
-    fn fetch_self_signed_keeps_user_custom_sni() {
-        // A user who explicitly set custom_sni (via the users-advanced overlay
-        // that ran BEFORE this step) keeps theirs — the auto step only fills the
-        // default when none is present.
-        let mut toml = fetched_toml("trusttunnel.local", "203.0.113.141:443");
-        toml = toml.replace(
-            "anti_dpi = true\n",
-            "anti_dpi = true\ncustom_sni = \"my.custom.sni\"\n",
-        );
-        let probe = Some(FetchProbeOutcome {
-            is_system_verifiable: false,
-            pinned_pem: Some(der_b64_to_pem("MAMBAgM=").unwrap()),
-            pin_verifiable: false,
-        });
-        let out = apply_fetched_self_signed_policy(&toml, probe).unwrap();
-        assert!(out.contains("custom_sni = \"my.custom.sni\""));
-        // The user SNI wins — custom_sni must NOT be overwritten with the hostname.
-        assert!(
-            !out.contains("custom_sni = \"trusttunnel.local\""),
-            "must not overwrite the user SNI; got: {out}"
-        );
-    }
-
-    #[test]
-    fn parse_probe_target_uses_hostname_sni_and_address_ip() {
-        // The probe SNI is the endpoint hostname (a name, never an IP); the probe
-        // host is the real dial IP from addresses[0]; the port is the address port.
-        let (sni, host, port) = parse_probe_target_from_endpoint(
-            &fetched_toml("trusttunnel.local", "203.0.113.141:8443"),
-            "params.fallback.host",
-        );
-        assert_eq!(sni, "trusttunnel.local", "SNI = the endpoint hostname, never an IP");
-        assert_eq!(host, "203.0.113.141", "probe host = the real dial IP from addresses[0]");
-        assert_eq!(port, 8443, "probe port = the addresses[0] port");
-    }
-
-    #[test]
-    fn parse_probe_target_defaults_and_fallbacks() {
-        // No addresses at all → probe host falls back to params_host, port 443.
-        let (sni, host, port) = parse_probe_target_from_endpoint(
-            "[endpoint]\nhostname = \"trusttunnel.local\"\nusername = \"u\"\n",
-            "203.0.113.99",
-        );
-        assert_eq!(sni, "trusttunnel.local");
-        assert_eq!(host, "203.0.113.99", "no address → fall back to params_host");
-        assert_eq!(port, 443, "no address port → default 443");
-
-        // Empty hostname → SNI falls back to params_host (still a name to send).
-        let (sni2, _h2, _p2) = parse_probe_target_from_endpoint(
-            "[endpoint]\nhostname = \"\"\naddresses = [\"1.2.3.4:443\"]\n",
-            "fallback.example.com",
-        );
-        assert_eq!(sni2, "fallback.example.com");
     }
 
     // ── Phase 25 (WR-01): the echo carried by SSH_CLIENT_NAME_INVALID|{name} ────────────

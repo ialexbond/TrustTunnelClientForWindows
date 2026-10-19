@@ -20,23 +20,14 @@ describe("vpnEventHelpers — reason-code localization", () => {
     i18n.changeLanguage("ru");
   });
 
-  it.each(["network-guard-failed", "network-guard-active", "network-guard-bootstrap-failed"])("localizes %s on both error channels in both languages", (code) => {
-    for (const language of ["ru", "en"]) {
-      i18n.changeLanguage(language);
-      const localized = makeLocalizeError(i18n)(code);
-      expect(localized).not.toBe(code);
-      expect(localized).not.toMatch(/^errors\./);
-      expect(localizeVpnError(new Error(code), i18n)).toBe(localized);
-      if (language === "ru") expect(localized).toMatch(/[а-яё]/i);
-    }
-  });
-
-  it("explains that failed routing preparation cancelled the connection instead of starting old settings", () => {
+  it("distinguishes unavailable downloads from invalid routing rules without alarming disk advice", () => {
     const localize = makeLocalizeError(i18n);
-    expect(localize("routing-rules-apply-failed")).toMatch(/подключение отменено/i);
-    expect(localize("routing-rules-apply-failed")).toMatch(/старые настройки/i);
+    expect(localize("routing-rules-apply-failed")).toMatch(/разделе «Маршрутизация»/i);
+    expect(localize("routing-data-unavailable")).toMatch(/списки сайтов/i);
+    expect(localizeVpnError("routing-data-unavailable", i18n)).toBe(localize("routing-data-unavailable"));
+    expect(localize("routing-data-unavailable")).not.toMatch(/диск|старые настройки|отменено/i);
     i18n.changeLanguage("en");
-    expect(localize("routing-rules-apply-failed")).toMatch(/connection was cancelled/i);
+    expect(localize("routing-data-unavailable")).toMatch(/download the site lists/i);
   });
 
   it("maps the exhausted-queue code to its own key, not the reconnect-gave-up one", () => {

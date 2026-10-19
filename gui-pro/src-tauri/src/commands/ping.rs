@@ -231,21 +231,6 @@ fn parse_port_from_addr(addr: &str) -> PortParse {
     PortParse::Absent
 }
 
-/// Extract the port of an `"ip:port"` / `"[ipv6]:port"` address as an `Option<u16>`
-/// (the simpler sibling of `parse_port_from_addr`'s tri-state, for callers that only
-/// want "the port, or the 443 default").
-///
-/// `pub(crate)` so the fetch-path cert probe (`server_config::parse_probe_target_from_endpoint`,
-/// 16-12 gap 5b-2) can SHARE this exact port derivation instead of copying it — the probe
-/// must target the SAME `addresses[0]` port the ping reader uses. Returns `None` for an
-/// absent OR unparseable port so the caller applies its own default (443).
-pub(crate) fn port_from_addr(addr: &str) -> Option<u16> {
-    match parse_port_from_addr(addr) {
-        PortParse::Port(p) => Some(p),
-        PortParse::Absent | PortParse::Invalid => None,
-    }
-}
-
 /// Extract the host part of an `"ip:port"` / `"[ipv6]:port"` address (the value used when
 /// the config has no named `hostname`).
 ///

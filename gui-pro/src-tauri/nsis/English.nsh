@@ -56,4 +56,4 @@ LangString uninstallDataKept ${LANG_ENGLISH} "Keeping user data"
 LangString uninstallCleaningRegistry ${LANG_ENGLISH} "Cleaning registry entries..."
 LangString uninstallRemovingUpdateFiles ${LANG_ENGLISH} "Removing temporary update files..."
 
-LangString networkGuardReleaseFailed ${LANG_ENGLISH} "Network protection cleanup could not finish. The program files have been kept. Close the app, wait a few seconds, then retry this operation. If the problem persists, run the latest installer."
+LangString networkGuardCleanupWarning ${LANG_ENGLISH} "Could not remove some obsolete network rules. This operation will continue."

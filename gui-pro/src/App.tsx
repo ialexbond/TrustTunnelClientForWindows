@@ -6,7 +6,6 @@ import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
 import StatusPanel from "./components/StatusPanel";
-import { NetworkGuardBanner } from "./components/NetworkGuardBanner";
 import LogPanel from "./components/LogPanel";
 import { ControlPanelPage } from "./components/ControlPanelPage";
 import SetupWizard from "./components/SetupWizard";
@@ -1727,8 +1726,6 @@ function App() {
         </button>
         <WindowControls />
       </TitleBar>
-
-      <NetworkGuardBanner status={status} />
 
       {/* Phase 14 (F6, 14-UAT): the calm switch-failed-reverted notice USED to render here as a
           floating window-level banner. It now renders EMBEDDED inside the lead ConfigCard (threaded
