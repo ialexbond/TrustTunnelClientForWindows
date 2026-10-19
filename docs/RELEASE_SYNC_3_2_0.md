@@ -312,16 +312,21 @@ The release installer includes the final routing-readiness correction and the hu
 from that same section of `gui-pro/src/shared/release-notes/RELEASE_NOTES.ru.md`.
 The release follows the Pro 3.1.0 asset layout:
 
-- `TrustTunnel.Client.Pro_3.2.0_x64-setup.exe`, 9,825,229 bytes.
+- `TrustTunnel.Client.Pro_3.2.0_x64-setup.exe`, 9,825,872 bytes.
 - `TrustTunnel.Client.Pro_3.2.0_x64-setup.exe.sha256`, containing the installer checksum.
 
-Installer SHA-256: `273042537b046058a9360d6d80d28585b6d664adceb561c47fe6d42bb85724d1`.
+Installer SHA-256: `9e6f7f96af92f2ae0994a7e35d43d55cf2d7a2189c32ee6f45089aa223fd33fe`.
 The packaged core remains `ed44123abae84992f431755a4e0dff302892d96dcdd306e329b036b45c543699`.
-Verification covers 131 focused Rust cases, 4,110 frontend cases, 49 release-notes cases,
+Verification covers 131 focused Rust cases, 4,114 frontend cases, 49 release-notes cases,
 strict Rust checks, and eight actual-package checks including the embedded notes asset.
 The publication metadata also removes one obsolete synthetic-address occurrence from the
 PII baseline; this changes no runtime behavior or installer payload. No production installation,
 VPN reconnect, route change, or firewall operation is part of publication verification.
+
+Release preparation uses native Send futures in the private endpoint-probe executor,
+activates Common Controls for the Windows test harness, preserves exact routing-fixture
+line endings, and guards notification animation updates after the window closes.
+The installer was rebuilt with those runtime changes and its extracted payloads verified.
 
 ## Sources
 
