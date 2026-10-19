@@ -21,16 +21,11 @@ tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-# RUSTSEC-2026-0154 (russh, "Unbounded 32-bit allocation") + RUSTSEC-2026-0153
-# (russh-cryptovec, "Unchecked CryptoVec allocation and growth") — both CVSS 7.5,
-# both fixed in 0.60.3. We pin the conservative 0.60.3 line (which stays on the
-# stable ssh-key 0.6.x fork) rather than 0.61.x — the latter pulls rc-pinned crypto
-# deps (ssh-key 0.7.0-rc, ssh-encoding 0.3.0-rc) and would force OUR `ssh-key = "0.6"`
-# pin (used by server_ssh_key.rs Ed25519 keygen) up to a release candidate. Staying on
-# 0.60.3 keeps the cross-crate compat (our ssh-key-generated PEM ↔ russh decode_secret_key,
-# server_ssh_key.rs canary test) intact. russh-keys merged into `russh::keys` in this
-# line, so it is no longer a separate crate — the `russh::keys::*` imports cover it.
-russh = "0.60.3"
+# Includes bounded SSH parsing/decompression, validated channel callbacks,
+# and the upstream agent-protocol fixes. Keep the application's stable key
+# generator below: OpenSSH PEM is the version-independent boundary, covered
+# by the server_ssh_key roundtrip and SSH compatibility tests.
+russh = "0.64.1"
 # Phase 16 — Ed25519 keypair generation (D-1.1) для SSH-key feature.
 # Features:
 #  - ed25519: Ed25519 algorithm support
@@ -198,6 +193,8 @@ windows = { version = "0.61.3", features = ["Win32_System_TaskScheduler", "Win32
 
 [dev-dependencies]
 regex = "1"
+# Exercise the upgraded transport with the RNG version its crypto APIs require.
+rand_0_10 = { package = "rand", version = "0.10" }
 
 [profile.release]
 strip = true
