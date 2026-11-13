@@ -25,7 +25,7 @@ tokio = { version = "1", features = ["full"] }
 # and the upstream agent-protocol fixes. Keep the application's stable key
 # generator below: OpenSSH PEM is the version-independent boundary, covered
 # by the server_ssh_key roundtrip and SSH compatibility tests.
-russh = "0.64.1"
+russh = "0.65.1"
 # Phase 16 — Ed25519 keypair generation (D-1.1) для SSH-key feature.
 # Features:
 #  - ed25519: Ed25519 algorithm support
