@@ -41,7 +41,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "country-flag-emoji-polyfill": "^0.1.8",
-    "i18next": "^25.10.4",
+    "i18next": "^27.2.7",
     "lucide-react": "^0.468.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
